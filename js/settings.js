@@ -332,6 +332,8 @@ async function confirmResetWithPassword() {
       }
     }
   }
+  // Refresh the badge immediately so it reflects the now-empty state
+  await checkReminders();
   showToast('All data has been reset', 'success');
   navigate('dashboard');
 }

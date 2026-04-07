@@ -265,6 +265,7 @@ async function completeReminder(reminderId) {
 
   showToast('Reminder completed', 'success');
   renderReminders();
+  checkReminders();
 }
 
 async function snoozeReminder(reminderId) {
@@ -277,6 +278,7 @@ async function snoozeReminder(reminderId) {
 
   showToast('Snoozed for 3 days', 'info');
   renderReminders();
+  checkReminders();
 }
 
 async function dismissReminder(reminderId) {
@@ -299,7 +301,8 @@ async function checkReminders() {
   const overdue = active.filter(r => isOverdue(r.dueDate));
   const dueToday = active.filter(r => isDueToday(r.dueDate));
 
-  const badgeCount = overdue.length + dueToday.length;
+  // Badge = total pending reminders (so it always matches what's actually in the list)
+  const badgeCount = active.length;
   const badge = document.getElementById('reminder-badge');
   const notifDot = document.getElementById('notif-dot');
 
