@@ -30,6 +30,7 @@ function navigate(page) {
     case 'news': renderNews(); break;
     case 'resources': renderResources(); break;
     case 'deals': renderDeals(); break;
+    case 'deal-search': renderDealSearch(); break;
     case 'settings': renderSettings(); break;
     default: renderDashboard();
   }
@@ -114,30 +115,34 @@ async function renderSuggestions() {
         </div>
       </div>
 
-      <!-- Suggested People (In-Tool Cards) -->
-      <div class="card mb-6">
-        <h2 class="text-base font-semibold mb-2">Suggested People to Connect With</h2>
-        <p class="text-xs text-surface-500 mb-4">Based on your network patterns, these are people you should consider reaching out to. Click "Add to Contacts" to create them directly.</p>
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-          ${generateSuggestedPeople(analysis, activeContacts).map(p => `
-            <div class="flex items-start gap-3 p-4 rounded-xl border border-surface-200 dark:border-surface-700 hover:border-brand-300 dark:hover:border-brand-600 transition-colors">
-              ${renderAvatar(p.name, '', 'md')}
-              <div class="flex-1 min-w-0">
-                <h3 class="text-sm font-semibold truncate">${escapeHtml(p.name)}</h3>
-                <p class="text-xs text-surface-500">${escapeHtml(p.title)} · ${escapeHtml(p.company)}</p>
-                <p class="text-xs text-surface-400 mt-1">${escapeHtml(p.reason)}</p>
-                <div class="flex gap-2 mt-2">
-                  <button onclick="openNewContactModal({fullName:'${escapeHtml(p.name)}',title:'${escapeHtml(p.title)}',companyName:'${escapeHtml(p.company)}',linkedInUrl:'${escapeHtml(p.linkedInUrl || '')}',tags:${JSON.stringify(p.tags || [])}})" class="btn-primary btn-xs">+ Add to Contacts</button>
-                  ${p.linkedInUrl ? `<a href="${escapeHtml(p.linkedInUrl)}" target="_blank" class="btn-secondary btn-xs">
-                    <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 24 24"><path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433c-1.144 0-2.063-.926-2.063-2.065 0-1.138.92-2.063 2.063-2.063 1.14 0 2.064.925 2.064 2.063 0 1.139-.925 2.065-2.064 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/></svg>
-                    LinkedIn
-                  </a>` : ''}
+      <!-- Priority Contacts (real data only) -->
+      ${(() => {
+        const priority = getPrioritizedContacts(activeContacts, companyMap, calls);
+        if (priority.length === 0) return '';
+        return `
+        <div class="card mb-6">
+          <h2 class="text-base font-semibold mb-2">Contacts to Prioritize</h2>
+          <p class="text-xs text-surface-500 mb-4">People already in your network who need attention — no calls yet, stale LP/investor relationships, or stuck in early stages.</p>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+            ${priority.map(p => {
+              const company = companyMap[p.companyId];
+              return `
+              <div class="flex items-start gap-3 p-4 rounded-xl border border-surface-200 dark:border-surface-700 hover:border-brand-300 dark:hover:border-brand-600 transition-colors cursor-pointer" onclick="viewContact('${p.id}')">
+                ${renderAvatar(p.fullName, p.photoUrl, 'md', p.linkedInUrl)}
+                <div class="flex-1 min-w-0">
+                  <h3 class="text-sm font-semibold truncate">${escapeHtml(p.fullName)}</h3>
+                  <p class="text-xs text-surface-500 truncate">${escapeHtml(p.title || '')}${company ? ' · ' + escapeHtml(company.name) : ''}</p>
+                  <p class="text-xs text-amber-600 dark:text-amber-400 mt-1">${escapeHtml(p._reason)}</p>
+                  <div class="flex gap-2 mt-2">
+                    <button onclick="event.stopPropagation(); openNewCallModal('${p.id}')" class="btn-primary btn-xs">Log Call</button>
+                    ${p.linkedInUrl ? `<a href="${escapeHtml(p.linkedInUrl)}" target="_blank" onclick="event.stopPropagation()" class="btn-secondary btn-xs">LinkedIn</a>` : ''}
+                  </div>
                 </div>
-              </div>
-            </div>
-          `).join('')}
-        </div>
-      </div>
+              </div>`;
+            }).join('')}
+          </div>
+        </div>`;
+      })()}
 
       <!-- LinkedIn Searches (keep redirect capability) -->
       <div class="card mb-6">
@@ -191,41 +196,53 @@ async function renderSuggestions() {
   `;
 }
 
-function generateSuggestedPeople(analysis, existingContacts) {
-  // Generate concrete suggested people based on network analysis
-  const existingNames = new Set(existingContacts.map(c => c.fullName.toLowerCase()));
-  const suggestions = [];
+function getPrioritizedContacts(contacts, companyMap, calls) {
+  // Returns real contacts from the DB that need attention — never called, stale LPs, or stuck in early stage
+  const callContactIds = new Set(calls.map(c => c.contactId));
+  const seen = new Set();
+  const results = [];
 
-  // Search fund ecosystem people suggestions based on roles and industries
-  const searchFundPeople = [
-    { name: 'Jennifer Martinez', title: 'Search Fund Investor', company: 'Pacific Lake Partners', reason: 'Active LP — backs 10+ searchers/year', tags: ['LP', 'Search Fund'], linkedInUrl: 'https://www.linkedin.com/search/results/people/?keywords=Jennifer+Martinez+Pacific+Lake+Partners' },
-    { name: 'Robert Kim', title: 'Operating Partner', company: 'Alpine Investors', reason: 'PeopleFirst operator — deep B2B SaaS experience', tags: ['PE/VC', 'Operator'], linkedInUrl: 'https://www.linkedin.com/search/results/people/?keywords=Robert+Kim+Alpine+Investors' },
-    { name: 'Amanda Foster', title: 'Search Fund CEO', company: 'Acquired Services Co.', reason: 'Completed search in 2024, now operating a $12M revenue business', tags: ['CEO', 'Search Fund'], linkedInUrl: 'https://www.linkedin.com/search/results/people/?keywords=Amanda+Foster+search+fund+CEO' },
-    { name: 'Daniel Okonkwo', title: 'Business Broker', company: 'Sunbelt Business Advisors', reason: 'Specializes in $2-10M B2B services businesses', tags: ['Broker'], linkedInUrl: 'https://www.linkedin.com/search/results/people/?keywords=Daniel+Okonkwo+Sunbelt' },
-    { name: 'Maria Rodriguez', title: 'Managing Director', company: 'Relay Investments', reason: 'Search fund accelerator — helps searchers from fundraise to close', tags: ['LP', 'Advisor'], linkedInUrl: 'https://www.linkedin.com/search/results/people/?keywords=Maria+Rodriguez+Relay+Investments' },
-    { name: 'Alex Chen', title: 'Search Fund Entrepreneur', company: 'Independent Search', reason: 'Fellow searcher (HBS 2025) — actively looking in healthcare services', tags: ['Search Fund'], linkedInUrl: 'https://www.linkedin.com/search/results/people/?keywords=Alex+Chen+search+fund' },
-    { name: 'Sarah Blackwell', title: 'M&A Advisor', company: 'Harris Williams', reason: 'Lower middle market deals — strong deal sourcing network', tags: ['Banker'], linkedInUrl: 'https://www.linkedin.com/search/results/people/?keywords=Sarah+Blackwell+Harris+Williams' },
-    { name: 'Mark Thompson', title: 'Professor of Entrepreneurship', company: 'Stanford GSB', reason: 'Teaches ETA course — deep network of searchers and LPs', tags: ['Advisor', 'Industry Expert'], linkedInUrl: 'https://www.linkedin.com/search/results/people/?keywords=Mark+Thompson+Stanford+GSB+entrepreneurship' },
-    { name: 'Kevin Park', title: 'VP of Corporate Development', company: 'Enduring Ventures', reason: 'Holding company doing add-on acquisitions — potential deal partner', tags: ['PE/VC', 'Operator'], linkedInUrl: 'https://www.linkedin.com/search/results/people/?keywords=Kevin+Park+Enduring+Ventures' },
-    { name: 'Lisa Chen', title: 'Board Member & Advisor', company: 'Multiple Search Fund Cos.', reason: 'Sits on 4 search fund boards — great for post-acquisition governance', tags: ['Board Member', 'Advisor'], linkedInUrl: 'https://www.linkedin.com/search/results/people/?keywords=Lisa+Chen+search+fund+board+member' },
-  ];
-
-  // Filter out existing contacts and add based on network gaps
-  for (const person of searchFundPeople) {
-    if (!existingNames.has(person.name.toLowerCase())) {
-      suggestions.push(person);
-    }
+  // 1. LP / Investor / Advisor contacts not contacted in 30+ days (highest priority)
+  const investorTags = ['LP', 'Investor', 'Search Fund', 'PE/VC', 'Advisor', 'Board Member'];
+  const staleInvestors = contacts
+    .filter(c => {
+      const hasTag = (c.tags || []).some(t => investorTags.includes(t));
+      if (!hasTag || seen.has(c.id)) return false;
+      const days = c.lastContactDate ? Math.abs(daysUntil(c.lastContactDate)) : 999;
+      return days > 30;
+    })
+    .sort((a, b) => {
+      const da = a.lastContactDate ? new Date(a.lastContactDate) : new Date(0);
+      const db = b.lastContactDate ? new Date(b.lastContactDate) : new Date(0);
+      return da - db;
+    });
+  for (const c of staleInvestors.slice(0, 3)) {
+    const days = c.lastContactDate ? Math.abs(daysUntil(c.lastContactDate)) : null;
+    results.push({ ...c, _reason: days ? `${investorTags.find(t => (c.tags||[]).includes(t))} — ${days} days since last contact` : 'Key contact — never contacted' });
+    seen.add(c.id);
   }
 
-  // Add industry-specific suggestions based on analysis
-  if (analysis.industries.includes('Private Equity')) {
-    suggestions.push({ name: 'James Cooper', title: 'Principal', company: 'Riverside Partners', reason: 'PE firm focused on lower middle market — potential co-investor', tags: ['PE/VC'], linkedInUrl: 'https://www.linkedin.com/search/results/people/?keywords=James+Cooper+Riverside+Partners' });
-  }
-  if (analysis.industries.includes('Management Consulting')) {
-    suggestions.push({ name: 'Emily Zhang', title: 'Senior Consultant', company: 'Bain & Company', reason: 'Former consultant turned searcher — great for DD support', tags: ['Operator'], linkedInUrl: 'https://www.linkedin.com/search/results/people/?keywords=Emily+Zhang+Bain+search+fund' });
+  // 2. Contacts added but never had a call logged
+  const neverCalled = contacts
+    .filter(c => !callContactIds.has(c.id) && !seen.has(c.id))
+    .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+  for (const c of neverCalled.slice(0, 3)) {
+    results.push({ ...c, _reason: 'No calls logged yet — schedule your first conversation' });
+    seen.add(c.id);
   }
 
-  return suggestions.filter(s => !existingNames.has(s.name.toLowerCase())).slice(0, 10);
+  // 3. Contacts stuck in "New intro" for 14+ days
+  const stuckNewIntro = contacts
+    .filter(c => {
+      if (seen.has(c.id) || c.stage !== 'New intro') return false;
+      return Math.abs(daysUntil(c.createdAt || new Date().toISOString())) > 14;
+    });
+  for (const c of stuckNewIntro.slice(0, 2)) {
+    results.push({ ...c, _reason: 'Still at "New intro" — follow up to deepen the relationship' });
+    seen.add(c.id);
+  }
+
+  return results.slice(0, 8);
 }
 
 function analyzeNetwork(contacts, companies, calls) {
