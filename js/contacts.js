@@ -4,7 +4,8 @@
 
 let contactsViewMode = 'table'; // table | cards
 let contactsFilters = { stage: '', tag: '', search: '', sort: 'name' };
-let _pendingNewCompanyId = null; // holds the ID of a company created via the inline dialog
+let _selectedCompanyId = null;  // ID of company selected/created in the contact picker
+let _cpCompanies = [];           // cached company list for the picker
 
 async function renderContacts() {
   const pageContent = document.getElementById('page-content');
@@ -181,27 +182,30 @@ async function openNewContactModal(prefill = {}) {
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label class="block text-sm font-medium text-surface-600 dark:text-surface-400 mb-1">Company</label>
-            <select id="contact-company" class="input-field">
-              <option value="">— Select existing company —</option>
-              ${companies.map(c => `<option value="${c.id}" ${prefill.companyId === c.id ? 'selected' : ''}>${escapeHtml(c.name)}</option>`).join('')}
-            </select>
-
-            <!-- New company badge (shown after filling in company details) -->
-            <div id="contact-new-company-badge" class="hidden mt-2 flex items-center gap-2 px-3 py-2 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg">
-              <svg class="w-4 h-4 text-green-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
-              <div class="min-w-0 flex-1">
-                <span id="contact-new-company-name" class="text-sm font-medium text-green-700 dark:text-green-400 truncate block"></span>
-                <span class="text-xs text-green-600 dark:text-green-500">New company — will be saved automatically</span>
+            <div class="relative" id="company-picker-wrapper">
+              <button type="button" id="cp-trigger"
+                class="input-field w-full text-left flex items-center justify-between gap-2 cursor-pointer"
+                onclick="cpToggle()">
+                <span id="cp-display" class="text-surface-400 truncate">Select or create a company…</span>
+                <svg class="w-4 h-4 text-surface-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+              </button>
+              <div id="cp-dropdown" class="hidden absolute z-50 top-full left-0 right-0 mt-1 bg-white dark:bg-surface-900 border border-surface-200 dark:border-surface-700 rounded-xl shadow-xl overflow-hidden">
+                <div class="p-2 border-b border-surface-100 dark:border-surface-800">
+                  <input type="text" id="cp-search" class="input-field py-1.5 text-sm" placeholder="Search companies…" oninput="cpFilter(this.value)" />
+                </div>
+                <div id="cp-list" class="max-h-52 overflow-y-auto py-1"></div>
+                <div class="p-2 border-t border-surface-100 dark:border-surface-800">
+                  <button type="button" onclick="cpToggle(); openCreateCompanyDialog()"
+                    class="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium text-brand-600 dark:text-brand-400 hover:bg-brand-50 dark:hover:bg-brand-900/20 transition-colors">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+                    Create New Company…
+                  </button>
+                </div>
               </div>
-              <button type="button" onclick="cancelPendingCompany()" class="text-xs text-red-500 hover:text-red-700 flex-shrink-0" title="Remove">✕</button>
             </div>
-
-            <!-- Add company button -->
-            <button type="button" id="contact-add-company-btn" onclick="openAddCompanyDialog()"
-              class="mt-2 w-full flex items-center justify-center gap-2 px-3 py-2 border-2 border-dashed border-surface-300 dark:border-surface-600 rounded-lg text-sm text-surface-500 hover:border-brand-400 hover:text-brand-600 dark:hover:border-brand-500 dark:hover:text-brand-400 transition-colors">
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
-              Add Company Information
-            </button>
+            <div id="cp-clear-row" class="hidden mt-1 flex justify-end">
+              <button type="button" onclick="cpClear()" class="text-xs text-surface-400 hover:text-red-500 transition-colors">✕ Clear selection</button>
+            </div>
           </div>
           <div>
             <label class="block text-sm font-medium text-surface-600 dark:text-surface-400 mb-1">Location</label>
@@ -268,6 +272,15 @@ async function openNewContactModal(prefill = {}) {
     await saveNewContact();
   });
 
+  // Init the searchable company picker
+  _selectedCompanyId = prefill.companyId || null;
+  _cpCompanies = companies;
+  cpRender('');
+  if (prefill.companyId) {
+    const pre = companies.find(c => c.id === prefill.companyId);
+    if (pre) cpSetSelected(pre.id, pre.name);
+  }
+
   // Auto-populate if URL is pasted via keyboard
   const linkedinInput = document.getElementById('linkedin-import-url');
   linkedinInput.addEventListener('paste', () => {
@@ -279,107 +292,185 @@ async function openNewContactModal(prefill = {}) {
 }
 
 // ============================================
-// Inline "Add Company" Dialog (inside new-contact modal)
+// Searchable Company Picker (inside new-contact modal)
 // ============================================
 
-const COMPANY_SIZES = ['1–10', '11–50', '51–200', '201–500', '501–1,000', '1,000–5,000', '5,000+'];
-const DEAL_SECTORS_FOR_COMPANY = [
+const COMPANY_TYPES = ['Acquisition Target', 'Portfolio Company', 'Prospect', 'Competitor', 'Partner / Advisor', 'Other'];
+const COMPANY_INDUSTRY_LIST = [
   'Healthcare Services','Technology','Business Services','Industrial',
   'Construction / Trades','Distribution','Food & Beverage','Consumer',
   'Education','Financial Services','Media & Entertainment','Real Estate',
   'Transportation & Logistics','Energy','Agriculture','Other',
 ];
+const COMPANY_SIZE_LIST = ['1–10','11–50','51–200','201–500','501–1,000','1,000–5,000','5,000+'];
 
-function openAddCompanyDialog() {
-  // Deselect the dropdown so the new company takes priority
-  const dropdown = document.getElementById('contact-company');
-  if (dropdown) dropdown.value = '';
+// --- Picker helpers ---
 
-  // Build a <dialog> element and append it to the body
-  let dlg = document.getElementById('add-company-dialog');
+function cpRender(filter) {
+  const list = document.getElementById('cp-list');
+  if (!list) return;
+  const q = (filter || '').toLowerCase();
+  const matches = _cpCompanies.filter(c =>
+    !q || c.name.toLowerCase().includes(q) || (c.industry || '').toLowerCase().includes(q)
+  );
+  if (matches.length === 0) {
+    list.innerHTML = `<div class="px-4 py-3 text-sm text-surface-400">No companies found</div>`;
+    return;
+  }
+  list.innerHTML = matches.map(c => `
+    <button type="button" onclick="cpSetSelected('${c.id}', ${JSON.stringify(escapeHtml(c.name))})"
+      class="w-full text-left px-3 py-2 text-sm hover:bg-surface-50 dark:hover:bg-surface-800 flex items-center gap-2.5 transition-colors ${_selectedCompanyId === c.id ? 'bg-brand-50 dark:bg-brand-900/20' : ''}">
+      <div class="w-6 h-6 rounded bg-surface-100 dark:bg-surface-700 flex items-center justify-center text-xs font-bold text-surface-500 flex-shrink-0">${escapeHtml(c.name.charAt(0))}</div>
+      <div class="min-w-0">
+        <div class="font-medium truncate ${_selectedCompanyId === c.id ? 'text-brand-700 dark:text-brand-400' : ''}">${escapeHtml(c.name)}</div>
+        ${c.industry ? `<div class="text-xs text-surface-400">${escapeHtml(c.industry)}</div>` : ''}
+        ${c.companyType ? `<div class="text-xs text-brand-500">${escapeHtml(c.companyType)}</div>` : ''}
+      </div>
+    </button>
+  `).join('');
+}
+
+function cpFilter(val) { cpRender(val); }
+
+function cpToggle() {
+  const dd = document.getElementById('cp-dropdown');
+  if (!dd) return;
+  const isHidden = dd.classList.contains('hidden');
+  dd.classList.toggle('hidden', !isHidden);
+  if (isHidden) {
+    const s = document.getElementById('cp-search');
+    if (s) { s.value = ''; cpRender(''); setTimeout(() => s.focus(), 40); }
+    // Close on outside click
+    setTimeout(() => {
+      function outsideClick(e) {
+        if (!document.getElementById('company-picker-wrapper')?.contains(e.target)) {
+          document.getElementById('cp-dropdown')?.classList.add('hidden');
+          document.removeEventListener('click', outsideClick, true);
+        }
+      }
+      document.addEventListener('click', outsideClick, true);
+    }, 0);
+  }
+}
+
+function cpSetSelected(id, name) {
+  _selectedCompanyId = id;
+  const display = document.getElementById('cp-display');
+  if (display) { display.textContent = name; display.classList.remove('text-surface-400'); }
+  document.getElementById('cp-dropdown')?.classList.add('hidden');
+  document.getElementById('cp-clear-row')?.classList.remove('hidden');
+  cpRender(document.getElementById('cp-search')?.value || '');
+}
+
+function cpClear() {
+  _selectedCompanyId = null;
+  const display = document.getElementById('cp-display');
+  if (display) { display.textContent = 'Select or create a company…'; display.classList.add('text-surface-400'); }
+  document.getElementById('cp-clear-row')?.classList.add('hidden');
+  cpRender('');
+}
+
+// --- Create New Company dialog ---
+
+function openCreateCompanyDialog() {
+  let dlg = document.getElementById('create-company-dlg');
   if (dlg) dlg.remove();
 
   dlg = document.createElement('dialog');
-  dlg.id = 'add-company-dialog';
-  dlg.className = 'rounded-2xl shadow-2xl bg-white dark:bg-surface-900 p-0 w-full max-w-lg mx-auto border-0 backdrop:bg-black/50';
+  dlg.id = 'create-company-dlg';
   dlg.innerHTML = `
-    <div class="p-6">
+    <div class="p-6 w-full">
       <div class="flex items-center justify-between mb-5">
         <div>
-          <h3 class="text-lg font-semibold">Add Company</h3>
-          <p class="text-xs text-surface-500 mt-0.5">This company will be saved and linked to the contact</p>
+          <h3 class="text-lg font-semibold">Create New Company</h3>
+          <p class="text-xs text-surface-500 mt-0.5">Saved immediately and linked to this contact</p>
         </div>
-        <button type="button" onclick="document.getElementById('add-company-dialog').close()"
-          class="text-surface-400 hover:text-surface-600 dark:hover:text-surface-300">
+        <button type="button" onclick="document.getElementById('create-company-dlg').close()"
+          class="text-surface-400 hover:text-surface-600 dark:hover:text-surface-300 p-1">
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
         </button>
       </div>
+      <form id="create-company-dlg-form" class="space-y-4">
 
-      <form id="add-company-dialog-form" class="space-y-4">
-        <div>
-          <label class="block text-sm font-medium text-surface-600 dark:text-surface-400 mb-1">Company Name *</label>
-          <input type="text" id="dlg-company-name" class="input-field" placeholder="Acme Corp" required autofocus />
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label class="block text-sm font-medium text-surface-600 dark:text-surface-400 mb-1">Company Name *</label>
+            <input type="text" id="ccd-name" class="input-field" placeholder="Acme Corp" required autofocus />
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-surface-600 dark:text-surface-400 mb-1">Company Type</label>
+            <select id="ccd-type" class="input-field">
+              <option value="">— Select type —</option>
+              ${COMPANY_TYPES.map(t => `<option value="${t}">${t}</option>`).join('')}
+            </select>
+          </div>
         </div>
 
-        <div class="grid grid-cols-2 gap-3">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label class="block text-sm font-medium text-surface-600 dark:text-surface-400 mb-1">Industry</label>
-            <select id="dlg-company-industry" class="input-field">
+            <select id="ccd-industry" class="input-field">
               <option value="">— Select —</option>
-              ${DEAL_SECTORS_FOR_COMPANY.map(s => `<option value="${s}">${s}</option>`).join('')}
+              ${COMPANY_INDUSTRY_LIST.map(s => `<option value="${s}">${s}</option>`).join('')}
             </select>
           </div>
           <div>
-            <label class="block text-sm font-medium text-surface-600 dark:text-surface-400 mb-1">Company Size</label>
-            <select id="dlg-company-size" class="input-field">
+            <label class="block text-sm font-medium text-surface-600 dark:text-surface-400 mb-1">Size (employees)</label>
+            <select id="ccd-size" class="input-field">
               <option value="">— Select —</option>
-              ${COMPANY_SIZES.map(s => `<option value="${s}">${s} employees</option>`).join('')}
+              ${COMPANY_SIZE_LIST.map(s => `<option value="${s}">${s}</option>`).join('')}
             </select>
           </div>
         </div>
 
-        <div class="grid grid-cols-2 gap-3">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label class="block text-sm font-medium text-surface-600 dark:text-surface-400 mb-1">Website</label>
-            <input type="url" id="dlg-company-website" class="input-field" placeholder="https://acme.com" />
+            <input type="url" id="ccd-website" class="input-field" placeholder="https://acme.com" />
           </div>
           <div>
             <label class="block text-sm font-medium text-surface-600 dark:text-surface-400 mb-1">Phone</label>
-            <input type="tel" id="dlg-company-phone" class="input-field" placeholder="+1 (555) 000-0000" />
+            <input type="tel" id="ccd-phone" class="input-field" placeholder="+1 (555) 000-0000" />
           </div>
         </div>
 
-        <div>
-          <label class="block text-sm font-medium text-surface-600 dark:text-surface-400 mb-1">Headquarters / Location</label>
-          <input type="text" id="dlg-company-location" class="input-field" placeholder="Boston, MA" />
-        </div>
-
-        <div class="grid grid-cols-2 gap-3">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
-            <label class="block text-sm font-medium text-surface-600 dark:text-surface-400 mb-1">Annual Revenue</label>
-            <input type="text" id="dlg-company-revenue" class="input-field" placeholder="e.g. $5M" />
+            <label class="block text-sm font-medium text-surface-600 dark:text-surface-400 mb-1">HQ / Location</label>
+            <input type="text" id="ccd-location" class="input-field" placeholder="Boston, MA" />
           </div>
           <div>
             <label class="block text-sm font-medium text-surface-600 dark:text-surface-400 mb-1">Founded Year</label>
-            <input type="number" id="dlg-company-founded" class="input-field" placeholder="2005" min="1800" max="2099" />
+            <input type="number" id="ccd-founded" class="input-field" placeholder="2005" min="1800" max="2099" />
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label class="block text-sm font-medium text-surface-600 dark:text-surface-400 mb-1">Annual Revenue</label>
+            <input type="text" id="ccd-revenue" class="input-field" placeholder="e.g. $5M" />
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-surface-600 dark:text-surface-400 mb-1">EBITDA</label>
+            <input type="text" id="ccd-ebitda" class="input-field" placeholder="e.g. $800K" />
           </div>
         </div>
 
         <div>
           <label class="block text-sm font-medium text-surface-600 dark:text-surface-400 mb-1">Description</label>
-          <textarea id="dlg-company-description" class="input-field" rows="2" placeholder="What does this company do?"></textarea>
+          <textarea id="ccd-description" class="input-field" rows="2" placeholder="What does this company do?"></textarea>
         </div>
 
         <div>
-          <label class="block text-sm font-medium text-surface-600 dark:text-surface-400 mb-1">Logo URL</label>
-          <input type="url" id="dlg-company-logo" class="input-field" placeholder="https://logo.clearbit.com/acme.com (optional)" />
+          <label class="block text-sm font-medium text-surface-600 dark:text-surface-400 mb-1">Logo URL <span class="text-xs font-normal text-surface-400">(optional)</span></label>
+          <input type="url" id="ccd-logo" class="input-field" placeholder="https://logo.clearbit.com/acme.com" />
         </div>
 
-        <div class="flex justify-end gap-3 pt-2">
-          <button type="button" onclick="document.getElementById('add-company-dialog').close()" class="btn-secondary">Cancel</button>
+        <div class="flex justify-end gap-3 pt-2 border-t border-surface-100 dark:border-surface-800">
+          <button type="button" onclick="document.getElementById('create-company-dlg').close()" class="btn-secondary">Cancel</button>
           <button type="submit" class="btn-primary flex items-center gap-2">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
-            Save Company
+            Save &amp; Link Company
           </button>
         </div>
       </form>
@@ -388,73 +479,37 @@ function openAddCompanyDialog() {
 
   document.body.appendChild(dlg);
   dlg.showModal();
+  dlg.addEventListener('click', e => { if (e.target === dlg) dlg.close(); });
 
-  // Close on backdrop click
-  dlg.addEventListener('click', (e) => { if (e.target === dlg) dlg.close(); });
-
-  document.getElementById('add-company-dialog-form').addEventListener('submit', async (e) => {
+  document.getElementById('create-company-dlg-form').addEventListener('submit', async (e) => {
     e.preventDefault();
-    await saveCompanyFromDialog();
+    const name = document.getElementById('ccd-name').value.trim();
+    if (!name) return;
+
+    const company = await DB.add(STORES.companies, {
+      userId:      currentUser.id,
+      name,
+      companyType: document.getElementById('ccd-type').value,
+      industry:    document.getElementById('ccd-industry').value,
+      size:        document.getElementById('ccd-size').value,
+      website:     document.getElementById('ccd-website').value.trim(),
+      phone:       document.getElementById('ccd-phone').value.trim(),
+      location:    document.getElementById('ccd-location').value.trim(),
+      founded:     document.getElementById('ccd-founded').value.trim(),
+      revenue:     document.getElementById('ccd-revenue').value.trim(),
+      ebitda:      document.getElementById('ccd-ebitda').value.trim(),
+      description: document.getElementById('ccd-description').value.trim(),
+      logoUrl:     document.getElementById('ccd-logo').value.trim(),
+      createdAt:   new Date().toISOString(),
+    });
+
+    // Add to picker cache and select it
+    _cpCompanies.push(company);
+    cpSetSelected(company.id, name);
+
+    document.getElementById('create-company-dlg').close();
+    showToast(`"${name}" created and linked`, 'success');
   });
-}
-
-async function saveCompanyFromDialog() {
-  const name = document.getElementById('dlg-company-name').value.trim();
-  if (!name) {
-    document.getElementById('dlg-company-name').focus();
-    return;
-  }
-
-  // Save the company to the database immediately
-  const company = await DB.add(STORES.companies, {
-    userId:      currentUser.id,
-    name,
-    industry:    document.getElementById('dlg-company-industry').value,
-    size:        document.getElementById('dlg-company-size').value,
-    website:     document.getElementById('dlg-company-website').value.trim(),
-    phone:       document.getElementById('dlg-company-phone').value.trim(),
-    location:    document.getElementById('dlg-company-location').value.trim(),
-    revenue:     document.getElementById('dlg-company-revenue').value.trim(),
-    founded:     document.getElementById('dlg-company-founded').value.trim(),
-    description: document.getElementById('dlg-company-description').value.trim(),
-    logoUrl:     document.getElementById('dlg-company-logo').value.trim(),
-    createdAt:   new Date().toISOString(),
-  });
-
-  _pendingNewCompanyId = company.id;
-
-  // Close dialog and update the contact form to show the linked company
-  document.getElementById('add-company-dialog').close();
-
-  const badge = document.getElementById('contact-new-company-badge');
-  const badgeName = document.getElementById('contact-new-company-name');
-  const addBtn = document.getElementById('contact-add-company-btn');
-
-  if (badge && badgeName) {
-    badgeName.textContent = name;
-    badge.classList.remove('hidden');
-  }
-  if (addBtn) {
-    addBtn.textContent = '✎ Edit company info';
-    addBtn.onclick = () => openEditCompanyDialog(company.id);
-  }
-
-  // Clear the existing-company dropdown so there's no conflict
-  const dropdown = document.getElementById('contact-company');
-  if (dropdown) dropdown.value = '';
-
-  showToast(`"${name}" saved and linked`, 'success');
-}
-
-function cancelPendingCompany() {
-  _pendingNewCompanyId = null;
-  const badge = document.getElementById('contact-new-company-badge');
-  const addBtn = document.getElementById('contact-add-company-btn');
-  if (badge) badge.classList.add('hidden');
-  if (addBtn) {
-    addBtn.innerHTML = `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg> Add Company Information`;
-    addBtn.onclick = () => openAddCompanyDialog();
-  }
 }
 
 // ============================================
@@ -719,9 +774,9 @@ async function saveNewContact() {
     if (!proceed) return;
   }
 
-  // Handle company — prefer a newly-created pending company over the dropdown
-  let companyId = _pendingNewCompanyId || document.getElementById('contact-company').value || null;
-  _pendingNewCompanyId = null; // clear after use
+  // Use whatever company was selected/created in the picker
+  const companyId = _selectedCompanyId || null;
+  _selectedCompanyId = null; // clear after use
 
   const contact = await DB.add(STORES.contacts, {
     userId: currentUser.id,

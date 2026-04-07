@@ -116,9 +116,23 @@ async function openNewCompanyModal() {
     <div class="p-6">
       <h2 class="text-lg font-semibold mb-6">New Company</h2>
       <form id="new-company-form" class="space-y-4">
-        <div>
-          <label class="block text-sm font-medium text-surface-600 dark:text-surface-400 mb-1">Company Name *</label>
-          <input type="text" id="company-name" required class="input-field" placeholder="Acme Corp" />
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label class="block text-sm font-medium text-surface-600 dark:text-surface-400 mb-1">Company Name *</label>
+            <input type="text" id="company-name" required class="input-field" placeholder="Acme Corp" />
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-surface-600 dark:text-surface-400 mb-1">Company Type</label>
+            <select id="company-type" class="input-field">
+              <option value="">— Select type —</option>
+              <option value="Acquisition Target">Acquisition Target</option>
+              <option value="Portfolio Company">Portfolio Company</option>
+              <option value="Prospect">Prospect</option>
+              <option value="Competitor">Competitor</option>
+              <option value="Partner / Advisor">Partner / Advisor</option>
+              <option value="Other">Other</option>
+            </select>
+          </div>
         </div>
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
@@ -161,6 +175,7 @@ async function openNewCompanyModal() {
     await DB.add(STORES.companies, {
       userId: currentUser.id,
       name: document.getElementById('company-name').value.trim(),
+      companyType: document.getElementById('company-type').value,
       industry: document.getElementById('company-industry').value.trim(),
       size: document.getElementById('company-size').value.trim(),
       website: document.getElementById('company-website').value.trim(),
@@ -180,9 +195,23 @@ async function openEditCompanyModal(companyId) {
     <div class="p-6">
       <h2 class="text-lg font-semibold mb-6">Edit Company</h2>
       <form id="edit-company-form" class="space-y-4">
-        <div>
-          <label class="block text-sm font-medium text-surface-600 dark:text-surface-400 mb-1">Company Name *</label>
-          <input type="text" id="edit-company-name" required class="input-field" value="${escapeHtml(company.name)}" />
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label class="block text-sm font-medium text-surface-600 dark:text-surface-400 mb-1">Company Name *</label>
+            <input type="text" id="edit-company-name" required class="input-field" value="${escapeHtml(company.name)}" />
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-surface-600 dark:text-surface-400 mb-1">Company Type</label>
+            <select id="edit-company-type" class="input-field">
+              <option value="">— Select type —</option>
+              <option value="Acquisition Target" ${company.companyType === 'Acquisition Target' ? 'selected' : ''}>Acquisition Target</option>
+              <option value="Portfolio Company" ${company.companyType === 'Portfolio Company' ? 'selected' : ''}>Portfolio Company</option>
+              <option value="Prospect" ${company.companyType === 'Prospect' ? 'selected' : ''}>Prospect</option>
+              <option value="Competitor" ${company.companyType === 'Competitor' ? 'selected' : ''}>Competitor</option>
+              <option value="Partner / Advisor" ${company.companyType === 'Partner / Advisor' ? 'selected' : ''}>Partner / Advisor</option>
+              <option value="Other" ${company.companyType === 'Other' ? 'selected' : ''}>Other</option>
+            </select>
+          </div>
         </div>
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
@@ -226,6 +255,7 @@ async function openEditCompanyModal(companyId) {
   document.getElementById('edit-company-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     company.name = document.getElementById('edit-company-name').value.trim();
+    company.companyType = document.getElementById('edit-company-type').value;
     company.industry = document.getElementById('edit-company-industry').value.trim();
     company.size = document.getElementById('edit-company-size').value.trim();
     company.website = document.getElementById('edit-company-website').value.trim();
