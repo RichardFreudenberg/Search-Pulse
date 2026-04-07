@@ -4,6 +4,7 @@
 
 let contactsViewMode = 'table'; // table | cards
 let contactsFilters = { stage: '', tag: '', search: '', sort: 'name' };
+let _pendingNewCompanyId = null; // holds the ID of a company created via the inline dialog
 
 async function renderContacts() {
   const pageContent = document.getElementById('page-content');
@@ -181,10 +182,26 @@ async function openNewContactModal(prefill = {}) {
           <div>
             <label class="block text-sm font-medium text-surface-600 dark:text-surface-400 mb-1">Company</label>
             <select id="contact-company" class="input-field">
-              <option value="">Select or create below</option>
+              <option value="">— Select existing company —</option>
               ${companies.map(c => `<option value="${c.id}" ${prefill.companyId === c.id ? 'selected' : ''}>${escapeHtml(c.name)}</option>`).join('')}
             </select>
-            <input type="text" id="contact-new-company" class="input-field mt-2" placeholder="Or type a new company name" value="${escapeHtml(prefill.companyName || '')}" />
+
+            <!-- New company badge (shown after filling in company details) -->
+            <div id="contact-new-company-badge" class="hidden mt-2 flex items-center gap-2 px-3 py-2 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg">
+              <svg class="w-4 h-4 text-green-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+              <div class="min-w-0 flex-1">
+                <span id="contact-new-company-name" class="text-sm font-medium text-green-700 dark:text-green-400 truncate block"></span>
+                <span class="text-xs text-green-600 dark:text-green-500">New company — will be saved automatically</span>
+              </div>
+              <button type="button" onclick="cancelPendingCompany()" class="text-xs text-red-500 hover:text-red-700 flex-shrink-0" title="Remove">✕</button>
+            </div>
+
+            <!-- Add company button -->
+            <button type="button" id="contact-add-company-btn" onclick="openAddCompanyDialog()"
+              class="mt-2 w-full flex items-center justify-center gap-2 px-3 py-2 border-2 border-dashed border-surface-300 dark:border-surface-600 rounded-lg text-sm text-surface-500 hover:border-brand-400 hover:text-brand-600 dark:hover:border-brand-500 dark:hover:text-brand-400 transition-colors">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+              Add Company Information
+            </button>
           </div>
           <div>
             <label class="block text-sm font-medium text-surface-600 dark:text-surface-400 mb-1">Location</label>
@@ -259,6 +276,185 @@ async function openNewContactModal(prefill = {}) {
   linkedinInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') { e.preventDefault(); autoPopulateFromLinkedIn(); }
   });
+}
+
+// ============================================
+// Inline "Add Company" Dialog (inside new-contact modal)
+// ============================================
+
+const COMPANY_SIZES = ['1–10', '11–50', '51–200', '201–500', '501–1,000', '1,000–5,000', '5,000+'];
+const DEAL_SECTORS_FOR_COMPANY = [
+  'Healthcare Services','Technology','Business Services','Industrial',
+  'Construction / Trades','Distribution','Food & Beverage','Consumer',
+  'Education','Financial Services','Media & Entertainment','Real Estate',
+  'Transportation & Logistics','Energy','Agriculture','Other',
+];
+
+function openAddCompanyDialog() {
+  // Deselect the dropdown so the new company takes priority
+  const dropdown = document.getElementById('contact-company');
+  if (dropdown) dropdown.value = '';
+
+  // Build a <dialog> element and append it to the body
+  let dlg = document.getElementById('add-company-dialog');
+  if (dlg) dlg.remove();
+
+  dlg = document.createElement('dialog');
+  dlg.id = 'add-company-dialog';
+  dlg.className = 'rounded-2xl shadow-2xl bg-white dark:bg-surface-900 p-0 w-full max-w-lg mx-auto border-0 backdrop:bg-black/50';
+  dlg.innerHTML = `
+    <div class="p-6">
+      <div class="flex items-center justify-between mb-5">
+        <div>
+          <h3 class="text-lg font-semibold">Add Company</h3>
+          <p class="text-xs text-surface-500 mt-0.5">This company will be saved and linked to the contact</p>
+        </div>
+        <button type="button" onclick="document.getElementById('add-company-dialog').close()"
+          class="text-surface-400 hover:text-surface-600 dark:hover:text-surface-300">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+      </div>
+
+      <form id="add-company-dialog-form" class="space-y-4">
+        <div>
+          <label class="block text-sm font-medium text-surface-600 dark:text-surface-400 mb-1">Company Name *</label>
+          <input type="text" id="dlg-company-name" class="input-field" placeholder="Acme Corp" required autofocus />
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-sm font-medium text-surface-600 dark:text-surface-400 mb-1">Industry</label>
+            <select id="dlg-company-industry" class="input-field">
+              <option value="">— Select —</option>
+              ${DEAL_SECTORS_FOR_COMPANY.map(s => `<option value="${s}">${s}</option>`).join('')}
+            </select>
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-surface-600 dark:text-surface-400 mb-1">Company Size</label>
+            <select id="dlg-company-size" class="input-field">
+              <option value="">— Select —</option>
+              ${COMPANY_SIZES.map(s => `<option value="${s}">${s} employees</option>`).join('')}
+            </select>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-sm font-medium text-surface-600 dark:text-surface-400 mb-1">Website</label>
+            <input type="url" id="dlg-company-website" class="input-field" placeholder="https://acme.com" />
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-surface-600 dark:text-surface-400 mb-1">Phone</label>
+            <input type="tel" id="dlg-company-phone" class="input-field" placeholder="+1 (555) 000-0000" />
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-sm font-medium text-surface-600 dark:text-surface-400 mb-1">Headquarters / Location</label>
+          <input type="text" id="dlg-company-location" class="input-field" placeholder="Boston, MA" />
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-sm font-medium text-surface-600 dark:text-surface-400 mb-1">Annual Revenue</label>
+            <input type="text" id="dlg-company-revenue" class="input-field" placeholder="e.g. $5M" />
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-surface-600 dark:text-surface-400 mb-1">Founded Year</label>
+            <input type="number" id="dlg-company-founded" class="input-field" placeholder="2005" min="1800" max="2099" />
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-sm font-medium text-surface-600 dark:text-surface-400 mb-1">Description</label>
+          <textarea id="dlg-company-description" class="input-field" rows="2" placeholder="What does this company do?"></textarea>
+        </div>
+
+        <div>
+          <label class="block text-sm font-medium text-surface-600 dark:text-surface-400 mb-1">Logo URL</label>
+          <input type="url" id="dlg-company-logo" class="input-field" placeholder="https://logo.clearbit.com/acme.com (optional)" />
+        </div>
+
+        <div class="flex justify-end gap-3 pt-2">
+          <button type="button" onclick="document.getElementById('add-company-dialog').close()" class="btn-secondary">Cancel</button>
+          <button type="submit" class="btn-primary flex items-center gap-2">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+            Save Company
+          </button>
+        </div>
+      </form>
+    </div>
+  `;
+
+  document.body.appendChild(dlg);
+  dlg.showModal();
+
+  // Close on backdrop click
+  dlg.addEventListener('click', (e) => { if (e.target === dlg) dlg.close(); });
+
+  document.getElementById('add-company-dialog-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    await saveCompanyFromDialog();
+  });
+}
+
+async function saveCompanyFromDialog() {
+  const name = document.getElementById('dlg-company-name').value.trim();
+  if (!name) {
+    document.getElementById('dlg-company-name').focus();
+    return;
+  }
+
+  // Save the company to the database immediately
+  const company = await DB.add(STORES.companies, {
+    userId:      currentUser.id,
+    name,
+    industry:    document.getElementById('dlg-company-industry').value,
+    size:        document.getElementById('dlg-company-size').value,
+    website:     document.getElementById('dlg-company-website').value.trim(),
+    phone:       document.getElementById('dlg-company-phone').value.trim(),
+    location:    document.getElementById('dlg-company-location').value.trim(),
+    revenue:     document.getElementById('dlg-company-revenue').value.trim(),
+    founded:     document.getElementById('dlg-company-founded').value.trim(),
+    description: document.getElementById('dlg-company-description').value.trim(),
+    logoUrl:     document.getElementById('dlg-company-logo').value.trim(),
+    createdAt:   new Date().toISOString(),
+  });
+
+  _pendingNewCompanyId = company.id;
+
+  // Close dialog and update the contact form to show the linked company
+  document.getElementById('add-company-dialog').close();
+
+  const badge = document.getElementById('contact-new-company-badge');
+  const badgeName = document.getElementById('contact-new-company-name');
+  const addBtn = document.getElementById('contact-add-company-btn');
+
+  if (badge && badgeName) {
+    badgeName.textContent = name;
+    badge.classList.remove('hidden');
+  }
+  if (addBtn) {
+    addBtn.textContent = '✎ Edit company info';
+    addBtn.onclick = () => openEditCompanyDialog(company.id);
+  }
+
+  // Clear the existing-company dropdown so there's no conflict
+  const dropdown = document.getElementById('contact-company');
+  if (dropdown) dropdown.value = '';
+
+  showToast(`"${name}" saved and linked`, 'success');
+}
+
+function cancelPendingCompany() {
+  _pendingNewCompanyId = null;
+  const badge = document.getElementById('contact-new-company-badge');
+  const addBtn = document.getElementById('contact-add-company-btn');
+  if (badge) badge.classList.add('hidden');
+  if (addBtn) {
+    addBtn.innerHTML = `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg> Add Company Information`;
+    addBtn.onclick = () => openAddCompanyDialog();
+  }
 }
 
 // ============================================
@@ -523,21 +719,9 @@ async function saveNewContact() {
     if (!proceed) return;
   }
 
-  // Handle company
-  let companyId = document.getElementById('contact-company').value;
-  const newCompanyName = document.getElementById('contact-new-company').value.trim();
-  if (!companyId && newCompanyName) {
-    const company = await DB.add(STORES.companies, {
-      userId: currentUser.id,
-      name: newCompanyName,
-      description: '',
-      size: '',
-      website: '',
-      logoUrl: '',
-      industry: '',
-    });
-    companyId = company.id;
-  }
+  // Handle company — prefer a newly-created pending company over the dropdown
+  let companyId = _pendingNewCompanyId || document.getElementById('contact-company').value || null;
+  _pendingNewCompanyId = null; // clear after use
 
   const contact = await DB.add(STORES.contacts, {
     userId: currentUser.id,
