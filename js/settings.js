@@ -257,18 +257,81 @@ async function importData(event) {
   }
 }
 
-async function resetAllData() {
-  confirmDialog('Reset All Data', 'This will permanently delete ALL your CRM data. This cannot be undone.', async () => {
-    for (const store of Object.values(STORES)) {
-      if (store === 'users' || store === 'settings') continue;
-      const items = await DB.getAll(store);
-      for (const item of items) {
-        if (item.userId === currentUser.id) {
-          await DB.delete(store, item.id);
-        }
+function resetAllData() {
+  openModal(`
+    <div class="p-6">
+      <div class="flex items-center gap-3 mb-4">
+        <div class="w-10 h-10 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center flex-shrink-0">
+          <svg class="w-5 h-5 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/>
+          </svg>
+        </div>
+        <div>
+          <h3 class="text-lg font-semibold text-red-600">Reset All Data</h3>
+          <p class="text-xs text-surface-500">This action is permanent and cannot be undone</p>
+        </div>
+      </div>
+
+      <div class="bg-red-50 dark:bg-red-900/15 border border-red-200 dark:border-red-800 rounded-xl p-3 mb-5 text-sm text-red-700 dark:text-red-400">
+        All contacts, companies, calls, notes, reminders, deals, and pipeline data will be <strong>permanently deleted</strong>. Your account and settings will remain.
+      </div>
+
+      <div class="mb-5">
+        <label class="block text-sm font-medium mb-1.5">Enter your password to confirm</label>
+        <input type="password" id="reset-confirm-password" class="input-field" placeholder="Your account password"
+          onkeydown="if(event.key==='Enter') confirmResetWithPassword()" autofocus />
+        <p id="reset-password-error" class="text-xs text-red-600 mt-1.5 hidden">Incorrect password. Please try again.</p>
+      </div>
+
+      <div class="flex justify-end gap-3">
+        <button onclick="closeModal()" class="btn-secondary">Cancel</button>
+        <button onclick="confirmResetWithPassword()" class="btn-danger flex items-center gap-2">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+          </svg>
+          Delete Everything
+        </button>
+      </div>
+    </div>
+  `, { small: true });
+
+  // Focus the password field after modal renders
+  setTimeout(() => document.getElementById('reset-confirm-password')?.focus(), 50);
+}
+
+async function confirmResetWithPassword() {
+  const input = document.getElementById('reset-confirm-password');
+  const errorEl = document.getElementById('reset-password-error');
+  if (!input) return;
+
+  const password = input.value;
+  if (!password) {
+    input.focus();
+    return;
+  }
+
+  // Verify against the stored password hash
+  const user = await DB.get(STORES.users, currentUser.id);
+  const enteredHash = await hashPassword(password);
+
+  if (enteredHash !== user.passwordHash) {
+    errorEl.classList.remove('hidden');
+    input.value = '';
+    input.focus();
+    return;
+  }
+
+  // Password correct — proceed with deletion
+  closeModal();
+  for (const store of Object.values(STORES)) {
+    if (store === 'users' || store === 'settings') continue;
+    const items = await DB.getAll(store);
+    for (const item of items) {
+      if (item.userId === currentUser.id) {
+        await DB.delete(store, item.id);
       }
     }
-    showToast('All data has been reset', 'success');
-    navigate('dashboard');
-  });
+  }
+  showToast('All data has been reset', 'success');
+  navigate('dashboard');
 }
