@@ -325,6 +325,12 @@ function setupAuthForms() {
 function showApp() {
   document.getElementById('auth-screen').classList.add('hidden');
   document.getElementById('app-shell').classList.remove('hidden');
-  navigate('dashboard');
+
+  // Restore the page from URL hash (so refresh keeps you on the same tab)
+  const hashPage = location.hash.slice(1);
+  const startPage = (hashPage && typeof VALID_PAGES !== 'undefined' && VALID_PAGES.has(hashPage))
+    ? hashPage
+    : 'dashboard';
+  navigate(startPage);
   checkReminders();
 }

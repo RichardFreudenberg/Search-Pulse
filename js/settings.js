@@ -93,6 +93,11 @@ async function renderSettings() {
             <input type="password" id="settings-claude-key" class="input-field" placeholder="sk-ant-…" value="${settings?.claudeApiKey || ''}" />
             <p class="text-xs text-surface-400 mt-1">Uses Claude 3.5 Haiku. If both keys are set, Claude takes priority. Get a key at <a href="https://console.anthropic.com/settings/keys" target="_blank" class="text-brand-600 hover:underline">console.anthropic.com</a>.</p>
           </div>
+          <div>
+            <label class="block text-sm font-medium text-surface-600 dark:text-surface-400 mb-1">Google Places API Key <span class="text-xs font-normal text-surface-400">(Company Scout)</span></label>
+            <input type="password" id="settings-google-places-key" class="input-field" placeholder="AIza…" value="${settings?.googlePlacesApiKey || ''}" />
+            <p class="text-xs text-surface-400 mt-1">Powers the Company Scout map search. Enable the <strong>Places API (New)</strong> in your Google Cloud project. Get a key at <a href="https://console.cloud.google.com/apis/credentials" target="_blank" class="text-brand-600 hover:underline">console.cloud.google.com</a>. Leave blank to use free OpenStreetMap data instead.</p>
+          </div>
         </div>
       </div>
 
@@ -161,6 +166,7 @@ async function saveSettings() {
   settings.defaultFollowUpDays = parseInt(document.getElementById('settings-default-followup').value) || 14;
   settings.openaiApiKey = document.getElementById('settings-openai-key').value.trim();
   settings.claudeApiKey = document.getElementById('settings-claude-key').value.trim();
+  settings.googlePlacesApiKey = document.getElementById('settings-google-places-key').value.trim();
   settings.rapidApiKey = document.getElementById('settings-rapidapi-key').value.trim();
   settings.linkedInProfileUrl = document.getElementById('settings-linkedin-url').value.trim();
   settings.linkedInConnected = !!settings.linkedInProfileUrl;

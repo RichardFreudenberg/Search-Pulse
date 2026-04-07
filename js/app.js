@@ -4,9 +4,22 @@
 
 let currentPage = 'dashboard';
 
+// Valid pages — anything not in this set falls back to dashboard
+const VALID_PAGES = new Set([
+  'dashboard','contacts','companies','calls','reminders',
+  'suggestions','news','resources','deals','deal-search',
+  'company-scout','settings',
+]);
+
 // Navigation
-function navigate(page) {
+function navigate(page, { pushState = true } = {}) {
+  if (!VALID_PAGES.has(page)) page = 'dashboard';
   currentPage = page;
+
+  // Update URL hash so refresh / back-button work
+  if (pushState) {
+    history.pushState({ page }, '', '#' + page);
+  }
 
   // Update nav active states
   document.querySelectorAll('.nav-item[data-page]').forEach(el => {
@@ -31,10 +44,18 @@ function navigate(page) {
     case 'resources': renderResources(); break;
     case 'deals': renderDeals(); break;
     case 'deal-search': renderDealSearch(); break;
+    case 'company-scout': renderCompanyScout(); break;
     case 'settings': renderSettings(); break;
     default: renderDashboard();
   }
 }
+
+// Back / forward button support
+window.addEventListener('popstate', (e) => {
+  if (!currentUser) return; // ignore if not logged in
+  const page = (e.state?.page) || (location.hash.slice(1)) || 'dashboard';
+  navigate(page, { pushState: false });
+});
 
 function toggleSidebar() {
   const sidebar = document.getElementById('sidebar');
