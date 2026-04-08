@@ -191,6 +191,9 @@ function initScoutMap() {
   }).addTo(_scoutMap);
 
   _scoutMap.on('click', (e) => scoutHandleMapClick(e.latlng.lat, e.latlng.lng));
+
+  // Force recalculation of map size after the container is fully painted
+  setTimeout(() => _scoutMap && _scoutMap.invalidateSize(), 100);
 }
 
 async function scoutHandleMapClick(lat, lng) {
