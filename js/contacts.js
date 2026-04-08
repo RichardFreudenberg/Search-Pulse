@@ -4,8 +4,9 @@
 
 let contactsViewMode = 'table'; // table | cards
 let contactsFilters = { stage: '', tag: '', search: '', sort: 'name' };
-let _selectedCompanyId = null;  // ID of company selected/created in the contact picker
-let _cpCompanies = [];           // cached company list for the picker
+let _selectedCompanyId = null;      // ID of company selected/created in the contact picker
+let _cpCompanies = [];              // cached company list for the picker
+let _cpOutsideClickHandler = null;  // tracked so we never stack duplicate listeners
 
 async function renderContacts() {
   const pageContent = document.getElementById('page-content');
@@ -317,8 +318,10 @@ function cpRender(filter) {
     list.innerHTML = `<div class="px-4 py-3 text-sm text-surface-400">No companies found</div>`;
     return;
   }
+  // Use data-* attributes — avoids name encoding/escaping bugs in inline onclick
   list.innerHTML = matches.map(c => `
-    <button type="button" onclick="cpSetSelected('${c.id}', ${JSON.stringify(escapeHtml(c.name))})"
+    <button type="button" data-cpid="${c.id}" data-cpname="${escapeHtml(c.name)}"
+      onclick="cpSetSelected(this.dataset.cpid, this.dataset.cpname)"
       class="w-full text-left px-3 py-2 text-sm hover:bg-surface-50 dark:hover:bg-surface-800 flex items-center gap-2.5 transition-colors ${_selectedCompanyId === c.id ? 'bg-brand-50 dark:bg-brand-900/20' : ''}">
       <div class="w-6 h-6 rounded bg-surface-100 dark:bg-surface-700 flex items-center justify-center text-xs font-bold text-surface-500 flex-shrink-0">${escapeHtml(c.name.charAt(0))}</div>
       <div class="min-w-0">
@@ -332,32 +335,53 @@ function cpRender(filter) {
 
 function cpFilter(val) { cpRender(val); }
 
-function cpToggle() {
+// Close the picker dropdown and clean up its outside-click listener
+function cpClose() {
   const dd = document.getElementById('cp-dropdown');
-  if (!dd) return;
-  const isHidden = dd.classList.contains('hidden');
-  dd.classList.toggle('hidden', !isHidden);
-  if (isHidden) {
-    const s = document.getElementById('cp-search');
-    if (s) { s.value = ''; cpRender(''); setTimeout(() => s.focus(), 40); }
-    // Close on outside click
-    setTimeout(() => {
-      function outsideClick(e) {
-        if (!document.getElementById('company-picker-wrapper')?.contains(e.target)) {
-          document.getElementById('cp-dropdown')?.classList.add('hidden');
-          document.removeEventListener('click', outsideClick, true);
-        }
-      }
-      document.addEventListener('click', outsideClick, true);
-    }, 0);
+  if (dd) dd.classList.add('hidden');
+  if (_cpOutsideClickHandler) {
+    document.removeEventListener('click', _cpOutsideClickHandler, true);
+    _cpOutsideClickHandler = null;
   }
+}
+
+function cpToggle() {
+  const trigger = document.getElementById('cp-trigger');
+  const dd = document.getElementById('cp-dropdown');
+  if (!dd || !trigger) return;
+
+  if (!dd.classList.contains('hidden')) {
+    cpClose();
+    return;
+  }
+
+  // Portal the dropdown to <body> so it escapes modal's overflow clipping
+  if (dd.parentElement !== document.body) document.body.appendChild(dd);
+
+  // Position directly under the trigger using fixed coords
+  const rect = trigger.getBoundingClientRect();
+  dd.style.cssText = `position:fixed;top:${rect.bottom + 4}px;left:${rect.left}px;width:${rect.width}px;z-index:9999;`;
+  dd.classList.remove('hidden');
+
+  // Reset search and render full list
+  const s = document.getElementById('cp-search');
+  if (s) { s.value = ''; cpRender(''); setTimeout(() => s.focus(), 40); }
+
+  // Outside-click: close when user clicks outside the wrapper or dropdown
+  // Always remove the old handler first to prevent stacking
+  if (_cpOutsideClickHandler) document.removeEventListener('click', _cpOutsideClickHandler, true);
+  _cpOutsideClickHandler = (e) => {
+    const wrapper = document.getElementById('company-picker-wrapper');
+    if (!wrapper?.contains(e.target) && !dd.contains(e.target)) cpClose();
+  };
+  setTimeout(() => document.addEventListener('click', _cpOutsideClickHandler, true), 0);
 }
 
 function cpSetSelected(id, name) {
   _selectedCompanyId = id;
   const display = document.getElementById('cp-display');
   if (display) { display.textContent = name; display.classList.remove('text-surface-400'); }
-  document.getElementById('cp-dropdown')?.classList.add('hidden');
+  cpClose();
   document.getElementById('cp-clear-row')?.classList.remove('hidden');
   cpRender(document.getElementById('cp-search')?.value || '');
 }
@@ -378,6 +402,7 @@ function openCreateCompanyDialog() {
 
   dlg = document.createElement('dialog');
   dlg.id = 'create-company-dlg';
+  dlg.style.cssText = 'width:min(600px,95vw);max-height:90vh;overflow-y:auto;';
   dlg.innerHTML = `
     <div class="p-6 w-full">
       <div class="flex items-center justify-between mb-5">
@@ -480,6 +505,8 @@ function openCreateCompanyDialog() {
   document.body.appendChild(dlg);
   dlg.showModal();
   dlg.addEventListener('click', e => { if (e.target === dlg) dlg.close(); });
+  // Stop Escape from bubbling up and closing the parent custom modal too
+  dlg.addEventListener('keydown', e => { if (e.key === 'Escape') e.stopPropagation(); });
 
   document.getElementById('create-company-dlg-form').addEventListener('submit', async (e) => {
     e.preventDefault();

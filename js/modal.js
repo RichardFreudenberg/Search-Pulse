@@ -43,6 +43,8 @@ function closeModal() {
   overlay.classList.add('hidden');
   overlay.classList.remove('show');
   document.removeEventListener('keydown', handleModalEscape);
+  // Clean up company picker dropdown if it was portaled to body
+  if (typeof cpClose === 'function') cpClose();
 }
 
 function handleModalEscape(e) {

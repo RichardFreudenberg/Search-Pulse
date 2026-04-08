@@ -167,7 +167,7 @@
   <div id="app-shell" class="hidden min-h-screen flex">
     <!-- Sidebar -->
     <aside id="sidebar" class="sidebar">
-      <div class="flex items-center gap-3 px-5 py-5 border-b border-surface-200 dark:border-surface-800">
+      <button onclick="navigate('dashboard')" class="flex items-center gap-3 px-5 py-5 border-b border-surface-200 dark:border-surface-800 w-full text-left hover:bg-surface-50 dark:hover:bg-surface-800/50 transition-colors" title="Go to Dashboard">
         <div class="flex items-center justify-center w-9 h-9 rounded-xl bg-brand-600 text-white flex-shrink-0">
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3.75 3v11.25A2.25 2.25 0 006 16.5h2.25M3.75 3h-1.5m1.5 0h16.5m0 0h1.5m-1.5 0v11.25A2.25 2.25 0 0118 16.5h-2.25m-7.5 0h7.5m-7.5 0l-1 3m8.5-3l1 3m0 0l.5 1.5m-.5-1.5h-9.5m0 0l-.5 1.5M9 11.25v1.5M12 9v3.75m3-6v6" /></svg>
         </div>
@@ -175,7 +175,7 @@
           <h1 class="text-sm font-semibold tracking-tight truncate">Pulse</h1>
           <p class="text-xs text-surface-500 dark:text-surface-400 truncate" id="sidebar-user-name"></p>
         </div>
-      </div>
+      </button>
       <nav class="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
         <!-- CRM Section Header -->
         <div class="px-2 pt-1 pb-2">
