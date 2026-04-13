@@ -333,4 +333,6 @@ function showApp() {
     : 'dashboard';
   navigate(startPage);
   checkReminders();
+  // Restore Gmail token if user had connected previously
+  if (typeof initGmailSync === 'function') initGmailSync();
 }

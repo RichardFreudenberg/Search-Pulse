@@ -101,6 +101,9 @@ async function renderSettings() {
         </div>
       </div>
 
+      <!-- Gmail Sync -->
+      ${typeof renderGmailSyncCard === 'function' ? renderGmailSyncCard(settings) : ''}
+
       <!-- Email BCC Logging -->
       ${typeof renderEmailLogCard === 'function' ? renderEmailLogCard(settings) : ''}
 

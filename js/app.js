@@ -8,7 +8,7 @@ let currentPage = 'dashboard';
 const VALID_PAGES = new Set([
   'dashboard','contacts','companies','calls','reminders',
   'suggestions','news','resources','deals','deal-search',
-  'company-scout','settings',
+  'company-scout','sourcing','settings',
 ]);
 
 // Navigation
@@ -45,6 +45,7 @@ function navigate(page, { pushState = true } = {}) {
     case 'deals': renderDeals(); break;
     case 'deal-search': renderDealSearch(); break;
     case 'company-scout': renderCompanyScout(); break;
+    case 'sourcing': renderSourcing(); break;
     case 'settings': renderSettings(); break;
     default: renderDashboard();
   }

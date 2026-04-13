@@ -3,7 +3,16 @@
    ============================================ */
 
 const DB_NAME = 'pulse_crm';
-const DB_VERSION = 4;
+// Version history:
+//   4 — original Pulse release (pre-git Nexus CRM era used 'nexus_crm' database name)
+//   5 — added shareInvites, shareDashboards, sourcingCampaigns stores
+//   8 — robustness pass: onblocked/versionchange handlers, legacy DB migration
+// RULE: only bump this when adding new object stores. Never delete or rename stores.
+const DB_VERSION = 8;
+
+// Legacy database names used before the app was renamed from Nexus CRM → Pulse.
+// Add new names here if the app is ever renamed again.
+const LEGACY_DB_NAMES = ['nexus_crm', 'nexus', 'crm', 'search_fund_crm', 'pulse'];
 
 const STORES = {
   users: 'users',
@@ -26,184 +35,235 @@ const STORES = {
   dealHistory: 'dealHistory',
   ndaTemplates: 'ndaTemplates',
   ddProjects: 'ddProjects',
+  shareInvites: 'shareInvites',
+  shareDashboards: 'shareDashboards',
+  sourcingCampaigns: 'sourcingCampaigns',
 };
 
 let db = null;
 
+// -------------------------------------------------------
+// Legacy database migration + account recovery
+// -------------------------------------------------------
+
+// Read all data from an already-open IDBDatabase into a plain object.
+function _readAllFromDB(idbInstance) {
+  return new Promise((resolve) => {
+    const storeNames = Array.from(idbInstance.objectStoreNames);
+    if (storeNames.length === 0) return resolve({});
+
+    const data = {};
+    const tx = idbInstance.transaction(storeNames, 'readonly');
+    let pending = storeNames.length;
+
+    storeNames.forEach(name => {
+      const req = tx.objectStore(name).getAll();
+      req.onsuccess = () => {
+        data[name] = req.result || [];
+        if (--pending === 0) resolve(data);
+      };
+      req.onerror = () => {
+        data[name] = [];
+        if (--pending === 0) resolve(data);
+      };
+    });
+  });
+}
+
+// Open a database by name (no version = open as-is, no upgrade).
+function _openAny(name) {
+  return new Promise((resolve) => {
+    const req = indexedDB.open(name);
+    req.onsuccess = (e) => resolve(e.target.result);
+    req.onerror = () => resolve(null);
+    req.onupgradeneeded = (e) => {
+      // Abort the upgrade so we don't accidentally modify the DB.
+      e.target.transaction.abort();
+      resolve(null);
+    };
+  });
+}
+
+// Return list of all IndexedDB databases accessible at this origin.
+async function _listAllDBNames() {
+  const names = new Set(LEGACY_DB_NAMES);
+  names.add(DB_NAME);
+  // Modern browsers expose indexedDB.databases()
+  if (typeof indexedDB.databases === 'function') {
+    try {
+      const list = await indexedDB.databases();
+      list.forEach(d => { if (d.name) names.add(d.name); });
+    } catch (_) {}
+  }
+  return Array.from(names);
+}
+
+// Scan every known/discoverable database, return array of
+// { dbName, users: [{id, name, email}] } for any that have a users store with records.
+async function scanAllDBsForAccounts() {
+  const names = await _listAllDBNames();
+  const results = [];
+
+  for (const name of names) {
+    if (name === DB_NAME) continue; // skip current DB — handled normally
+    const idb = await _openAny(name);
+    if (!idb) continue;
+
+    if (!idb.objectStoreNames.contains('users')) {
+      idb.close();
+      continue;
+    }
+
+    const data = await _readAllFromDB(idb);
+    idb.close();
+
+    const users = (data.users || []).map(u => ({ id: u.id, name: u.name, email: u.email }));
+    if (users.length > 0) {
+      results.push({ dbName: name, data, users });
+    }
+  }
+
+  return results;
+}
+
+// Import all records from a legacy dataset into pulse_crm.
+// Existing records (by id) are NOT overwritten. User records with a
+// conflicting email are merged: the legacy user id is mapped to the
+// existing account so all their contacts/calls/etc. come across.
+async function importLegacyData(legacyData) {
+  await openDB(); // ensure pulse_crm is open + up-to-date
+
+  // Build a map of existing users in pulse_crm by email
+  const existingUsers = await DB.getAll(STORES.users);
+  const emailToNewId = {};
+  existingUsers.forEach(u => { emailToNewId[u.email] = u.id; });
+
+  // Figure out if any legacy user emails clash with existing ones.
+  // If so, build a remapping: legacyId → existingId
+  const idRemap = {};
+  for (const legacyUser of (legacyData.users || [])) {
+    const existingId = emailToNewId[legacyUser.email];
+    if (existingId && existingId !== legacyUser.id) {
+      idRemap[legacyUser.id] = existingId;
+    }
+  }
+
+  const knownStores = Array.from((await openDB()).objectStoreNames);
+
+  for (const storeName of Object.keys(legacyData)) {
+    if (!knownStores.includes(storeName)) continue;
+    const records = legacyData[storeName] || [];
+
+    for (let record of records) {
+      // Remap userId and id fields if needed
+      const remappedRecord = Object.assign({}, record);
+      if (remappedRecord.userId && idRemap[remappedRecord.userId]) {
+        remappedRecord.userId = idRemap[remappedRecord.userId];
+      }
+
+      // For the users store: skip records whose email already exists
+      if (storeName === 'users') {
+        if (emailToNewId[remappedRecord.email]) continue;
+      }
+
+      // If the id itself was remapped (i.e. this IS the legacy user record), skip —
+      // we already have this user under the existing id.
+      if (idRemap[remappedRecord.id]) continue;
+
+      // Only insert if not already present
+      const existing = await DB.get(storeName, remappedRecord.id);
+      if (!existing) {
+        try { await DB.add(storeName, remappedRecord); } catch (_) {}
+      }
+    }
+  }
+}
+
+// On app startup: migrate any data from legacy databases into pulse_crm.
+// Shows a toast when data is found so the user knows their account was recovered.
+async function migrateLegacyDB() {
+  const found = await scanAllDBsForAccounts();
+  let totalUsers = 0;
+  for (const { dbName, data, users } of found) {
+    try {
+      await importLegacyData(data);
+      totalUsers += users.length;
+      indexedDB.deleteDatabase(dbName);
+    } catch (_) {}
+  }
+  if (totalUsers > 0) {
+    // Show toast once DOM is ready (auth forms may not be set up yet)
+    setTimeout(() => {
+      if (typeof showToast === 'function') {
+        showToast('Account recovered — sign in with your original password', 'success');
+      }
+    }, 500);
+  }
+}
+
+// Shared upgrade logic used both by the normal openDB path and writeToNewDB above.
+function _runUpgrade(e) {
+  const database = e.target.result;
+
+  function ensureStore(name, indexes = [], uniqueIndexes = []) {
+    if (database.objectStoreNames.contains(name)) return;
+    const store = database.createObjectStore(name, { keyPath: 'id' });
+    indexes.forEach(idx => store.createIndex(idx, idx, { unique: false }));
+    uniqueIndexes.forEach(idx => store.createIndex(idx, idx, { unique: true }));
+  }
+
+  ensureStore(STORES.users,              [], ['email']);
+  ensureStore(STORES.contacts,           ['userId', 'companyId', 'stage', 'archived', 'lastContactDate', 'nextFollowUpDate']);
+  ensureStore(STORES.companies,          ['userId', 'name']);
+  ensureStore(STORES.calls,              ['userId', 'contactId', 'date']);
+  ensureStore(STORES.notes,              ['userId', 'contactId', 'callId']);
+  ensureStore(STORES.reminders,          ['userId', 'contactId', 'dueDate', 'status']);
+  ensureStore(STORES.tags,               ['userId']);
+  ensureStore(STORES.sources,            ['contactId', 'companyId']);
+  ensureStore(STORES.activities,         ['userId', 'contactId', 'timestamp']);
+  ensureStore(STORES.enrichmentJobs,     ['contactId', 'status']);
+  ensureStore(STORES.notifications,      ['userId', 'read']);
+  ensureStore(STORES.settings,           []);
+  ensureStore(STORES.deals,              ['userId', 'stage', 'status', 'priority', 'createdAt']);
+  ensureStore(STORES.dealDocuments,      ['dealId', 'userId', 'category']);
+  ensureStore(STORES.dealDiligence,      ['dealId', 'userId', 'type', 'createdAt']);
+  ensureStore(STORES.dealTasks,          ['dealId', 'userId', 'status', 'dueDate']);
+  ensureStore(STORES.dealNotes,          ['dealId', 'userId', 'createdAt']);
+  ensureStore(STORES.dealHistory,        ['dealId', 'userId', 'timestamp', 'action']);
+  ensureStore(STORES.ndaTemplates,       ['userId', 'createdAt']);
+  ensureStore(STORES.ddProjects,         ['userId', 'dealId', 'status', 'createdAt']);
+  ensureStore(STORES.shareInvites,       ['userId', 'createdAt']);
+  ensureStore(STORES.shareDashboards,    ['userId']);
+  ensureStore(STORES.sourcingCampaigns,  ['userId', 'status', 'sector', 'createdAt']);
+}
+
 function openDB() {
   return new Promise((resolve, reject) => {
     if (db) {
-      // Check version matches
       if (db.version === DB_VERSION) return resolve(db);
       db.close();
       db = null;
     }
     const request = indexedDB.open(DB_NAME, DB_VERSION);
 
-    request.onupgradeneeded = (e) => {
-      const database = e.target.result;
+    request.onupgradeneeded = _runUpgrade;
 
-      // Users
-      if (!database.objectStoreNames.contains(STORES.users)) {
-        const store = database.createObjectStore(STORES.users, { keyPath: 'id' });
-        store.createIndex('email', 'email', { unique: true });
-      }
-
-      // Contacts
-      if (!database.objectStoreNames.contains(STORES.contacts)) {
-        const store = database.createObjectStore(STORES.contacts, { keyPath: 'id' });
-        store.createIndex('userId', 'userId', { unique: false });
-        store.createIndex('companyId', 'companyId', { unique: false });
-        store.createIndex('stage', 'stage', { unique: false });
-        store.createIndex('archived', 'archived', { unique: false });
-        store.createIndex('lastContactDate', 'lastContactDate', { unique: false });
-        store.createIndex('nextFollowUpDate', 'nextFollowUpDate', { unique: false });
-      }
-
-      // Companies
-      if (!database.objectStoreNames.contains(STORES.companies)) {
-        const store = database.createObjectStore(STORES.companies, { keyPath: 'id' });
-        store.createIndex('userId', 'userId', { unique: false });
-        store.createIndex('name', 'name', { unique: false });
-      }
-
-      // Calls
-      if (!database.objectStoreNames.contains(STORES.calls)) {
-        const store = database.createObjectStore(STORES.calls, { keyPath: 'id' });
-        store.createIndex('userId', 'userId', { unique: false });
-        store.createIndex('contactId', 'contactId', { unique: false });
-        store.createIndex('date', 'date', { unique: false });
-      }
-
-      // Notes
-      if (!database.objectStoreNames.contains(STORES.notes)) {
-        const store = database.createObjectStore(STORES.notes, { keyPath: 'id' });
-        store.createIndex('userId', 'userId', { unique: false });
-        store.createIndex('contactId', 'contactId', { unique: false });
-        store.createIndex('callId', 'callId', { unique: false });
-      }
-
-      // Reminders
-      if (!database.objectStoreNames.contains(STORES.reminders)) {
-        const store = database.createObjectStore(STORES.reminders, { keyPath: 'id' });
-        store.createIndex('userId', 'userId', { unique: false });
-        store.createIndex('contactId', 'contactId', { unique: false });
-        store.createIndex('dueDate', 'dueDate', { unique: false });
-        store.createIndex('status', 'status', { unique: false });
-      }
-
-      // Tags
-      if (!database.objectStoreNames.contains(STORES.tags)) {
-        const store = database.createObjectStore(STORES.tags, { keyPath: 'id' });
-        store.createIndex('userId', 'userId', { unique: false });
-      }
-
-      // Sources (enrichment provenance)
-      if (!database.objectStoreNames.contains(STORES.sources)) {
-        const store = database.createObjectStore(STORES.sources, { keyPath: 'id' });
-        store.createIndex('contactId', 'contactId', { unique: false });
-        store.createIndex('companyId', 'companyId', { unique: false });
-      }
-
-      // Activities (timeline)
-      if (!database.objectStoreNames.contains(STORES.activities)) {
-        const store = database.createObjectStore(STORES.activities, { keyPath: 'id' });
-        store.createIndex('userId', 'userId', { unique: false });
-        store.createIndex('contactId', 'contactId', { unique: false });
-        store.createIndex('timestamp', 'timestamp', { unique: false });
-      }
-
-      // Enrichment jobs
-      if (!database.objectStoreNames.contains(STORES.enrichmentJobs)) {
-        const store = database.createObjectStore(STORES.enrichmentJobs, { keyPath: 'id' });
-        store.createIndex('contactId', 'contactId', { unique: false });
-        store.createIndex('status', 'status', { unique: false });
-      }
-
-      // Notifications
-      if (!database.objectStoreNames.contains(STORES.notifications)) {
-        const store = database.createObjectStore(STORES.notifications, { keyPath: 'id' });
-        store.createIndex('userId', 'userId', { unique: false });
-        store.createIndex('read', 'read', { unique: false });
-      }
-
-      // Settings
-      if (!database.objectStoreNames.contains(STORES.settings)) {
-        database.createObjectStore(STORES.settings, { keyPath: 'id' });
-      }
-
-      // Deals
-      if (!database.objectStoreNames.contains(STORES.deals)) {
-        const store = database.createObjectStore(STORES.deals, { keyPath: 'id' });
-        store.createIndex('userId', 'userId', { unique: false });
-        store.createIndex('stage', 'stage', { unique: false });
-        store.createIndex('status', 'status', { unique: false });
-        store.createIndex('priority', 'priority', { unique: false });
-        store.createIndex('createdAt', 'createdAt', { unique: false });
-      }
-
-      // Deal Documents
-      if (!database.objectStoreNames.contains(STORES.dealDocuments)) {
-        const store = database.createObjectStore(STORES.dealDocuments, { keyPath: 'id' });
-        store.createIndex('dealId', 'dealId', { unique: false });
-        store.createIndex('userId', 'userId', { unique: false });
-        store.createIndex('category', 'category', { unique: false });
-      }
-
-      // Deal Diligence (AI runs)
-      if (!database.objectStoreNames.contains(STORES.dealDiligence)) {
-        const store = database.createObjectStore(STORES.dealDiligence, { keyPath: 'id' });
-        store.createIndex('dealId', 'dealId', { unique: false });
-        store.createIndex('userId', 'userId', { unique: false });
-        store.createIndex('type', 'type', { unique: false });
-        store.createIndex('createdAt', 'createdAt', { unique: false });
-      }
-
-      // Deal Tasks
-      if (!database.objectStoreNames.contains(STORES.dealTasks)) {
-        const store = database.createObjectStore(STORES.dealTasks, { keyPath: 'id' });
-        store.createIndex('dealId', 'dealId', { unique: false });
-        store.createIndex('userId', 'userId', { unique: false });
-        store.createIndex('status', 'status', { unique: false });
-        store.createIndex('dueDate', 'dueDate', { unique: false });
-      }
-
-      // Deal Notes
-      if (!database.objectStoreNames.contains(STORES.dealNotes)) {
-        const store = database.createObjectStore(STORES.dealNotes, { keyPath: 'id' });
-        store.createIndex('dealId', 'dealId', { unique: false });
-        store.createIndex('userId', 'userId', { unique: false });
-        store.createIndex('createdAt', 'createdAt', { unique: false });
-      }
-
-      // Deal History (immutable audit trail)
-      if (!database.objectStoreNames.contains(STORES.dealHistory)) {
-        const store = database.createObjectStore(STORES.dealHistory, { keyPath: 'id' });
-        store.createIndex('dealId', 'dealId', { unique: false });
-        store.createIndex('userId', 'userId', { unique: false });
-        store.createIndex('timestamp', 'timestamp', { unique: false });
-        store.createIndex('action', 'action', { unique: false });
-      }
-
-      // NDA Templates (for AI NDA checker)
-      if (!database.objectStoreNames.contains(STORES.ndaTemplates)) {
-        const store = database.createObjectStore(STORES.ndaTemplates, { keyPath: 'id' });
-        store.createIndex('userId', 'userId', { unique: false });
-        store.createIndex('createdAt', 'createdAt', { unique: false });
-      }
-
-      // Due Diligence Projects
-      if (!database.objectStoreNames.contains(STORES.ddProjects)) {
-        const store = database.createObjectStore(STORES.ddProjects, { keyPath: 'id' });
-        store.createIndex('userId', 'userId', { unique: false });
-        store.createIndex('dealId', 'dealId', { unique: false });
-        store.createIndex('status', 'status', { unique: false });
-        store.createIndex('createdAt', 'createdAt', { unique: false });
-      }
+    request.onblocked = () => {
+      // Another tab has the DB open at an older version.
+      // We can't force-close it, so surface a message to the user.
+      console.warn('[Pulse] DB upgrade blocked — please close other tabs and reload.');
     };
 
     request.onsuccess = (e) => {
       db = e.target.result;
+
+      // If this tab's connection becomes stale (another tab opened a newer version),
+      // close gracefully so the other tab's upgrade can proceed.
+      db.onversionchange = () => {
+        db.close();
+        db = null;
+      };
+
       resolve(db);
     };
 
