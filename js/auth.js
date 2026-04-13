@@ -118,22 +118,70 @@ function logout() {
   document.getElementById('app-shell').classList.add('hidden');
 }
 
-function showAuthLogin() {
-  document.getElementById('auth-login').classList.remove('hidden');
-  document.getElementById('auth-register').classList.add('hidden');
-  document.getElementById('auth-verify').classList.add('hidden');
+function _showAuthPanel(name) {
+  ['login', 'register', 'verify', 'reset', 'recover'].forEach(s =>
+    document.getElementById(`auth-${s}`).classList.toggle('hidden', s !== name)
+  );
 }
+function showAuthLogin()    { _showAuthPanel('login'); }
+function showAuthRegister() { _showAuthPanel('register'); }
+function showAuthVerify()   { _showAuthPanel('verify'); }
+function showAuthReset()    { _showAuthPanel('reset'); }
 
-function showAuthRegister() {
-  document.getElementById('auth-login').classList.add('hidden');
-  document.getElementById('auth-register').classList.remove('hidden');
-  document.getElementById('auth-verify').classList.add('hidden');
-}
+async function startAccountRecovery() {
+  _showAuthPanel('recover');
+  const statusEl  = document.getElementById('recover-status');
+  const resultsEl = document.getElementById('recover-results');
+  resultsEl.innerHTML = '';
+  statusEl.textContent = 'Scanning all local databases for your account…';
 
-function showAuthVerify() {
-  document.getElementById('auth-login').classList.add('hidden');
-  document.getElementById('auth-register').classList.add('hidden');
-  document.getElementById('auth-verify').classList.remove('hidden');
+  let found;
+  try {
+    found = await scanAllDBsForAccounts();
+  } catch (err) {
+    statusEl.textContent = 'Scan failed: ' + err.message;
+    return;
+  }
+
+  if (found.length === 0) {
+    statusEl.textContent = 'No accounts found in any other local database. Your data may have been cleared by the browser, or was stored under a different browser profile.';
+    return;
+  }
+
+  statusEl.textContent = `Found ${found.reduce((n, f) => n + f.users.length, 0)} account(s) in ${found.length} database(s). Click "Restore" to import into Pulse.`;
+
+  found.forEach(({ dbName, data, users }) => {
+    users.forEach(user => {
+      const card = document.createElement('div');
+      card.className = 'flex items-center justify-between bg-surface-50 dark:bg-surface-800 border border-surface-200 dark:border-surface-700 rounded p-3';
+      card.innerHTML = `
+        <div>
+          <p class="text-sm font-medium">${user.name || '(no name)'}</p>
+          <p class="text-xs text-surface-500">${user.email} &mdash; <span class="font-mono text-xs">${dbName}</span></p>
+        </div>
+        <button class="btn-primary text-xs px-3 py-1.5">Restore</button>
+      `;
+      card.querySelector('button').addEventListener('click', async () => {
+        card.querySelector('button').textContent = 'Importing…';
+        card.querySelector('button').disabled = true;
+        try {
+          await importLegacyData(data);
+          indexedDB.deleteDatabase(dbName);
+          showToast('Account restored — sign in now', 'success');
+          // Pre-fill email on login screen
+          showAuthLogin();
+          const emailField = document.getElementById('login-email');
+          if (emailField) emailField.value = user.email;
+          document.getElementById('login-password').focus();
+        } catch (err) {
+          showToast('Restore failed: ' + err.message, 'error');
+          card.querySelector('button').textContent = 'Retry';
+          card.querySelector('button').disabled = false;
+        }
+      });
+      resultsEl.appendChild(card);
+    });
+  });
 }
 
 // Password visibility toggle (press-and-hold)
@@ -193,14 +241,42 @@ function getOtpValue() {
 }
 
 async function sendVerificationEmail(email, code) {
-  // In a production app, this would call a backend API to send an actual email.
-  // For local mode, we simulate it and show the code in the UI as a hint.
   console.log(`[Pulse] Verification code for ${email}: ${code}`);
 
-  // Show hint since we can't send real emails in local mode
   const hint = document.getElementById('verify-code-hint');
+
+  // Try EmailJS if configured
+  try {
+    const ejsRaw = localStorage.getItem('pulse_emailjs_config');
+    const ejsCfg = ejsRaw ? JSON.parse(ejsRaw) : null;
+
+    if (ejsCfg && ejsCfg.publicKey && ejsCfg.serviceId && ejsCfg.templateId && window.emailjs) {
+      emailjs.init({ publicKey: ejsCfg.publicKey });
+      await emailjs.send(ejsCfg.serviceId, ejsCfg.templateId, {
+        to_email: email,
+        to_name: pendingVerification?.name || '',
+        code: code,
+        app_name: 'Pulse CRM',
+      });
+      // Success — hide code, show confirmation
+      if (hint) {
+        hint.innerHTML = `<span class="inline-flex items-center gap-1.5 text-green-600 dark:text-green-400 text-sm font-medium"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> Verification email sent to ${email}</span>`;
+      }
+      return;
+    }
+  } catch (err) {
+    console.warn('[Pulse] EmailJS send failed:', err);
+    // Fall through to show code hint below
+  }
+
+  // Fallback: show code in UI (local / no EmailJS configured)
   if (hint) {
-    hint.innerHTML = `<span class="bg-surface-100 dark:bg-surface-800 px-3 py-1.5 rounded-lg font-mono text-base tracking-widest">${code}</span><br><span class="text-surface-400 text-xs mt-1 inline-block">Local mode: code shown here. In production, this is sent via email.</span>`;
+    hint.innerHTML = `
+      <span class="bg-surface-100 dark:bg-surface-800 px-3 py-1.5 rounded-lg font-mono text-base tracking-widest">${code}</span>
+      <br><span class="text-surface-400 text-xs mt-1 inline-block">
+        No email service configured — code shown here.
+        <button onclick="navigate('settings')" class="text-brand-600 hover:underline ml-1">Configure EmailJS in Settings →</button>
+      </span>`;
   }
 }
 
@@ -211,10 +287,25 @@ function resendVerificationCode() {
   showToast('New verification code sent', 'info');
 }
 
+async function resetPassword(email, newPassword) {
+  const users = await DB.getAll(STORES.users);
+  const user = users.find(u => u.email === email);
+  if (!user) throw new Error('No account found with this email');
+
+  const passwordHash = await hashPassword(newPassword);
+  user.passwordHash = passwordHash;
+  await DB.put(STORES.users, user);
+  return user;
+}
+
 function setupAuthForms() {
   // Login form
   document.getElementById('login-form').addEventListener('submit', async (e) => {
     e.preventDefault();
+    const btn = e.target.querySelector('button[type="submit"]');
+    const origLabel = btn.textContent;
+    btn.textContent = 'Signing in…';
+    btn.disabled = true;
     try {
       const email = document.getElementById('login-email').value;
       const password = document.getElementById('login-password').value;
@@ -223,7 +314,23 @@ function setupAuthForms() {
       showApp();
       showToast('Welcome back, ' + user.name.split(' ')[0], 'success');
     } catch (err) {
+      btn.textContent = origLabel;
+      btn.disabled = false;
       showToast(err.message, 'error');
+
+      // If the account wasn't found, automatically run the recovery scan
+      // so the user doesn't have to hunt for the button.
+      if (err.message && err.message.toLowerCase().includes('no account')) {
+        const recoverBtn = document.getElementById('recover-btn');
+        if (recoverBtn) {
+          recoverBtn.style.animation = 'pulse 1s 2';
+          recoverBtn.querySelector('#recover-btn-label').textContent =
+            'Account not found — click here to scan & recover your data';
+          recoverBtn.classList.add('text-amber-600', 'dark:text-amber-400', 'font-medium');
+        }
+        // Auto-run the scan
+        setTimeout(() => startAccountRecovery(), 800);
+      }
     }
   });
 
@@ -276,6 +383,32 @@ function setupAuthForms() {
     }
   });
 
+  // Reset password form
+  document.getElementById('reset-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try {
+      const email = document.getElementById('reset-email').value;
+      const password = document.getElementById('reset-password').value;
+      const passwordConfirm = document.getElementById('reset-password-confirm').value;
+
+      if (password !== passwordConfirm) {
+        showToast('Passwords do not match', 'error');
+        return;
+      }
+      if (password.length < 8) {
+        showToast('Password must be at least 8 characters', 'error');
+        return;
+      }
+
+      await resetPassword(email, password);
+      showToast('Password reset — please sign in', 'success');
+      document.getElementById('login-email').value = email;
+      showAuthLogin();
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  });
+
   // Verification form
   document.getElementById('verify-form').addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -314,6 +447,9 @@ function setupAuthForms() {
       await seedDemoData(user.id);
       pendingVerification = null;
 
+      // Flag this user for the onboarding tutorial (persists across page refresh)
+      localStorage.setItem('pulse_show_tutorial_' + user.id, '1');
+
       showApp();
       showToast('Welcome to Pulse, ' + user.name.split(' ')[0] + '!', 'success');
     } catch (err) {
@@ -326,6 +462,11 @@ function showApp() {
   document.getElementById('auth-screen').classList.add('hidden');
   document.getElementById('app-shell').classList.remove('hidden');
 
+  // Seed the demo deal for this user (fire-and-forget — won't block the UI)
+  if (currentUser) {
+    seedDemoDeal(currentUser.id).catch(() => {});
+  }
+
   // Restore the page from URL hash (so refresh keeps you on the same tab)
   const hashPage = location.hash.slice(1);
   const startPage = (hashPage && typeof VALID_PAGES !== 'undefined' && VALID_PAGES.has(hashPage))
@@ -333,4 +474,11 @@ function showApp() {
     : 'dashboard';
   navigate(startPage);
   checkReminders();
+
+  // Show onboarding tutorial for new users (flag set at registration time)
+  if (currentUser && localStorage.getItem('pulse_show_tutorial_' + currentUser.id)) {
+    setTimeout(() => {
+      if (typeof startTutorial === 'function') startTutorial();
+    }, 600);
+  }
 }

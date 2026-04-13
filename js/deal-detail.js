@@ -13,12 +13,19 @@ async function viewDeal(dealId) {
   const deal = await DB.get(STORES.deals, dealId);
   if (!deal) { showToast('Deal not found', 'error'); navigate('deals'); return; }
 
+  // Fetch counts for tabs
+  const [tabNotes, tabDocs, tabTasks] = await Promise.all([
+    DB.getAllByIndex(STORES.dealNotes, 'dealId', dealId).then(r => r.filter(x => x.userId === currentUser.id).length).catch(() => 0),
+    DB.getAllByIndex(STORES.dealDocuments, 'dealId', dealId).then(r => r.filter(x => x.userId === currentUser.id).length).catch(() => 0),
+    DB.getAllByIndex(STORES.dealTasks, 'dealId', dealId).then(r => r.filter(x => x.userId === currentUser.id && x.status !== 'done').length).catch(() => 0),
+  ]);
+
   const tabs = [
     { id: 'overview', label: 'Overview', icon: '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M2.25 12l8.954-8.955a1.126 1.126 0 011.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25" /></svg>' },
-    { id: 'notes', label: 'Notes', icon: '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" /></svg>' },
-    { id: 'documents', label: 'Documents', icon: '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" /></svg>' },
+    { id: 'notes', label: 'Notes', icon: '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" /></svg>', count: tabNotes },
+    { id: 'documents', label: 'Documents', icon: '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" /></svg>', count: tabDocs },
     { id: 'diligence', label: 'AI Diligence', icon: '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.455 2.456L21.75 6l-1.036.259a3.375 3.375 0 00-2.455 2.456zM16.894 20.567L16.5 21.75l-.394-1.183a2.25 2.25 0 00-1.423-1.423L13.5 18.75l1.183-.394a2.25 2.25 0 001.423-1.423l.394-1.183.394 1.183a2.25 2.25 0 001.423 1.423l1.183.394-1.183.394a2.25 2.25 0 00-1.423 1.423z" /></svg>' },
-    { id: 'tasks', label: 'Tasks', icon: '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>' },
+    { id: 'tasks', label: 'Tasks', icon: '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>', count: tabTasks },
     { id: 'scoring', label: 'Scoring', icon: '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M11.48 3.499a.562.562 0 011.04 0l2.125 5.111a.563.563 0 00.475.345l5.518.442c.499.04.701.663.321.988l-4.204 3.602a.563.563 0 00-.182.557l1.285 5.385a.562.562 0 01-.84.61l-4.725-2.885a.563.563 0 00-.586 0L6.982 20.54a.562.562 0 01-.84-.61l1.285-5.386a.562.562 0 00-.182-.557l-4.204-3.602a.563.563 0 01.321-.988l5.518-.442a.563.563 0 00.475-.345L11.48 3.5z" /></svg>' },
     { id: 'history', label: 'History', icon: '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>' },
     { id: 'nda', label: 'NDA Review', icon: '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.955 11.955 0 003 12c0 6.627 5.373 12 12 12s12-5.373 12-12c0-2.13-.558-4.128-1.534-5.856"/></svg>' },
@@ -53,28 +60,29 @@ async function viewDeal(dealId) {
         </div>
       </div>
 
-      <!-- Quick Stats Row -->
+      <!-- Quick Stats Row — all clickable, open financial analysis -->
       <div class="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
-        <div class="card p-3 text-center">
-          <p class="text-xs text-surface-500">Revenue</p>
-          <p class="text-lg font-bold">${deal.revenue ? '$' + (deal.revenue / 1e6).toFixed(1) + 'M' : '—'}</p>
-        </div>
-        <div class="card p-3 text-center">
-          <p class="text-xs text-surface-500">EBITDA</p>
-          <p class="text-lg font-bold">${deal.ebitda ? '$' + (deal.ebitda / 1e6).toFixed(1) + 'M' : '—'}</p>
-        </div>
-        <div class="card p-3 text-center">
-          <p class="text-xs text-surface-500">Margin</p>
-          <p class="text-lg font-bold">${deal.revenue && deal.ebitda ? ((deal.ebitda / deal.revenue) * 100).toFixed(0) + '%' : '—'}</p>
-        </div>
-        <div class="card p-3 text-center">
-          <p class="text-xs text-surface-500">Ask Price</p>
-          <p class="text-lg font-bold">${deal.askingPrice ? '$' + (deal.askingPrice / 1e6).toFixed(1) + 'M' : '—'}</p>
-        </div>
-        <div class="card p-3 text-center">
-          <p class="text-xs text-surface-500">Multiple</p>
-          <p class="text-lg font-bold">${deal.askingMultiple ? deal.askingMultiple + 'x' : '—'}</p>
-        </div>
+        ${(() => {
+          const margin = deal.revenue && deal.ebitda ? ((deal.ebitda / deal.revenue) * 100).toFixed(0) + '%' : '—';
+          const multiple = deal.askingMultiple
+            ? deal.askingMultiple + 'x'
+            : (deal.askingPrice && deal.ebitda ? (deal.askingPrice / deal.ebitda).toFixed(1) + 'x' : '—');
+          const evRev = deal.askingPrice && deal.revenue ? (deal.askingPrice / deal.revenue).toFixed(1) + 'x' : null;
+          const stats = [
+            { label: 'Revenue', value: deal.revenue ? '$' + (deal.revenue / 1e6).toFixed(1) + 'M' : '—', sub: deal.revenue ? 'annual' : 'not set', color: 'brand' },
+            { label: 'EBITDA', value: deal.ebitda ? '$' + (deal.ebitda / 1e6).toFixed(1) + 'M' : '—', sub: deal.ebitda && deal.revenue ? margin + ' margin' : 'not set', color: 'green' },
+            { label: 'EBITDA Margin', value: margin, sub: margin !== '—' ? 'operating efficiency' : 'need rev + EBITDA', color: margin !== '—' && parseInt(margin) >= 20 ? 'green' : 'yellow' },
+            { label: 'Asking Price', value: deal.askingPrice ? '$' + (deal.askingPrice / 1e6).toFixed(1) + 'M' : '—', sub: evRev ? evRev + ' EV/Rev' : 'not set', color: 'purple' },
+            { label: 'EBITDA Multiple', value: multiple, sub: multiple !== '—' ? 'enterprise value' : 'need price + EBITDA', color: 'orange' },
+          ];
+          return stats.map(s => `
+            <button onclick="openEditDealModal('${dealId}')" title="Click to edit financials" class="card p-3 text-center hover:border-brand-300 dark:hover:border-brand-700 hover:shadow-sm transition-all cursor-pointer text-left group">
+              <p class="text-xs text-surface-500 group-hover:text-brand-500 transition-colors">${s.label}</p>
+              <p class="text-xl font-bold mt-0.5">${s.value}</p>
+              <p class="text-xs text-surface-400 mt-0.5">${s.sub}</p>
+            </button>
+          `).join('');
+        })()}
       </div>
 
       <!-- Tabs -->
@@ -82,6 +90,7 @@ async function viewDeal(dealId) {
         ${tabs.map(t => `
           <button onclick="switchDealTab('${t.id}')" class="deal-tab flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-t-lg whitespace-nowrap transition-colors ${currentDealTab === t.id ? 'text-brand-600 border-b-2 border-brand-600 bg-brand-50/50 dark:bg-brand-900/20' : 'text-surface-500 hover:text-surface-700 dark:hover:text-surface-300'}" data-tab="${t.id}">
             ${t.icon} ${t.label}
+            ${t.count != null ? `<span class="text-xs px-1.5 py-0.5 rounded-full ${currentDealTab === t.id ? 'bg-brand-100 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300' : 'bg-surface-100 dark:bg-surface-800 text-surface-500'}">${t.count}</span>` : ''}
           </button>
         `).join('')}
       </div>
@@ -155,10 +164,71 @@ async function renderDealOverviewTab() {
             }).join('')}
           </div>
         </div>
+
+        <!-- Highlights -->
+        ${deal.highlights && deal.highlights.length > 0 ? `
+        <div class="card">
+          <h3 class="text-sm font-semibold mb-3 flex items-center gap-2">
+            <svg class="w-4 h-4 text-green-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+            Key Highlights
+          </h3>
+          <ul class="space-y-2">
+            ${deal.highlights.map(h => `
+              <li class="flex items-start gap-2.5">
+                <span class="w-1.5 h-1.5 rounded-full bg-green-500 flex-shrink-0 mt-1.5"></span>
+                <span class="text-sm text-surface-700 dark:text-surface-300">${escapeHtml(h)}</span>
+              </li>
+            `).join('')}
+          </ul>
+        </div>
+        ` : ''}
+
+        <!-- Concerns -->
+        ${deal.concerns && deal.concerns.length > 0 ? `
+        <div class="card">
+          <h3 class="text-sm font-semibold mb-3 flex items-center gap-2">
+            <svg class="w-4 h-4 text-amber-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/></svg>
+            Key Concerns / Risks
+          </h3>
+          <ul class="space-y-2">
+            ${deal.concerns.map(c => `
+              <li class="flex items-start gap-2.5">
+                <span class="w-1.5 h-1.5 rounded-full bg-amber-500 flex-shrink-0 mt-1.5"></span>
+                <span class="text-sm text-surface-700 dark:text-surface-300">${escapeHtml(c)}</span>
+              </li>
+            `).join('')}
+          </ul>
+        </div>
+        ` : ''}
       </div>
 
       <!-- Sidebar -->
       <div class="space-y-6">
+        <!-- Financial Analysis -->
+        ${(deal.revenue || deal.ebitda || deal.askingPrice) ? `
+        <div class="card">
+          <div class="flex items-center justify-between mb-3">
+            <h3 class="text-sm font-semibold">Financial Analysis</h3>
+            <button onclick="openEditDealModal('${deal.id}')" class="text-xs text-brand-600 hover:underline">Edit</button>
+          </div>
+          <dl class="space-y-2.5 text-sm">
+            ${deal.revenue ? `<div class="flex justify-between"><dt class="text-surface-500">Revenue</dt><dd class="font-semibold">$${(deal.revenue / 1e6).toFixed(2)}M</dd></div>` : ''}
+            ${deal.ebitda ? `<div class="flex justify-between"><dt class="text-surface-500">EBITDA</dt><dd class="font-semibold">$${(deal.ebitda / 1e6).toFixed(2)}M</dd></div>` : ''}
+            ${deal.revenue && deal.ebitda ? `<div class="flex justify-between"><dt class="text-surface-500">EBITDA Margin</dt><dd class="font-semibold ${(deal.ebitda/deal.revenue) >= 0.20 ? 'text-green-600' : 'text-yellow-600'}">${((deal.ebitda/deal.revenue)*100).toFixed(1)}%</dd></div>` : ''}
+            ${deal.askingPrice ? `<div class="flex justify-between pt-1.5 border-t border-surface-100 dark:border-surface-800"><dt class="text-surface-500">Asking Price</dt><dd class="font-semibold">$${(deal.askingPrice / 1e6).toFixed(2)}M</dd></div>` : ''}
+            ${(deal.askingMultiple || (deal.askingPrice && deal.ebitda)) ? `<div class="flex justify-between"><dt class="text-surface-500">EBITDA Multiple</dt><dd class="font-semibold">${(deal.askingMultiple || deal.askingPrice / deal.ebitda).toFixed(1)}x</dd></div>` : ''}
+            ${deal.askingPrice && deal.revenue ? `<div class="flex justify-between"><dt class="text-surface-500">EV / Revenue</dt><dd class="font-semibold">${(deal.askingPrice / deal.revenue).toFixed(1)}x</dd></div>` : ''}
+            ${deal.ebitda ? `
+              <div class="pt-1.5 border-t border-surface-100 dark:border-surface-800">
+                <p class="text-xs text-surface-400 mb-1.5">Financing Estimates (illustrative)</p>
+                <div class="flex justify-between"><dt class="text-surface-500 text-xs">Debt Capacity (3x)</dt><dd class="text-xs font-medium">$${(deal.ebitda * 3 / 1e6).toFixed(1)}M</dd></div>
+                ${deal.askingPrice ? `<div class="flex justify-between mt-1"><dt class="text-surface-500 text-xs">Equity Required</dt><dd class="text-xs font-medium">$${Math.max(0, (deal.askingPrice - deal.ebitda * 3) / 1e6).toFixed(1)}M</dd></div>` : ''}
+              </div>
+            ` : ''}
+          </dl>
+        </div>
+        ` : ''}
+
         <div class="card">
           <h3 class="text-sm font-semibold mb-3">Details</h3>
           <dl class="space-y-3 text-sm">
@@ -345,7 +415,7 @@ async function renderDealDocsTab() {
       </div>
 
       ${missing.length > 0 ? `
-        <div class="bg-yellow-50 dark:bg-yellow-900/15 border border-yellow-200 dark:border-yellow-800 rounded-xl p-3 mb-4">
+        <div class="bg-yellow-50 dark:bg-yellow-900/15 border border-yellow-200 dark:border-yellow-800 rounded p-3 mb-4">
           <div class="flex items-center gap-2 mb-1">
             <svg class="w-4 h-4 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" /></svg>
             <span class="text-xs font-semibold text-yellow-700 dark:text-yellow-400">Missing Documents</span>
@@ -382,7 +452,7 @@ async function renderDealDiligenceTab() {
       <!-- Run Diligence Panel -->
       <div class="card mb-6 bg-gradient-to-r from-brand-50 to-purple-50 dark:from-brand-900/20 dark:to-purple-900/20 border-brand-200 dark:border-brand-800">
         <div class="flex items-center gap-3 mb-3">
-          <div class="p-2 rounded-xl bg-brand-100 dark:bg-brand-900/30">
+          <div class="p-2 rounded bg-brand-100 dark:bg-brand-900/30">
             <svg class="w-6 h-6 text-brand-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" /></svg>
           </div>
           <div>
@@ -392,7 +462,7 @@ async function renderDealDiligenceTab() {
         </div>
         <div class="grid grid-cols-2 md:grid-cols-4 gap-2 mb-3">
           ${Object.entries(DILIGENCE_TYPES).filter(([k]) => k !== 'qa_response').map(([type, info]) => `
-            <button onclick="startDiligenceRun('${currentDealId}', '${type}')" class="p-2.5 rounded-xl border border-surface-200 dark:border-surface-700 hover:border-brand-400 dark:hover:border-brand-600 bg-white dark:bg-surface-900 text-left transition-all hover:shadow-sm group">
+            <button onclick="startDiligenceRun('${currentDealId}', '${type}')" class="p-2.5 rounded border border-surface-200 dark:border-surface-700 hover:border-brand-400 dark:hover:border-brand-600 bg-white dark:bg-surface-900 text-left transition-all hover:shadow-sm group">
               <span class="text-lg">${info.icon}</span>
               <p class="text-xs font-medium mt-1 group-hover:text-brand-600">${info.label}</p>
             </button>
@@ -450,7 +520,7 @@ async function askDealQuestionUI() {
   try {
     const result = await askDealQuestion(currentDealId, question);
     resultDiv.innerHTML = `
-      <div class="p-4 bg-surface-50 dark:bg-surface-800 rounded-xl">
+      <div class="p-4 bg-surface-50 dark:bg-surface-800 rounded">
         <p class="text-xs text-surface-400 mb-2">Q: ${escapeHtml(question)}</p>
         <div class="text-sm deal-ai-output">${renderMarkdown(result.response)}</div>
         <p class="text-xs text-surface-400 mt-2">${result.tokensUsed} tokens &bull; ${(result.durationMs / 1000).toFixed(1)}s</p>
@@ -508,7 +578,7 @@ function renderDealTaskItem(task) {
   const priorityColors = { high: 'text-red-500', medium: 'text-yellow-500', low: 'text-blue-500' };
 
   return `
-    <div class="flex items-start gap-3 p-3 rounded-xl border border-surface-200 dark:border-surface-700 ${isOverdue ? 'border-red-300 dark:border-red-800 bg-red-50/50 dark:bg-red-900/10' : ''}">
+    <div class="flex items-start gap-3 p-3 rounded border border-surface-200 dark:border-surface-700 ${isOverdue ? 'border-red-300 dark:border-red-800 bg-red-50/50 dark:bg-red-900/10' : ''}">
       <button onclick="toggleDealTaskStatus('${task.id}')" class="mt-0.5 flex-shrink-0">
         ${isDone
           ? '<svg class="w-5 h-5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>'
@@ -757,7 +827,7 @@ function renderDealNdaTab(dealId) {
     <div class="space-y-4">
       <div class="card">
         <div class="flex items-center gap-3 mb-4">
-          <div class="w-10 h-10 rounded-xl bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center">
+          <div class="w-10 h-10 rounded bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center">
             <svg class="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.955 11.955 0 003 12c0 6.627 5.373 12 12 12s12-5.373 12-12c0-2.13-.558-4.128-1.534-5.856"/></svg>
           </div>
           <div>

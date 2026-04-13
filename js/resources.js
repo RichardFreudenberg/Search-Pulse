@@ -227,7 +227,7 @@ async function renderResources() {
       <div class="flex gap-2 overflow-x-auto pb-2 mb-6 -mx-1 px-1">
         ${RESOURCE_CATEGORIES.map(cat => `
           <button onclick="switchResourceCategory('${cat.id}')" id="resource-tab-${cat.id}"
-            class="px-4 py-2 rounded-xl text-sm font-medium whitespace-nowrap transition-all ${currentResourceCategory === cat.id
+            class="px-4 py-2 rounded text-sm font-medium whitespace-nowrap transition-all ${currentResourceCategory === cat.id
               ? 'bg-brand-600 text-white shadow-sm'
               : 'bg-white dark:bg-surface-900 border border-surface-200 dark:border-surface-700 text-surface-600 dark:text-surface-400 hover:border-brand-300 dark:hover:border-brand-700'}">
             ${cat.label}
@@ -267,7 +267,7 @@ function renderResourceCard(resource, isFeatured) {
   return `
     <a href="${escapeHtml(resource.url)}" target="_blank" rel="noopener" class="card card-interactive block ${isFeatured ? 'border-brand-200 dark:border-brand-800' : ''}">
       <div class="flex items-start gap-3">
-        <div class="flex-shrink-0 w-12 h-12 rounded-xl bg-surface-100 dark:bg-surface-800 flex items-center justify-center overflow-hidden border border-surface-200 dark:border-surface-700">
+        <div class="flex-shrink-0 w-12 h-12 rounded bg-surface-100 dark:bg-surface-800 flex items-center justify-center overflow-hidden border border-surface-200 dark:border-surface-700">
           ${resource.logo
             ? `<img src="${escapeHtml(resource.logo)}" alt="" class="w-8 h-8 object-contain" onerror="this.parentElement.innerHTML='<span class=\\'text-lg font-bold text-surface-400\\'>${resource.name.charAt(0)}</span>'" />`
             : `<span class="text-lg font-bold text-surface-400">${resource.name.charAt(0)}</span>`}
@@ -296,9 +296,9 @@ function switchResourceCategory(catId) {
     const tab = document.getElementById(`resource-tab-${cat.id}`);
     if (tab) {
       if (cat.id === catId) {
-        tab.className = 'px-4 py-2 rounded-xl text-sm font-medium whitespace-nowrap transition-all bg-brand-600 text-white shadow-sm';
+        tab.className = 'px-4 py-2 rounded text-sm font-medium whitespace-nowrap transition-all bg-brand-600 text-white shadow-sm';
       } else {
-        tab.className = 'px-4 py-2 rounded-xl text-sm font-medium whitespace-nowrap transition-all bg-white dark:bg-surface-900 border border-surface-200 dark:border-surface-700 text-surface-600 dark:text-surface-400 hover:border-brand-300 dark:hover:border-brand-700';
+        tab.className = 'px-4 py-2 rounded text-sm font-medium whitespace-nowrap transition-all bg-white dark:bg-surface-900 border border-surface-200 dark:border-surface-700 text-surface-600 dark:text-surface-400 hover:border-brand-300 dark:hover:border-brand-700';
       }
     }
   });

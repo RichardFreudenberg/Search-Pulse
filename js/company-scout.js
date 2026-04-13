@@ -543,7 +543,7 @@ function renderScoutCard(company, index) {
           <h3 class="text-sm font-semibold leading-snug">${escapeHtml(company.name)}</h3>
           <p class="text-xs text-surface-500 truncate">${escapeHtml(company.industry)}</p>
         </div>
-        <span class="text-xs px-1.5 py-0.5 rounded-full ${company._source === 'google'
+        <span class="text-xs px-1.5 py-0.5 rounded ${company._source === 'google'
           ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-300'
           : 'bg-green-50 dark:bg-green-900/20 text-green-600 dark:text-green-300'} whitespace-nowrap flex-shrink-0">
           ${company._source === 'google' ? 'G' : 'OSM'}

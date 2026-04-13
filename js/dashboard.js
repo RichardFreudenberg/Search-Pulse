@@ -59,7 +59,7 @@ async function renderDashboard() {
     DB.getAll(STORES.deals).then(all => all.filter(d => d.userId === currentUser.id)).catch(() => []),
   ]);
 
-  const activeContacts = contacts.filter(c => !c.archived);
+  const activeContacts = getActiveContacts(contacts);
   const overdueFollowUps = activeContacts.filter(c => c.nextFollowUpDate && isOverdue(c.nextFollowUpDate));
   const dueToday = activeContacts.filter(c => c.nextFollowUpDate && isDueToday(c.nextFollowUpDate));
   const dueThisWeek = activeContacts.filter(c => c.nextFollowUpDate && isDueThisWeek(c.nextFollowUpDate) && !isDueToday(c.nextFollowUpDate));
@@ -84,11 +84,8 @@ async function renderDashboard() {
   }).length;
   const atRisk = activeContacts.length - healthy - stale;
 
-  const companyMap = {};
-  companies.forEach(c => companyMap[c.id] = c);
-
-  const contactMap = {};
-  activeContacts.forEach(c => contactMap[c.id] = c);
+  const companyMap = buildMap(companies);
+  const contactMap = buildMap(activeContacts);
 
   // Call statistics
   const callsByTitle = {};
@@ -118,13 +115,13 @@ async function renderDashboard() {
       html: `
         <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
           ${renderStatCard('Total Contacts', activeContacts.length,
-            '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z" /></svg>', 'brand')}
+            '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z" /></svg>', 'brand', "showDrilldown('contacts-all')")}
           ${renderStatCard('Total Calls', calls.length,
-            '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 002.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 01-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 00-1.091-.852H4.5A2.25 2.25 0 002.25 4.5v2.25z" /></svg>', 'purple')}
+            '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 002.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 01-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 00-1.091-.852H4.5A2.25 2.25 0 002.25 4.5v2.25z" /></svg>', 'purple', "showDrilldown('calls-all')")}
           ${renderStatCard('Due Today', dueToday.length,
-            '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>', 'yellow')}
+            '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>', 'yellow', "showDrilldown('contacts-today')")}
           ${renderStatCard('Overdue', overdueFollowUps.length,
-            '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" /></svg>', 'red')}
+            '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" /></svg>', 'red', "showDrilldown('contacts-overdue')")}
         </div>
       `,
     },
@@ -140,7 +137,8 @@ async function renderDashboard() {
                 ${topTitles.map(([title, count], i) => {
                   const pct = (count / maxTitleCalls) * 100;
                   return `
-                    <div>
+                    <div class="cursor-pointer hover:bg-surface-50 dark:hover:bg-surface-800/40 rounded -mx-2 px-2 py-1 transition-colors"
+                      onclick="showDrilldown('calls-title', '${encodeURIComponent(title)}')">
                       <div class="flex items-center justify-between mb-1">
                         <span class="text-sm text-surface-600 dark:text-surface-400 truncate mr-2">${escapeHtml(title)}</span>
                         <span class="text-sm font-semibold whitespace-nowrap">${count} call${count !== 1 ? 's' : ''}</span>
@@ -162,7 +160,8 @@ async function renderDashboard() {
                   const pct = (count / maxCompanyCalls) * 100;
                   const comp = companies.find(c => c.name === company);
                   return `
-                    <div>
+                    <div class="cursor-pointer hover:bg-surface-50 dark:hover:bg-surface-800/40 rounded -mx-2 px-2 py-1 transition-colors"
+                      onclick="showDrilldown('calls-company', '${encodeURIComponent(company)}')">
                       <div class="flex items-center justify-between mb-1">
                         <div class="flex items-center gap-2 min-w-0 mr-2">
                           ${comp ? renderCompanyLogo(comp, 'sm') : `<div class="avatar avatar-sm" style="background-color: ${avatarColor(company)}15; color: ${avatarColor(company)}">${getInitials(company)}</div>`}
@@ -222,7 +221,8 @@ async function renderDashboard() {
                 yellow: 'bg-yellow-500', red: 'bg-red-500',
               }[color] || 'bg-surface-400';
               return `
-                <div>
+                <div class="cursor-pointer hover:bg-surface-50 dark:hover:bg-surface-800/40 rounded -mx-2 px-2 py-1 transition-colors"
+                  onclick="showDrilldown('contacts-stage', '${encodeURIComponent(stage)}')">
                   <div class="flex items-center justify-between mb-1">
                     <span class="text-sm text-surface-600 dark:text-surface-400">${escapeHtml(stage)}</span>
                     <span class="text-sm font-medium">${count}</span>
@@ -293,19 +293,22 @@ async function renderDashboard() {
           ${activeContacts.length === 0 ? `
             <p class="text-sm text-surface-500 py-4 text-center">Add contacts to track health</p>
           ` : `
-            <div class="space-y-4">
-              <div class="flex items-center gap-3">
-                <div class="w-3 h-3 rounded-full bg-green-500"></div>
+            <div class="space-y-2">
+              <div class="flex items-center gap-3 cursor-pointer hover:bg-surface-50 dark:hover:bg-surface-800/40 rounded p-2 -mx-2 transition-colors"
+                onclick="showDrilldown('contacts-health', 'healthy')">
+                <div class="w-3 h-3 rounded-full bg-green-500 flex-shrink-0"></div>
                 <span class="text-sm flex-1">Active (&le;30 days)</span>
                 <span class="text-sm font-semibold">${healthy}</span>
               </div>
-              <div class="flex items-center gap-3">
-                <div class="w-3 h-3 rounded-full bg-yellow-500"></div>
+              <div class="flex items-center gap-3 cursor-pointer hover:bg-surface-50 dark:hover:bg-surface-800/40 rounded p-2 -mx-2 transition-colors"
+                onclick="showDrilldown('contacts-health', 'atrisk')">
+                <div class="w-3 h-3 rounded-full bg-yellow-500 flex-shrink-0"></div>
                 <span class="text-sm flex-1">At risk (31&ndash;60 days)</span>
                 <span class="text-sm font-semibold">${atRisk}</span>
               </div>
-              <div class="flex items-center gap-3">
-                <div class="w-3 h-3 rounded-full bg-red-500"></div>
+              <div class="flex items-center gap-3 cursor-pointer hover:bg-surface-50 dark:hover:bg-surface-800/40 rounded p-2 -mx-2 transition-colors"
+                onclick="showDrilldown('contacts-health', 'stale')">
+                <div class="w-3 h-3 rounded-full bg-red-500 flex-shrink-0"></div>
                 <span class="text-sm flex-1">Stale (&gt;60 days)</span>
                 <span class="text-sm font-semibold">${stale}</span>
               </div>
@@ -387,14 +390,15 @@ async function renderDashboard() {
   const overviewHtml = `
     <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
       ${[
-        ['Contacts', activeContacts.length, 'brand'],
-        ['Companies', companies.length, 'purple'],
-        ['Calls', calls.length, 'indigo'],
-        ['Active Deals', activeDeals.length, 'green'],
-        ['Hot Deals', hotDeals.length, 'yellow'],
-        ['Pipeline Value', fmtVal(pipelineValue), 'pink'],
-      ].map(([label, val, color]) => `
-        <div class="card text-center py-4">
+        ['Contacts', activeContacts.length, 'brand', "showDrilldown('contacts-all')"],
+        ['Companies', companies.length, 'purple', "showDrilldown('companies-all')"],
+        ['Calls', calls.length, 'indigo', "showDrilldown('calls-all')"],
+        ['Active Deals', activeDeals.length, 'green', "showDrilldown('deals-active')"],
+        ['Hot Deals', hotDeals.length, 'yellow', "showDrilldown('deals-hot')"],
+        ['Pipeline Value', fmtVal(pipelineValue), 'pink', "showDrilldown('deals-active')"],
+      ].map(([label, val, color, click]) => `
+        <div class="card text-center py-4 cursor-pointer hover:border-${color}-300 dark:hover:border-${color}-700 transition-colors"
+          onclick="${click}" title="Click to see details">
           <p class="text-xl font-bold text-${color}-600 dark:text-${color}-400">${val}</p>
           <p class="text-xs text-surface-500 mt-1">${label}</p>
         </div>
@@ -452,12 +456,13 @@ async function renderDashboard() {
   const dealsStatsHtml = `
     <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
       ${[
-        ['Total Deals', allDeals.length],
-        ['Active', activeDeals.length],
-        ['Hot / High Priority', hotDeals.length],
-        ['Pipeline Value', fmtVal(pipelineValue)],
-      ].map(([label, val]) => `
-        <div class="card text-center py-4">
+        ['Total Deals', allDeals.length, "showDrilldown('deals-all')"],
+        ['Active', activeDeals.length, "showDrilldown('deals-active')"],
+        ['Hot / High Priority', hotDeals.length, "showDrilldown('deals-hot')"],
+        ['Pipeline Value', fmtVal(pipelineValue), "showDrilldown('deals-active')"],
+      ].map(([label, val, click]) => `
+        <div class="card text-center py-4 cursor-pointer hover:border-brand-300 dark:hover:border-brand-700 transition-colors"
+          onclick="${click}" title="Click to see details">
           <p class="text-2xl font-bold text-brand-600">${val}</p>
           <p class="text-xs text-surface-500 mt-1">${label}</p>
         </div>
@@ -516,7 +521,7 @@ async function renderDashboard() {
   `;
 
   const tabBar = `
-    <div class="flex items-center gap-1 mb-6 bg-surface-100 dark:bg-surface-800 p-1 rounded-xl w-fit">
+    <div class="flex items-center gap-1 mb-6 bg-surface-100 dark:bg-surface-800 p-1 rounded w-fit">
       <button onclick="switchDashboardTab('overview')" class="dash-tab ${currentDashboardTab === 'overview' ? 'active' : ''}">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" /></svg>
         Overview
@@ -571,17 +576,29 @@ async function renderDashboard() {
         createDoughnutChart('dash-health-chart',
           ['Active', 'At Risk', 'Stale'],
           [healthy, atRisk, stale],
-          { colors: ['#22c55e','#eab308','#ef4444'] }
+          {
+            colors: ['#22c55e','#eab308','#ef4444'],
+            onClickLabel: (label) => {
+              const map = { 'Active': 'healthy', 'At Risk': 'atrisk', 'Stale': 'stale' };
+              showDrilldown('contacts-health', map[label] || label);
+            },
+          }
         );
       }
       const stageLabels = STAGES.filter(s => (stageCount[s] || 0) > 0);
       const stageData = stageLabels.map(s => stageCount[s] || 0);
       if (stageLabels.length > 0) {
-        createBarChart('dash-stage-chart', stageLabels, stageData, { singleColor: '#5c7cfa' });
+        createBarChart('dash-stage-chart', stageLabels, stageData, {
+          singleColor: '#5c7cfa',
+          onClickLabel: (label) => showDrilldown('contacts-stage', encodeURIComponent(label)),
+        });
       }
       const dealStageKeys = Object.keys(dealsByStage).filter(k => dealsByStage[k] > 0);
       if (dealStageKeys.length > 0) {
-        createBarChart('dash-deal-stage-chart', dealStageKeys, dealStageKeys.map(k => dealsByStage[k]), { singleColor: '#20c997' });
+        createBarChart('dash-deal-stage-chart', dealStageKeys, dealStageKeys.map(k => dealsByStage[k]), {
+          singleColor: '#20c997',
+          onClickLabel: (label) => showDrilldown('deals-stage', encodeURIComponent(label)),
+        });
       }
     }, 50);
   }
@@ -590,11 +607,15 @@ async function renderDashboard() {
     setTimeout(() => {
       const stageKeys = Object.keys(dealsByStage).filter(k => dealsByStage[k] > 0);
       if (stageKeys.length > 0) {
-        createBarChart('deal-stage-bar-chart', stageKeys, stageKeys.map(k => dealsByStage[k]));
+        createBarChart('deal-stage-bar-chart', stageKeys, stageKeys.map(k => dealsByStage[k]), {
+          onClickLabel: (label) => showDrilldown('deals-stage', encodeURIComponent(label)),
+        });
       }
       const srcKeys = Object.keys(dealsBySource).filter(k => dealsBySource[k] > 0);
       if (srcKeys.length > 0) {
-        createDoughnutChart('deal-source-donut-chart', srcKeys, srcKeys.map(k => dealsBySource[k]));
+        createDoughnutChart('deal-source-donut-chart', srcKeys, srcKeys.map(k => dealsBySource[k]), {
+          onClickLabel: (label) => showDrilldown('deals-source', encodeURIComponent(label)),
+        });
       }
     }, 50);
   }
@@ -607,7 +628,7 @@ function switchDashboardTab(tab) {
 
 function renderWidgetEditOverlay(id, label) {
   return `
-    <div class="absolute inset-0 z-10 bg-brand-50/50 dark:bg-brand-900/20 border-2 border-dashed border-brand-300 dark:border-brand-700 rounded-2xl flex items-start justify-between p-3 pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity">
+    <div class="absolute inset-0 z-10 bg-brand-50/50 dark:bg-brand-900/20 border-2 border-dashed border-brand-300 dark:border-brand-700 rounded flex items-start justify-between p-3 pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity">
       <span class="text-xs font-semibold text-brand-700 dark:text-brand-300 bg-white dark:bg-surface-900 rounded-lg px-2 py-1 shadow-sm pointer-events-auto">${escapeHtml(label)}</span>
       <svg class="w-5 h-5 text-brand-400 cursor-grab pointer-events-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" /></svg>
     </div>
@@ -774,8 +795,7 @@ function renderFollowUpItem(contact, company, urgency) {
 
 // Synchronous version for use in widget rendering
 function renderRecentCallsListSync(calls, contacts) {
-  const contactMap = {};
-  contacts.forEach(c => contactMap[c.id] = c);
+  const contactMap = buildMap(contacts);
 
   return calls.map(call => {
     const contact = contactMap[call.contactId];
@@ -827,5 +847,288 @@ function renderDonut(healthy, atRisk, stale) {
         transform="rotate(-90 ${size/2} ${size/2})" />` : ''}
       <text x="50%" y="50%" text-anchor="middle" dy="0.35em" class="text-lg font-bold fill-current">${total}</text>
     </svg>
+  `;
+}
+
+// ── Dashboard Drilldown Modal ─────────────────────────────────────
+
+async function showDrilldown(type, encodedFilter) {
+  const filter = encodedFilter ? decodeURIComponent(encodedFilter) : '';
+
+  const [contacts, companies, calls, allDeals] = await Promise.all([
+    DB.getForUser(STORES.contacts, currentUser.id),
+    DB.getForUser(STORES.companies, currentUser.id),
+    DB.getForUser(STORES.calls, currentUser.id),
+    DB.getAll(STORES.deals).then(all => all.filter(d => d.userId === currentUser.id)).catch(() => []),
+  ]);
+
+  const activeContacts = getActiveContacts(contacts);
+  const companyMap = buildMap(companies);
+  const contactMap = buildMap(activeContacts);
+
+  let title, subtitle, bodyHtml;
+
+  // ── CONTACT DRILLDOWNS ───────────────────────────────────────────
+  if (type === 'contacts-all') {
+    const items = activeContacts;
+    title = 'All Contacts';
+    subtitle = `${items.length} active contact${items.length !== 1 ? 's' : ''}`;
+    bodyHtml = _drilldownContactList(items, companyMap);
+
+  } else if (type === 'contacts-stage') {
+    const items = activeContacts.filter(c => c.stage === filter);
+    title = `Stage: ${filter}`;
+    subtitle = `${items.length} contact${items.length !== 1 ? 's' : ''}`;
+    bodyHtml = _drilldownContactList(items, companyMap);
+
+  } else if (type === 'contacts-health') {
+    const now = new Date();
+    let items, label;
+    if (filter === 'healthy') {
+      items = activeContacts.filter(c => c.lastContactDate && Math.abs(daysUntil(c.lastContactDate)) <= 30);
+      label = 'Active — contacted within 30 days';
+    } else if (filter === 'atrisk') {
+      items = activeContacts.filter(c => {
+        const days = c.lastContactDate ? Math.abs(daysUntil(c.lastContactDate)) : 999;
+        return days > 30 && days <= 60;
+      });
+      label = 'At Risk — 31–60 days since contact';
+    } else {
+      items = activeContacts.filter(c => !c.lastContactDate || Math.abs(daysUntil(c.lastContactDate)) > 60);
+      label = 'Stale — over 60 days since contact';
+    }
+    title = 'Relationship Health';
+    subtitle = `${label} — ${items.length} contact${items.length !== 1 ? 's' : ''}`;
+    bodyHtml = _drilldownContactList(items, companyMap);
+
+  } else if (type === 'contacts-overdue') {
+    const items = activeContacts.filter(c => c.nextFollowUpDate && isOverdue(c.nextFollowUpDate));
+    title = 'Overdue Follow-ups';
+    subtitle = `${items.length} contact${items.length !== 1 ? 's' : ''} past their follow-up date`;
+    bodyHtml = _drilldownContactList(items, companyMap, true);
+
+  } else if (type === 'contacts-today') {
+    const items = activeContacts.filter(c => c.nextFollowUpDate && isDueToday(c.nextFollowUpDate));
+    title = 'Due Today';
+    subtitle = `${items.length} contact${items.length !== 1 ? 's' : ''} to follow up with today`;
+    bodyHtml = _drilldownContactList(items, companyMap, true);
+
+  // ── CALL DRILLDOWNS ───────────────────────────────────────────────
+  } else if (type === 'calls-all') {
+    const sorted = sortByDate([...calls], 'date');
+    title = 'All Calls';
+    subtitle = `${calls.length} call${calls.length !== 1 ? 's' : ''} logged`;
+    bodyHtml = _drilldownCallList(sorted, contactMap, companyMap);
+
+  } else if (type === 'calls-title') {
+    const filtered = calls.filter(call => {
+      const c = contactMap[call.contactId] || (call.participantIds || []).map(id => contactMap[id]).find(Boolean);
+      return c && normalizeTitle(c.title || '') === filter;
+    });
+    title = `Calls with ${filter}`;
+    subtitle = `${filtered.length} call${filtered.length !== 1 ? 's' : ''}`;
+    bodyHtml = _drilldownCallList(sortByDate([...filtered], 'date'), contactMap, companyMap);
+
+  } else if (type === 'calls-company') {
+    const filtered = calls.filter(call => {
+      const pIds = call.participantIds || (call.contactId ? [call.contactId] : []);
+      return pIds.some(id => {
+        const c = contactMap[id];
+        if (!c) return false;
+        const co = companyMap[c.companyId];
+        return (co ? co.name : c.companyName || '') === filter;
+      });
+    });
+    title = `Calls — ${filter}`;
+    subtitle = `${filtered.length} call${filtered.length !== 1 ? 's' : ''}`;
+    bodyHtml = _drilldownCallList(sortByDate([...filtered], 'date'), contactMap, companyMap);
+
+  // ── DEAL DRILLDOWNS ───────────────────────────────────────────────
+  } else if (type === 'deals-all') {
+    title = 'All Deals';
+    subtitle = `${allDeals.length} deal${allDeals.length !== 1 ? 's' : ''}`;
+    bodyHtml = _drilldownDealList(allDeals);
+
+  } else if (type === 'deals-active') {
+    const items = allDeals.filter(d => !['Closed - Won','Closed - Lost','Rejected'].includes(d.stage));
+    title = 'Active Deals';
+    subtitle = `${items.length} deal${items.length !== 1 ? 's' : ''} in progress`;
+    bodyHtml = _drilldownDealList(items);
+
+  } else if (type === 'deals-hot') {
+    const items = allDeals.filter(d => d.priority === 'high' || (d.score && d.score >= 7));
+    title = 'Hot / High Priority Deals';
+    subtitle = `${items.length} deal${items.length !== 1 ? 's' : ''}`;
+    bodyHtml = _drilldownDealList(items);
+
+  } else if (type === 'deals-stage') {
+    const items = allDeals.filter(d => d.stage === filter);
+    title = `Deals in Stage: ${filter}`;
+    subtitle = `${items.length} deal${items.length !== 1 ? 's' : ''}`;
+    bodyHtml = _drilldownDealList(items);
+
+  } else if (type === 'deals-source') {
+    const items = allDeals.filter(d => d.source === filter);
+    title = `Deals Sourced via: ${filter}`;
+    subtitle = `${items.length} deal${items.length !== 1 ? 's' : ''}`;
+    bodyHtml = _drilldownDealList(items);
+
+  // ── COMPANY DRILLDOWN ─────────────────────────────────────────────
+  } else if (type === 'companies-all') {
+    title = 'All Companies';
+    subtitle = `${companies.length} compan${companies.length !== 1 ? 'ies' : 'y'}`;
+    bodyHtml = _drilldownCompanyList(companies, activeContacts);
+
+  } else {
+    return;
+  }
+
+  openModal(`
+    <div>
+      <div class="px-6 pt-6 pb-4 border-b border-surface-200 dark:border-surface-800">
+        <h2 class="text-base font-semibold">${escapeHtml(title)}</h2>
+        <p class="text-sm text-surface-500 mt-0.5">${escapeHtml(subtitle)}</p>
+      </div>
+      <div class="overflow-y-auto" style="max-height:60vh">
+        ${bodyHtml}
+      </div>
+    </div>
+  `, { wide: true });
+}
+
+function _drilldownContactList(contacts, companyMap, showFollowUp = false) {
+  if (contacts.length === 0) return '<p class="p-6 text-sm text-surface-500 text-center">No contacts to show.</p>';
+  return `
+    <table class="data-table w-full">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Company</th>
+          <th>Stage</th>
+          <th>Last Contact</th>
+          ${showFollowUp ? '<th>Follow-up</th>' : ''}
+        </tr>
+      </thead>
+      <tbody>
+        ${contacts.map(c => {
+          const co = companyMap[c.companyId];
+          const overdueClass = c.nextFollowUpDate && isOverdue(c.nextFollowUpDate) ? 'text-red-600 dark:text-red-400 font-medium' : 'text-surface-500';
+          return `
+            <tr class="clickable" onclick="closeModal();viewContact('${c.id}')">
+              <td>
+                <div class="flex items-center gap-2">
+                  ${renderAvatar(c.fullName, c.photoUrl, 'sm')}
+                  <div>
+                    <div class="font-medium text-sm">${escapeHtml(c.fullName)}</div>
+                    ${c.title ? `<div class="text-xs text-surface-500">${escapeHtml(c.title)}</div>` : ''}
+                  </div>
+                </div>
+              </td>
+              <td class="text-sm text-surface-600 dark:text-surface-400">${co ? escapeHtml(co.name) : '—'}</td>
+              <td>${renderStageBadge(c.stage)}</td>
+              <td class="text-sm text-surface-500">${c.lastContactDate ? formatRelative(c.lastContactDate) : '—'}</td>
+              ${showFollowUp ? `<td class="text-sm ${overdueClass}">${c.nextFollowUpDate ? formatFutureRelative(c.nextFollowUpDate) : '—'}</td>` : ''}
+            </tr>
+          `;
+        }).join('')}
+      </tbody>
+    </table>
+  `;
+}
+
+function _drilldownCallList(calls, contactMap, companyMap) {
+  if (calls.length === 0) return '<p class="p-6 text-sm text-surface-500 text-center">No calls to show.</p>';
+  return `
+    <div class="divide-y divide-surface-100 dark:divide-surface-800">
+      ${calls.map(call => {
+        const pIds = call.participantIds || (call.contactId ? [call.contactId] : []);
+        const participants = pIds.map(id => contactMap[id]).filter(Boolean);
+        const primary = participants[0];
+        const co = primary ? companyMap[primary.companyId] : null;
+        return `
+          <div class="flex items-start gap-3 px-6 py-3 hover:bg-surface-50 dark:hover:bg-surface-800/50 cursor-pointer"
+            onclick="${primary ? `closeModal();viewContact('${primary.id}')` : ''}">
+            <div class="flex -space-x-1.5 flex-shrink-0 mt-0.5">
+              ${participants.slice(0, 3).map(p =>
+                `<div class="ring-2 ring-white dark:ring-surface-900 rounded-full">${renderAvatar(p.fullName, p.photoUrl, 'sm')}</div>`
+              ).join('') || '<div class="avatar avatar-sm">?</div>'}
+            </div>
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-2 flex-wrap">
+                <span class="text-sm font-medium">
+                  ${participants.length > 0 ? participants.map(p => escapeHtml(p.fullName)).join(', ') : 'Unknown'}
+                </span>
+                ${co ? `<span class="text-xs text-surface-400">${escapeHtml(co.name)}</span>` : ''}
+                ${call.outcome ? `<span class="badge badge-blue">${escapeHtml(call.outcome)}</span>` : ''}
+              </div>
+              ${call.notes ? `<p class="text-xs text-surface-500 mt-0.5 truncate">${escapeHtml(truncate(call.notes, 80))}</p>` : ''}
+            </div>
+            <span class="text-xs text-surface-400 whitespace-nowrap flex-shrink-0">${formatRelative(call.date)}</span>
+          </div>
+        `;
+      }).join('')}
+    </div>
+  `;
+}
+
+function _drilldownDealList(deals) {
+  if (deals.length === 0) return '<p class="p-6 text-sm text-surface-500 text-center">No deals to show.</p>';
+  const fmtVal = (n) => n >= 1e6 ? `$${(n/1e6).toFixed(1)}M` : n >= 1e3 ? `$${(n/1e3).toFixed(0)}K` : n ? `$${n}` : '—';
+  return `
+    <table class="data-table w-full">
+      <thead>
+        <tr>
+          <th>Company</th>
+          <th>Stage</th>
+          <th>Source</th>
+          <th class="text-right">Revenue</th>
+          <th class="text-right">Ask Price</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${deals.map(deal => `
+          <tr class="clickable" onclick="closeModal();viewDeal('${deal.id}')">
+            <td class="font-medium text-sm">${escapeHtml(deal.name)}</td>
+            <td class="text-sm text-surface-500">${deal.stage || '—'}</td>
+            <td class="text-sm text-surface-500">${deal.source || '—'}</td>
+            <td class="text-right text-sm">${deal.revenue ? fmtVal(deal.revenue) : '—'}</td>
+            <td class="text-right text-sm font-medium">${deal.askingPrice ? fmtVal(deal.askingPrice) : '—'}</td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
+  `;
+}
+
+function _drilldownCompanyList(companies, contacts) {
+  if (companies.length === 0) return '<p class="p-6 text-sm text-surface-500 text-center">No companies to show.</p>';
+  const contactsPerCompany = {};
+  contacts.forEach(c => { contactsPerCompany[c.companyId] = (contactsPerCompany[c.companyId] || 0) + 1; });
+  return `
+    <table class="data-table w-full">
+      <thead>
+        <tr>
+          <th>Company</th>
+          <th>Type</th>
+          <th>Industry</th>
+          <th class="text-right">Contacts</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${companies.map(co => `
+          <tr class="clickable" onclick="closeModal();navigate('companies')">
+            <td>
+              <div class="flex items-center gap-2">
+                ${renderCompanyLogo(co, 'sm')}
+                <span class="font-medium text-sm">${escapeHtml(co.name)}</span>
+              </div>
+            </td>
+            <td class="text-sm text-surface-500">${co.companyType || '—'}</td>
+            <td class="text-sm text-surface-500">${co.industry || '—'}</td>
+            <td class="text-right text-sm font-medium">${contactsPerCompany[co.id] || 0}</td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
   `;
 }

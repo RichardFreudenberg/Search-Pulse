@@ -20,8 +20,7 @@ function setupGlobalSearch() {
       DB.getForUser(STORES.reminders, currentUser.id),
     ]);
 
-    const companyMap = {};
-    companies.forEach(c => companyMap[c.id] = c);
+    const companyMap = buildMap(companies);
 
     const matchedContacts = contacts.filter(c => !c.archived && (
       c.fullName.toLowerCase().includes(q) ||
@@ -159,7 +158,7 @@ async function getSmartSuggestions() {
   if (!currentUser) return [];
 
   const contacts = await DB.getForUser(STORES.contacts, currentUser.id);
-  const activeContacts = contacts.filter(c => !c.archived);
+  const activeContacts = getActiveContacts(contacts);
   const suggestions = [];
 
   // Contacts due for follow-up

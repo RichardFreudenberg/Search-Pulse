@@ -1,319 +1,913 @@
 /* ============================================
-   Pulse — Shareable Dashboard
+   Nexus CRM — Shared Dashboard
    ============================================ */
 
 const SHARE_SECTIONS = [
-  { id: 'crm_stats', label: 'CRM Overview (contacts, calls, follow-ups)' },
-  { id: 'relationship_health', label: 'Relationship Health Breakdown' },
-  { id: 'stage_distribution', label: 'Contact Stage Distribution' },
-  { id: 'deal_pipeline', label: 'Deal Pipeline Summary' },
-  { id: 'deal_sourcing', label: 'Deal Sourcing Breakdown' },
-  { id: 'deal_financials', label: 'Deal Financials (revenue, EBITDA ranges)' },
-  { id: 'recent_activity', label: 'Recent Activity Feed' },
-  { id: 'top_contacts', label: 'Top Contacts List' },
+  { id: 'crm_stats',           label: 'CRM Overview',              description: 'Contacts, calls, and follow-up counts' },
+  { id: 'relationship_health', label: 'Relationship Health',        description: 'Active / At Risk / Stale breakdown' },
+  { id: 'stage_distribution',  label: 'Contact Stage Distribution', description: 'How contacts are spread across pipeline stages' },
+  { id: 'deal_pipeline',       label: 'Deal Pipeline Summary',      description: 'Total deals, active count, pipeline value' },
+  { id: 'deal_sourcing',       label: 'Deal Sourcing Breakdown',    description: 'Where deals are coming from' },
+  { id: 'deal_details',        label: 'Deal Cards',                 description: 'Full details for each selected deal (financials, timeline, notes)' },
+  { id: 'deal_documents',      label: 'Deal Documents',             description: 'Document list for each selected deal' },
 ];
 
-function openShareDashboardModal() {
-  const checkboxes = SHARE_SECTIONS.map(s => `
-    <label class="flex items-center gap-3 p-3 rounded-xl border border-surface-200 dark:border-surface-700 hover:bg-surface-50 dark:hover:bg-surface-800 cursor-pointer transition-colors">
-      <input type="checkbox" class="share-section-cb w-4 h-4 rounded text-brand-600" value="${s.id}" checked />
-      <span class="text-sm">${s.label}</span>
-    </label>
-  `).join('');
+const _SHARE_LS_PREFIX = 'nexus_share_';
+let _pendingSnapshot = null;
 
-  openModal('Share Dashboard', `
-    <div class="p-6 space-y-4">
-      <p class="text-sm text-surface-600 dark:text-surface-400">Select what to include in the shared view. Recipients open the link — no login required.</p>
-      <div class="space-y-2">${checkboxes}</div>
-      <div class="pt-2 border-t border-surface-200 dark:border-surface-800">
-        <label class="block text-sm font-medium mb-1">Recipient email (for mailto link)</label>
-        <input type="email" id="share-recipient-email" class="input-field" placeholder="colleague@example.com" />
-      </div>
-      <div class="flex justify-end gap-3 pt-2">
-        <button onclick="closeModal()" class="btn-secondary">Cancel</button>
-        <button onclick="generateShareLink()" class="btn-primary">Generate Share Link</button>
-      </div>
-    </div>
-  `);
+// ── Config Helpers ─────────────────────────────────────────────────
+
+async function _loadDashConfig() {
+  const saved = await DB.get(STORES.shareDashboards, `dash_${currentUser.id}`);
+  return saved || {
+    id: `dash_${currentUser.id}`,
+    userId: currentUser.id,
+    sections: SHARE_SECTIONS.map(s => s.id),
+    includedDealIds: [],
+    passcode: '',
+    invites: [],
+    token: null,
+    lastGeneratedAt: null,
+  };
 }
 
-async function generateShareLink() {
-  const selected = Array.from(document.querySelectorAll('.share-section-cb:checked')).map(cb => cb.value);
-  if (selected.length === 0) {
-    showToast('Select at least one section to share', 'warning');
-    return;
-  }
+async function _saveDashConfig(config) {
+  config.id = `dash_${currentUser.id}`;
+  config.userId = currentUser.id;
+  await DB.put(STORES.shareDashboards, config);
+}
 
-  const recipientEmail = document.getElementById('share-recipient-email')?.value || '';
+// ── Management Page ───────────────────────────────────────────────
 
-  // Gather data for selected sections
-  const [contacts, companies, calls, deals] = await Promise.all([
+async function renderSharedDashboardPage() {
+  const pageContent = document.getElementById('page-content');
+  pageContent.innerHTML = `<div class="p-4 lg:p-8 max-w-5xl mx-auto">${renderLoadingSkeleton(4)}</div>`;
+
+  const [config, allDeals] = await Promise.all([
+    _loadDashConfig(),
+    DB.getAll(STORES.deals).then(all => all.filter(d => d.userId === currentUser.id)).catch(() => []),
+  ]);
+
+  const deals = allDeals.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+
+  pageContent.innerHTML = `
+    <div class="p-4 lg:p-8 max-w-5xl mx-auto animate-fade-in">
+      ${renderPageHeader('Shared Dashboard', 'Build a read-only snapshot to share with investors, advisors, or co-searchers')}
+
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+        <!-- Left column: Settings -->
+        <div class="space-y-5">
+
+          <!-- Sections -->
+          <div class="card space-y-4">
+            <div>
+              <h3 class="font-semibold text-sm">Sections to include</h3>
+              <p class="text-xs text-surface-500 mt-0.5">Choose what your viewers can see</p>
+            </div>
+            <div class="space-y-3">
+              ${SHARE_SECTIONS.map(s => `
+                <label class="flex items-start gap-3 cursor-pointer group">
+                  <input type="checkbox" class="share-section-cb mt-0.5 w-4 h-4 text-brand-600"
+                    value="${s.id}" ${config.sections.includes(s.id) ? 'checked' : ''} />
+                  <div>
+                    <p class="text-sm font-medium group-hover:text-brand-600 transition-colors">${s.label}</p>
+                    <p class="text-xs text-surface-400">${s.description}</p>
+                  </div>
+                </label>
+              `).join('')}
+            </div>
+          </div>
+
+          <!-- Deals -->
+          ${deals.length > 0 ? `
+            <div class="card space-y-3">
+              <div>
+                <h3 class="font-semibold text-sm">Deals to include</h3>
+                <p class="text-xs text-surface-500 mt-0.5">Uncheck any deal to exclude it from the share</p>
+              </div>
+              <div class="space-y-2 max-h-48 overflow-y-auto">
+                ${deals.map(d => `
+                  <label class="flex items-center gap-2.5 cursor-pointer group">
+                    <input type="checkbox" class="share-deal-cb w-4 h-4 text-brand-600" value="${d.id}"
+                      ${(!config.includedDealIds?.length || config.includedDealIds.includes(d.id)) ? 'checked' : ''} />
+                    <div class="min-w-0">
+                      <p class="text-sm font-medium truncate group-hover:text-brand-600 transition-colors">${escapeHtml(d.name)}</p>
+                      <p class="text-xs text-surface-400">${escapeHtml(d.stage || '')}</p>
+                    </div>
+                  </label>
+                `).join('')}
+              </div>
+            </div>
+          ` : ''}
+
+          <!-- Passcode -->
+          <div class="card space-y-3">
+            <div>
+              <h3 class="font-semibold text-sm">Passcode protection</h3>
+              <p class="text-xs text-surface-500 mt-0.5">Optional — leave blank for open access</p>
+            </div>
+            <input type="text" id="share-passcode" class="input-field text-sm font-mono"
+              placeholder="e.g. SearchFund2025"
+              value="${escapeHtml(config.passcode || '')}" maxlength="40" />
+          </div>
+
+          <!-- Action buttons -->
+          <div class="flex flex-col gap-2">
+            <button onclick="saveDashboardSettings()" class="btn-primary w-full">
+              Save Settings
+            </button>
+            <button onclick="generateAndCopyLink()" class="btn-secondary w-full flex items-center justify-center gap-2">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/>
+              </svg>
+              Generate &amp; Copy Link
+            </button>
+            <button onclick="previewSharedDashboard()" class="btn-ghost text-brand-600 w-full text-sm">
+              Preview as viewer →
+            </button>
+          </div>
+        </div>
+
+        <!-- Right column: Status + Invites -->
+        <div class="lg:col-span-2 space-y-5">
+
+          <!-- Link status -->
+          ${config.token && config.lastGeneratedAt ? `
+            <div class="card bg-green-50 dark:bg-green-900/10 border-green-200 dark:border-green-800">
+              <div class="flex items-start gap-3">
+                <svg class="w-5 h-5 text-green-600 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                </svg>
+                <div class="flex-1 min-w-0">
+                  <p class="text-sm font-semibold text-green-800 dark:text-green-300">Dashboard link is active</p>
+                  <p class="text-xs text-green-700 dark:text-green-400 mt-0.5">Last generated ${formatDate(config.lastGeneratedAt)}. Click "Generate &amp; Copy Link" anytime to send a fresh snapshot.</p>
+                </div>
+                <button onclick="generateAndCopyLink()" class="btn-secondary btn-sm shrink-0">Refresh</button>
+              </div>
+            </div>
+          ` : `
+            <div class="card text-center py-5">
+              <svg class="w-10 h-10 mx-auto mb-3 text-surface-200 dark:text-surface-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/>
+              </svg>
+              <p class="text-sm font-medium text-surface-500">No link generated yet</p>
+              <p class="text-xs text-surface-400 mt-1">Configure your settings on the left, then click "Generate &amp; Copy Link"</p>
+            </div>
+          `}
+
+          <!-- Invite tracker -->
+          <div class="card">
+            <div class="flex items-center justify-between mb-4">
+              <div>
+                <h3 class="font-semibold text-sm">Who you've shared with</h3>
+                <p class="text-xs text-surface-500 mt-0.5">${config.invites?.length || 0} ${(config.invites?.length || 0) === 1 ? 'person' : 'people'} tracked</p>
+              </div>
+              <button onclick="openAddInviteModal()" class="btn-primary btn-sm flex items-center gap-1.5">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+                </svg>
+                Add
+              </button>
+            </div>
+
+            ${!config.invites?.length ? `
+              <div class="text-center py-8 text-surface-400">
+                <svg class="w-8 h-8 mx-auto mb-2 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z"/>
+                </svg>
+                <p class="text-xs text-surface-400">Track who you've shared the link with (optional)</p>
+              </div>
+            ` : `
+              <div class="divide-y divide-surface-100 dark:divide-surface-800">
+                ${config.invites.map((inv, idx) => `
+                  <div class="py-3 flex items-center gap-3">
+                    <div class="w-8 h-8 rounded-full bg-brand-100 dark:bg-brand-900/30 flex items-center justify-center text-brand-700 dark:text-brand-300 font-semibold text-xs shrink-0">
+                      ${escapeHtml((inv.name || inv.email || '?').charAt(0).toUpperCase())}
+                    </div>
+                    <div class="flex-1 min-w-0">
+                      <p class="text-sm font-medium truncate">${escapeHtml(inv.name || '—')}</p>
+                      ${inv.email ? `<p class="text-xs text-surface-400 truncate">${escapeHtml(inv.email)}</p>` : ''}
+                      <p class="text-xs text-surface-300 dark:text-surface-600">Tracked ${formatDate(inv.addedAt)}</p>
+                    </div>
+                    <button data-idx="${idx}" onclick="removeInvite(parseInt(this.dataset.idx))"
+                      class="p-1.5 text-surface-300 hover:text-red-500 transition-colors shrink-0" title="Remove">
+                      <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                      </svg>
+                    </button>
+                  </div>
+                `).join('')}
+              </div>
+            `}
+          </div>
+
+          <!-- How it works -->
+          <div class="card border-brand-100 dark:border-brand-900/30 bg-brand-50/40 dark:bg-brand-900/10">
+            <div class="flex items-start gap-3">
+              <svg class="w-5 h-5 text-brand-500 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+              </svg>
+              <div>
+                <p class="text-sm font-semibold text-surface-700 dark:text-surface-300 mb-2">How it works</p>
+                <ul class="space-y-1.5 text-xs text-surface-500 dark:text-surface-400">
+                  <li>• <strong>Generate &amp; Copy Link</strong> saves your settings and copies a shareable URL to your clipboard</li>
+                  <li>• Recipients open the link with <strong>no login required</strong> — they see only what you chose to include</li>
+                  <li>• Each link is a <strong>snapshot in time</strong> — generate a fresh link anytime to send updated data</li>
+                  <li>• Add a <strong>passcode</strong> to protect sensitive information (e.g., deal financials)</li>
+                  <li>• Use <strong>"Add"</strong> to track who you've shared with — links work without doing this</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+// ── Save Settings ─────────────────────────────────────────────────
+
+async function saveDashboardSettings() {
+  const config = await _loadDashConfig();
+  config.sections = Array.from(document.querySelectorAll('.share-section-cb:checked')).map(cb => cb.value);
+  const checkedDeals = Array.from(document.querySelectorAll('.share-deal-cb:checked')).map(cb => cb.value);
+  const allDealCbs  = Array.from(document.querySelectorAll('.share-deal-cb')).map(cb => cb.value);
+  // Empty array = share all deals; otherwise store the specific subset
+  config.includedDealIds = (checkedDeals.length === allDealCbs.length) ? [] : checkedDeals;
+  config.passcode = (document.getElementById('share-passcode')?.value || '').trim();
+  await _saveDashConfig(config);
+  showToast('Settings saved', 'success');
+}
+
+// ── Invite Tracker ────────────────────────────────────────────────
+
+function openAddInviteModal() {
+  openModal(`
+    <div class="p-6">
+      <h2 class="text-lg font-semibold mb-1">Track an invite</h2>
+      <p class="text-sm text-surface-500 mb-5">Keep a record of who you've shared the dashboard with.</p>
+      <div class="space-y-4">
+        <div>
+          <label class="block text-sm font-medium mb-1">Name</label>
+          <input type="text" id="inv-name" class="input-field" placeholder="e.g. Sarah Chen" />
+        </div>
+        <div>
+          <label class="block text-sm font-medium mb-1">Email <span class="text-surface-400 font-normal text-xs">(optional)</span></label>
+          <input type="email" id="inv-email" class="input-field" placeholder="sarah@example.com" />
+        </div>
+        <div class="flex justify-end gap-3 pt-3 border-t border-surface-100 dark:border-surface-800">
+          <button onclick="closeModal()" class="btn-secondary">Cancel</button>
+          <button onclick="addInvite()" class="btn-primary">Save</button>
+        </div>
+      </div>
+    </div>
+  `, { small: true });
+}
+
+async function addInvite() {
+  const name  = document.getElementById('inv-name')?.value.trim()  || '';
+  const email = document.getElementById('inv-email')?.value.trim() || '';
+  if (!name && !email) { showToast('Enter a name or email', 'error'); return; }
+  const config = await _loadDashConfig();
+  if (!Array.isArray(config.invites)) config.invites = [];
+  config.invites.push({ name, email, addedAt: new Date().toISOString() });
+  await _saveDashConfig(config);
+  closeModal();
+  showToast('Invite tracked', 'success');
+  renderSharedDashboardPage();
+}
+
+async function removeInvite(idx) {
+  const config = await _loadDashConfig();
+  if (!Array.isArray(config.invites) || idx < 0 || idx >= config.invites.length) return;
+  config.invites.splice(idx, 1);
+  await _saveDashConfig(config);
+  showToast('Removed', 'success');
+  renderSharedDashboardPage();
+}
+
+// ── Snapshot Builder ──────────────────────────────────────────────
+
+async function _buildSnapshot(config) {
+  const [contacts, companies, calls, allDeals] = await Promise.all([
     DB.getForUser(STORES.contacts, currentUser.id),
     DB.getForUser(STORES.companies, currentUser.id),
     DB.getForUser(STORES.calls, currentUser.id),
-    DB.getAll(STORES.deals).then(all => all.filter(d => d.userId === currentUser.id)),
+    DB.getAll(STORES.deals).then(all => all.filter(d => d.userId === currentUser.id)).catch(() => []),
   ]);
 
-  const active = contacts.filter(c => !c.archived);
-  const overdue = active.filter(c => c.nextFollowUpDate && new Date(c.nextFollowUpDate) < new Date());
+  const active = getActiveContacts(contacts);
+  const now    = new Date();
+  const overdue = active.filter(c => c.nextFollowUpDate && new Date(c.nextFollowUpDate) < now);
+  const healthy = active.filter(c => c.lastContactDate && (now - new Date(c.lastContactDate)) < 30 * 86400000).length;
+  const stale   = active.filter(c => !c.lastContactDate || (now - new Date(c.lastContactDate)) > 90 * 86400000).length;
+  const atRisk  = active.length - healthy - stale;
+
   const stageCount = {};
-  active.forEach(c => { stageCount[c.stage] = (stageCount[c.stage] || 0) + 1; });
+  active.forEach(c => { stageCount[c.stage || 'Unknown'] = (stageCount[c.stage || 'Unknown'] || 0) + 1; });
+
+  const companyMap = buildMap(companies);
+
+  // Which deals to include
+  const selectedDeals = config.includedDealIds?.length
+    ? allDeals.filter(d => config.includedDealIds.includes(d.id))
+    : allDeals;
 
   const sourceCount = {};
-  deals.forEach(d => { if (d.source) sourceCount[d.source] = (sourceCount[d.source] || 0) + 1; });
+  selectedDeals.forEach(d => { if (d.source) sourceCount[d.source] = (sourceCount[d.source] || 0) + 1; });
 
-  const snapshot = {
+  // Build full deal payloads
+  const dealList = [];
+  for (const d of selectedDeals) {
+    const [docs, dealNotes, history, tasks] = await Promise.all([
+      DB.getAllByIndex(STORES.dealDocuments, 'dealId', d.id).catch(() => []),
+      DB.getAllByIndex(STORES.dealNotes,    'dealId', d.id).catch(() => []),
+      DB.getAllByIndex(STORES.dealHistory,  'dealId', d.id).catch(() => []),
+      DB.getAllByIndex(STORES.dealTasks,    'dealId', d.id).catch(() => []),
+    ]);
+
+    dealList.push({
+      id:          d.id,
+      name:        d.name,
+      stage:       d.stage,
+      status:      d.status,
+      priority:    d.priority,
+      source:      d.source,
+      sector:      d.sector,
+      location:    d.location,
+      revenue:     d.revenue,
+      ebitda:      d.ebitda,
+      askingPrice: d.askingPrice,
+      multiple:    (d.askingPrice && d.ebitda) ? (d.askingPrice / d.ebitda).toFixed(1) : null,
+      employees:   d.employees,
+      description: d.description,
+      highlights:  d.highlights,
+      concerns:    d.concerns,
+      createdAt:   d.createdAt,
+      documents: docs.map(doc => ({
+        name:       doc.name,
+        category:   doc.category,
+        type:       doc.type,
+        size:       doc.size,
+        uploadedAt: doc.uploadedAt || doc.createdAt,
+      })),
+      notes: dealNotes
+        .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))
+        .slice(0, 5)
+        .map(n => ({ content: n.content, createdAt: n.createdAt })),
+      history: history
+        .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp))
+        .map(h => ({ action: h.action, description: h.description, timestamp: h.timestamp })),
+      tasks: tasks
+        .filter(t => t.status !== 'done')
+        .slice(0, 8)
+        .map(t => ({ title: t.title, status: t.status, dueDate: t.dueDate, priority: t.priority })),
+    });
+  }
+
+  return {
     generatedAt: new Date().toISOString(),
     generatedBy: currentUser.name,
-    sections: selected,
+    sections:    config.sections,
+    passcode:    config.passcode || '',
     data: {
       crm: {
-        totalContacts: active.length,
-        totalCompanies: companies.length,
-        totalCalls: calls.length,
+        totalContacts:    active.length,
+        totalCompanies:   companies.length,
+        totalCalls:       calls.length,
         overdueFollowUps: overdue.length,
         stageDistribution: stageCount,
-        recentContacts: active.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
-          .slice(0, 8).map(c => ({ name: c.name, title: c.title, company: c.companyName, stage: c.stage })),
+        relationshipHealth: { healthy, atRisk, stale },
+        recentContacts: active
+          .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))
+          .slice(0, 10)
+          .map(c => ({
+            name:    c.fullName,
+            title:   c.title   || '',
+            company: companyMap[c.companyId]?.name || '',
+            stage:   c.stage   || '',
+          })),
       },
       deals: {
-        total: deals.length,
-        active: deals.filter(d => !['Closed - Won','Closed - Lost','Rejected'].includes(d.stage)).length,
-        pipelineValue: deals.filter(d => !['Closed - Lost','Rejected'].includes(d.stage))
-          .reduce((s, d) => s + (d.askingPrice || 0), 0),
-        byStage: deals.reduce((acc, d) => { acc[d.stage] = (acc[d.stage] || 0) + 1; return acc; }, {}),
+        total:         selectedDeals.length,
+        active:        selectedDeals.filter(d => !['Closed - Won', 'Closed - Lost', 'Rejected'].includes(d.stage)).length,
+        pipelineValue: selectedDeals.filter(d => !['Closed - Lost', 'Rejected'].includes(d.stage)).reduce((s, d) => s + (d.askingPrice || 0), 0),
+        byStage:  selectedDeals.reduce((acc, d) => { acc[d.stage || 'Unknown'] = (acc[d.stage || 'Unknown'] || 0) + 1; return acc; }, {}),
         bySource: sourceCount,
-        list: deals.map(d => ({
-          name: d.name, stage: d.stage, source: d.source, sector: d.sector,
-          revenue: d.revenue, ebitda: d.ebitda, askingPrice: d.askingPrice, priority: d.priority,
-        })),
+        list:     dealList,
       },
     },
   };
+}
 
+function _snapshotToUrl(token, snapshot) {
   const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(snapshot))));
-  const shareUrl = `${location.origin}${location.pathname}#shared/${encoded}`;
+  return `${location.origin}${location.pathname}#shared/${token}/${encoded}`;
+}
 
-  const subject = encodeURIComponent(`${currentUser.name} shared a Pulse Dashboard`);
-  const body = encodeURIComponent(`Hi,\n\n${currentUser.name} has shared a CRM & Deal Pipeline dashboard with you.\n\nOpen the link below to view it (no login required):\n${shareUrl}\n\n— Sent via Pulse`);
-  const mailtoLink = recipientEmail
-    ? `mailto:${recipientEmail}?subject=${subject}&body=${body}`
-    : `mailto:?subject=${subject}&body=${body}`;
+// ── Generate / Preview ────────────────────────────────────────────
 
-  openModal('Share Link Ready', `
-    <div class="p-6 space-y-4">
-      <div class="flex items-center gap-2 p-3 bg-green-50 dark:bg-green-900/20 rounded-xl border border-green-200 dark:border-green-800">
-        <svg class="w-5 h-5 text-green-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
-        <span class="text-sm text-green-700 dark:text-green-300 font-medium">Dashboard snapshot created — ${selected.length} sections included</span>
-      </div>
-      <div>
-        <label class="block text-sm font-medium mb-1">Share link</label>
-        <div class="flex gap-2">
-          <input type="text" id="share-url-display" class="input-field text-xs font-mono flex-1" readonly value="${shareUrl.substring(0, 80)}..." />
-          <button onclick="copyShareUrl(${JSON.stringify(shareUrl)})" class="btn-secondary text-sm px-3">Copy</button>
+async function generateAndCopyLink() {
+  await saveDashboardSettings();
+  const config = await _loadDashConfig();
+  if (!config.token) config.token = generateId();
+  config.lastGeneratedAt = new Date().toISOString();
+
+  const snapshot = await _buildSnapshot(config);
+
+  // Persist in localStorage so same-device viewers get full data fast
+  try {
+    localStorage.setItem(_SHARE_LS_PREFIX + config.token, JSON.stringify(snapshot));
+  } catch (e) { /* quota exceeded — URL fallback still works */ }
+
+  const url = _snapshotToUrl(config.token, snapshot);
+  await _saveDashConfig(config);
+
+  try {
+    await navigator.clipboard.writeText(url);
+    showToast('Link copied to clipboard!', 'success');
+  } catch (e) {
+    // Clipboard blocked — show fallback modal
+    openModal(`
+      <div class="p-6">
+        <h2 class="text-lg font-semibold mb-2">Your Dashboard Link</h2>
+        <p class="text-sm text-surface-500 mb-3">Copy and share this link:</p>
+        <textarea class="input-field text-xs w-full h-24 font-mono resize-none" readonly
+          onclick="this.select()">${escapeHtml(url)}</textarea>
+        <div class="flex justify-end mt-4">
+          <button onclick="closeModal()" class="btn-secondary">Close</button>
         </div>
       </div>
-      <div class="flex flex-col sm:flex-row gap-3 pt-2">
-        <a href="${mailtoLink}" class="btn-primary text-center text-sm flex-1">
-          Open Email Client
-        </a>
-        <button onclick="copyShareUrl(${JSON.stringify(shareUrl)}); closeModal();" class="btn-secondary text-sm flex-1">Copy & Close</button>
-      </div>
-      <p class="text-xs text-surface-400 text-center">Recipients can view this snapshot without logging in. Data is embedded in the URL.</p>
-    </div>
-  `);
+    `);
+  }
+
+  renderSharedDashboardPage();
 }
 
-function copyShareUrl(url) {
-  navigator.clipboard.writeText(url).then(() => showToast('Share link copied!', 'success'));
+async function previewSharedDashboard() {
+  await saveDashboardSettings();
+  const config = await _loadDashConfig();
+  const snapshot = await _buildSnapshot(config);
+  // Preview ignores passcode so you can see the full view
+  const previewSnap = { ...snapshot, passcode: '' };
+  const previewToken = 'preview_' + (config.token || generateId());
+  try {
+    localStorage.setItem(_SHARE_LS_PREFIX + previewToken, JSON.stringify(previewSnap));
+  } catch (e) { /* quota — URL fallback */ }
+  const url = _snapshotToUrl(previewToken, previewSnap);
+  window.open(url, '_blank');
 }
 
-// Called on app load — check if URL contains a shared dashboard hash
+// ── Route Check (called on app load) ─────────────────────────────
+
 function checkSharedDashboardRoute() {
   const hash = location.hash;
   if (!hash.startsWith('#shared/')) return false;
 
-  const encoded = hash.slice('#shared/'.length);
+  const rest     = hash.slice('#shared/'.length);
+  const slashIdx = rest.indexOf('/');
+  const token    = slashIdx === -1 ? rest : rest.slice(0, slashIdx);
+  const encoded  = slashIdx === -1 ? ''   : rest.slice(slashIdx + 1);
+
+  let snapshot = null;
+
+  // Try localStorage first (same device, no URL-length limits)
   try {
-    const snapshot = JSON.parse(decodeURIComponent(escape(atob(encoded))));
-    renderSharedDashboardView(snapshot);
-    return true;
-  } catch (e) {
-    console.error('Invalid share link', e);
-    return false;
+    const stored = localStorage.getItem(_SHARE_LS_PREFIX + token);
+    if (stored) snapshot = JSON.parse(stored);
+  } catch (e) { /* ignore */ }
+
+  // Fall back to URL-embedded base64
+  if (!snapshot && encoded) {
+    try {
+      snapshot = JSON.parse(decodeURIComponent(escape(atob(encoded))));
+    } catch (e) { /* ignore */ }
   }
+
+  if (!snapshot) {
+    _renderNoData();
+    return true;
+  }
+
+  renderSharedDashboardView(snapshot);
+  return true;
 }
 
+// ── Shared View Entry Point ───────────────────────────────────────
+
 function renderSharedDashboardView(snapshot) {
-  // Hide auth screen, hide app shell, show shared view
   document.getElementById('auth-screen').classList.add('hidden');
   document.getElementById('app-shell').classList.add('hidden');
 
-  let sharedView = document.getElementById('shared-view');
-  if (!sharedView) {
-    sharedView = document.createElement('div');
-    sharedView.id = 'shared-view';
-    sharedView.className = 'min-h-screen bg-surface-50 dark:bg-surface-950';
-    document.body.appendChild(sharedView);
+  let view = document.getElementById('shared-view');
+  if (!view) {
+    view = document.createElement('div');
+    view.id = 'shared-view';
+    view.className = 'min-h-screen bg-surface-50 dark:bg-surface-950';
+    document.body.appendChild(view);
   }
-  sharedView.classList.remove('hidden');
+  view.classList.remove('hidden');
 
-  const d = snapshot.data;
-  const sections = snapshot.sections;
-  const fmt = (n) => n >= 1e6 ? `$${(n/1e6).toFixed(1)}M` : n >= 1e3 ? `$${(n/1e3).toFixed(0)}K` : `$${n}`;
+  if (snapshot.passcode) {
+    _pendingSnapshot = snapshot;
+    _renderPasscodeGate(view);
+    return;
+  }
 
-  let html = `
-    <div class="max-w-5xl mx-auto p-6 space-y-6 animate-fade-in">
-      <div class="flex items-center justify-between flex-wrap gap-3">
-        <div>
-          <div class="flex items-center gap-3 mb-1">
-            <div class="w-9 h-9 rounded-xl bg-brand-600 text-white flex items-center justify-center">
-              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3.75 3v11.25A2.25 2.25 0 006 16.5h2.25M3.75 3h-1.5m1.5 0h16.5m0 0h1.5m-1.5 0v11.25A2.25 2.25 0 0118 16.5h-2.25m-7.5 0h7.5"/></svg>
-            </div>
-            <h1 class="text-xl font-bold">Pulse — Shared Dashboard</h1>
-          </div>
-          <p class="text-sm text-surface-500">Shared by <strong>${escapeHtml(snapshot.generatedBy)}</strong> · Generated ${new Date(snapshot.generatedAt).toLocaleDateString()}</p>
-        </div>
-        <span class="text-xs bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400 px-3 py-1 rounded-full font-medium">Read-only snapshot</span>
-      </div>
+  _renderDashboard(snapshot, view);
+}
+
+function _renderNoData() {
+  document.getElementById('auth-screen').classList.add('hidden');
+  document.getElementById('app-shell').classList.add('hidden');
+  let view = document.getElementById('shared-view');
+  if (!view) {
+    view = document.createElement('div');
+    view.id = 'shared-view';
+    view.className = 'min-h-screen bg-surface-50 dark:bg-surface-950';
+    document.body.appendChild(view);
+  }
+  view.classList.remove('hidden');
+  view.innerHTML = `
+    <div class="max-w-md mx-auto px-4 py-24 text-center">
+      <svg class="w-14 h-14 mx-auto mb-4 text-surface-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/>
+      </svg>
+      <h2 class="text-xl font-bold mb-2">Link unavailable</h2>
+      <p class="text-sm text-surface-500">This shared dashboard link has expired or is invalid.<br>Ask the sender to generate and share a new link.</p>
+    </div>
   `;
+}
 
-  if (sections.includes('crm_stats')) {
-    html += `
-      <div class="card">
-        <h2 class="text-base font-semibold mb-4">CRM Overview</h2>
-        <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
-          ${[
-            ['Contacts', d.crm.totalContacts],
-            ['Companies', d.crm.totalCompanies],
-            ['Calls Logged', d.crm.totalCalls],
-            ['Overdue Follow-ups', d.crm.overdueFollowUps],
-          ].map(([label, val]) => `
-            <div class="text-center p-4 bg-surface-50 dark:bg-surface-800 rounded-xl">
-              <p class="text-2xl font-bold text-brand-600">${val}</p>
-              <p class="text-xs text-surface-500 mt-1">${label}</p>
-            </div>
-          `).join('')}
+function _renderPasscodeGate(view) {
+  view.innerHTML = `
+    <div class="min-h-screen flex items-center justify-center px-4">
+      <div class="bg-white dark:bg-surface-900 rounded-2xl shadow-2xl p-8 max-w-sm w-full text-center space-y-5">
+        <div class="w-14 h-14 bg-brand-100 dark:bg-brand-900/30 rounded-full flex items-center justify-center mx-auto">
+          <svg class="w-7 h-7 text-brand-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
+          </svg>
         </div>
-      </div>
-    `;
-  }
-
-  if (sections.includes('stage_distribution') && d.crm.stageDistribution) {
-    const stages = Object.entries(d.crm.stageDistribution).filter(([,v]) => v > 0);
-    html += `
-      <div class="card">
-        <h2 class="text-base font-semibold mb-4">Contact Stage Distribution</h2>
-        <div class="space-y-2">
-          ${stages.map(([stage, count]) => {
-            const max = Math.max(...stages.map(([,v]) => v));
-            const pct = max ? Math.round(count / max * 100) : 0;
-            return `
-              <div class="flex items-center gap-3">
-                <span class="text-xs text-surface-500 w-32 truncate">${stage}</span>
-                <div class="flex-1 bg-surface-200 dark:bg-surface-700 rounded-full h-2">
-                  <div class="bg-brand-500 h-2 rounded-full" style="width:${pct}%"></div>
-                </div>
-                <span class="text-xs font-medium w-6 text-right">${count}</span>
-              </div>
-            `;
-          }).join('')}
+        <div>
+          <h2 class="text-xl font-bold mb-1">Protected Dashboard</h2>
+          <p class="text-sm text-surface-500">Enter the passcode to view this shared dashboard</p>
         </div>
-      </div>
-    `;
-  }
-
-  if (sections.includes('deal_pipeline') && d.deals) {
-    html += `
-      <div class="card">
-        <h2 class="text-base font-semibold mb-4">Deal Pipeline</h2>
-        <div class="grid grid-cols-2 sm:grid-cols-3 gap-4 mb-4">
-          <div class="text-center p-4 bg-surface-50 dark:bg-surface-800 rounded-xl">
-            <p class="text-2xl font-bold text-brand-600">${d.deals.total}</p>
-            <p class="text-xs text-surface-500 mt-1">Total Deals</p>
-          </div>
-          <div class="text-center p-4 bg-surface-50 dark:bg-surface-800 rounded-xl">
-            <p class="text-2xl font-bold text-green-600">${d.deals.active}</p>
-            <p class="text-xs text-surface-500 mt-1">Active Deals</p>
-          </div>
-          <div class="text-center p-4 bg-surface-50 dark:bg-surface-800 rounded-xl col-span-2 sm:col-span-1">
-            <p class="text-2xl font-bold text-purple-600">${fmt(d.deals.pipelineValue)}</p>
-            <p class="text-xs text-surface-500 mt-1">Pipeline Value</p>
-          </div>
+        <div class="text-left">
+          <input type="text" id="shared-passcode-input"
+            class="input-field text-center text-lg tracking-widest w-full"
+            placeholder="Enter passcode"
+            onkeydown="if(event.key==='Enter') checkSharedPasscode()" />
+          <p id="passcode-err" class="text-xs text-red-500 mt-2 text-center hidden">Incorrect passcode. Please try again.</p>
         </div>
-        ${d.deals.list && sections.includes('deal_financials') ? `
-          <div class="overflow-x-auto">
-            <table class="w-full text-sm">
-              <thead><tr class="border-b border-surface-200 dark:border-surface-700">
-                <th class="text-left pb-2 text-surface-500 font-medium text-xs">Company</th>
-                <th class="text-left pb-2 text-surface-500 font-medium text-xs">Stage</th>
-                <th class="text-right pb-2 text-surface-500 font-medium text-xs">Revenue</th>
-                <th class="text-right pb-2 text-surface-500 font-medium text-xs">Ask Price</th>
-              </tr></thead>
-              <tbody class="divide-y divide-surface-100 dark:divide-surface-800">
-                ${d.deals.list.slice(0, 10).map(deal => `
-                  <tr>
-                    <td class="py-2 font-medium">${escapeHtml(deal.name)}</td>
-                    <td class="py-2 text-surface-500 text-xs">${deal.stage || '—'}</td>
-                    <td class="py-2 text-right text-xs">${deal.revenue ? fmt(deal.revenue) : '—'}</td>
-                    <td class="py-2 text-right text-xs">${deal.askingPrice ? fmt(deal.askingPrice) : '—'}</td>
-                  </tr>
-                `).join('')}
-              </tbody>
-            </table>
-          </div>
-        ` : ''}
-      </div>
-    `;
-  }
-
-  if (sections.includes('deal_sourcing') && d.deals?.bySource) {
-    const sources = Object.entries(d.deals.bySource).filter(([,v]) => v > 0);
-    const maxSrc = Math.max(...sources.map(([,v]) => v));
-    html += `
-      <div class="card">
-        <h2 class="text-base font-semibold mb-4">Deal Sourcing</h2>
-        <div class="space-y-2">
-          ${sources.map(([src, count]) => `
-            <div class="flex items-center gap-3">
-              <span class="text-xs text-surface-500 w-28 truncate">${src}</span>
-              <div class="flex-1 bg-surface-200 dark:bg-surface-700 rounded-full h-2">
-                <div class="bg-purple-500 h-2 rounded-full" style="width:${maxSrc ? Math.round(count/maxSrc*100) : 0}%"></div>
-              </div>
-              <span class="text-xs font-medium w-6 text-right">${count}</span>
-            </div>
-          `).join('')}
-        </div>
-      </div>
-    `;
-  }
-
-  if (sections.includes('top_contacts') && d.crm.recentContacts?.length) {
-    html += `
-      <div class="card">
-        <h2 class="text-base font-semibold mb-4">Recent Contacts</h2>
-        <div class="space-y-2">
-          ${d.crm.recentContacts.map(c => `
-            <div class="flex items-center gap-3 p-2 rounded-lg hover:bg-surface-50 dark:hover:bg-surface-800">
-              <div class="w-8 h-8 rounded-full bg-brand-100 dark:bg-brand-900 flex items-center justify-center text-brand-700 dark:text-brand-300 font-semibold text-sm">${escapeHtml(c.name.charAt(0))}</div>
-              <div class="min-w-0 flex-1">
-                <p class="text-sm font-medium truncate">${escapeHtml(c.name)}</p>
-                <p class="text-xs text-surface-500 truncate">${escapeHtml(c.title || '')}${c.company ? ' · ' + escapeHtml(c.company) : ''}</p>
-              </div>
-              <span class="text-xs text-surface-400">${c.stage || ''}</span>
-            </div>
-          `).join('')}
-        </div>
-      </div>
-    `;
-  }
-
-  html += `
-      <div class="text-center py-4 border-t border-surface-200 dark:border-surface-800">
-        <p class="text-xs text-surface-400">Generated by Pulse · <a href="${location.origin}${location.pathname}" class="text-brand-500 hover:underline">Get your own</a></p>
+        <button onclick="checkSharedPasscode()" class="btn-primary w-full">Unlock Dashboard</button>
       </div>
     </div>
   `;
+  setTimeout(() => document.getElementById('shared-passcode-input')?.focus(), 100);
+}
 
-  sharedView.innerHTML = html;
+function checkSharedPasscode() {
+  const input = document.getElementById('shared-passcode-input')?.value || '';
+  const view  = document.getElementById('shared-view');
+  if (input === _pendingSnapshot.passcode) {
+    _renderDashboard(_pendingSnapshot, view);
+  } else {
+    const err = document.getElementById('passcode-err');
+    if (err) err.classList.remove('hidden');
+    document.getElementById('shared-passcode-input')?.select();
+  }
+}
+
+// ── Dashboard Renderer ────────────────────────────────────────────
+
+function _renderDashboard(snapshot, view) {
+  const d        = snapshot.data;
+  const sections = snapshot.sections || [];
+
+  const fmtMoney = n => {
+    if (!n && n !== 0) return '—';
+    if (n >= 1e6) return `$${(n / 1e6).toFixed(1)}M`;
+    if (n >= 1e3) return `$${(n / 1e3).toFixed(0)}K`;
+    return `$${n}`;
+  };
+
+  function statBox(label, value, color) {
+    const cls = {
+      brand:  'text-brand-600',
+      green:  'text-green-600',
+      yellow: 'text-yellow-500',
+      red:    'text-red-500',
+      purple: 'text-purple-600',
+    }[color] || 'text-brand-600';
+    return `
+      <div class="p-4 bg-surface-50 dark:bg-surface-800/60 border border-surface-200 dark:border-surface-700 rounded-lg text-center">
+        <p class="text-2xl font-bold ${cls} tracking-tight">${value}</p>
+        <p class="text-xs text-surface-500 mt-1 leading-tight">${label}</p>
+      </div>`;
+  }
+
+  function barRow(label, value, max, color) {
+    const pct = max ? Math.round(value / max * 100) : 0;
+    return `
+      <div class="flex items-center gap-3">
+        <span class="text-xs text-surface-500 w-40 truncate shrink-0">${escapeHtml(label)}</span>
+        <div class="flex-1 bg-surface-100 dark:bg-surface-700 h-2 rounded-full overflow-hidden">
+          <div class="h-2 rounded-full" style="width:${pct}%;background:${color || '#5c7cfa'}"></div>
+        </div>
+        <span class="text-xs font-semibold w-5 text-right shrink-0">${value}</span>
+      </div>`;
+  }
+
+  const STAGE_BADGE = {
+    'Screening':         'bg-surface-100 text-surface-700 dark:bg-surface-800 dark:text-surface-300',
+    'NDA Signed':        'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300',
+    'CIM Review':        'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300',
+    'Management Call':   'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300',
+    'LOI Submitted':     'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300',
+    'Due Diligence':     'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300',
+    'Closed - Won':      'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300',
+    'Closed - Lost':     'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300',
+    'Rejected':          'bg-surface-100 text-surface-400',
+  };
+
+  let html = `
+    <div class="max-w-5xl mx-auto px-4 py-8 space-y-6 animate-fade-in">
+
+      <!-- Header -->
+      <div class="flex items-start justify-between flex-wrap gap-4 pb-5 border-b border-surface-200 dark:border-surface-800">
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 bg-brand-600 text-white rounded-lg flex items-center justify-center shrink-0">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3.75 3v11.25A2.25 2.25 0 006 16.5h2.25M3.75 3h-1.5m1.5 0h16.5m0 0h1.5m-1.5 0v11.25A2.25 2.25 0 0118 16.5h-2.25m-7.5 0h7.5"/>
+            </svg>
+          </div>
+          <div>
+            <h1 class="text-lg font-bold leading-tight">Nexus CRM — Shared Dashboard</h1>
+            <p class="text-sm text-surface-500 mt-0.5">
+              Shared by <strong class="text-surface-700 dark:text-surface-300">${escapeHtml(snapshot.generatedBy)}</strong>
+              &nbsp;·&nbsp;
+              ${new Date(snapshot.generatedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+            </p>
+          </div>
+        </div>
+        <span class="text-xs bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-700 px-3 py-1.5 rounded-full font-medium">
+          Read-only snapshot
+        </span>
+      </div>
+  `;
+
+  // ── CRM Overview ──────────────────────────────────────────────
+  if (sections.includes('crm_stats') && d.crm) {
+    html += `
+      <div class="bg-white dark:bg-surface-900 rounded-xl border border-surface-200 dark:border-surface-800 p-5">
+        <h2 class="text-xs font-semibold uppercase tracking-wider text-surface-400 mb-4">CRM Overview</h2>
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          ${statBox('Active Contacts',    d.crm.totalContacts,    'brand')}
+          ${statBox('Companies',          d.crm.totalCompanies,   'brand')}
+          ${statBox('Calls Logged',       d.crm.totalCalls,       'purple')}
+          ${statBox('Overdue Follow-ups', d.crm.overdueFollowUps, d.crm.overdueFollowUps > 0 ? 'red' : 'green')}
+        </div>
+      </div>`;
+  }
+
+  // ── Relationship Health ───────────────────────────────────────
+  if (sections.includes('relationship_health') && d.crm?.relationshipHealth) {
+    const rh    = d.crm.relationshipHealth;
+    const total = (rh.healthy + rh.atRisk + rh.stale) || 1;
+    html += `
+      <div class="bg-white dark:bg-surface-900 rounded-xl border border-surface-200 dark:border-surface-800 p-5">
+        <h2 class="text-xs font-semibold uppercase tracking-wider text-surface-400 mb-4">Relationship Health</h2>
+        <div class="grid grid-cols-3 gap-3 mb-5">
+          ${statBox('Active',  rh.healthy, 'green')}
+          ${statBox('At Risk', rh.atRisk,  'yellow')}
+          ${statBox('Stale',   rh.stale,   'red')}
+        </div>
+        <div class="flex h-3 rounded-full overflow-hidden">
+          <div class="bg-green-500"  style="width:${Math.round(rh.healthy / total * 100)}%"></div>
+          <div class="bg-yellow-400" style="width:${Math.round(rh.atRisk  / total * 100)}%"></div>
+          <div class="bg-red-400"    style="width:${Math.round(rh.stale   / total * 100)}%"></div>
+        </div>
+        <div class="flex gap-5 mt-2.5 text-xs text-surface-400">
+          <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-green-500 inline-block"></span>Active</span>
+          <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-yellow-400 inline-block"></span>At Risk</span>
+          <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-red-400 inline-block"></span>Stale</span>
+        </div>
+      </div>`;
+  }
+
+  // ── Stage Distribution ────────────────────────────────────────
+  if (sections.includes('stage_distribution') && d.crm?.stageDistribution) {
+    const stages = Object.entries(d.crm.stageDistribution).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
+    const maxS   = Math.max(...stages.map(([, v]) => v), 1);
+    if (stages.length > 0) {
+      html += `
+        <div class="bg-white dark:bg-surface-900 rounded-xl border border-surface-200 dark:border-surface-800 p-5">
+          <h2 class="text-xs font-semibold uppercase tracking-wider text-surface-400 mb-4">Contact Stage Distribution</h2>
+          <div class="space-y-3">${stages.map(([stage, count]) => barRow(stage, count, maxS, '#5c7cfa')).join('')}</div>
+        </div>`;
+    }
+  }
+
+  // ── Deal Pipeline ─────────────────────────────────────────────
+  if (sections.includes('deal_pipeline') && d.deals) {
+    const stageEntries = Object.entries(d.deals.byStage || {}).sort((a, b) => b[1] - a[1]);
+    const maxStage     = Math.max(...stageEntries.map(([, v]) => v), 1);
+    html += `
+      <div class="bg-white dark:bg-surface-900 rounded-xl border border-surface-200 dark:border-surface-800 p-5">
+        <h2 class="text-xs font-semibold uppercase tracking-wider text-surface-400 mb-4">Deal Pipeline</h2>
+        <div class="grid grid-cols-3 gap-3 mb-5">
+          ${statBox('Total Deals',    d.deals.total,         'brand')}
+          ${statBox('Active Deals',   d.deals.active,        'green')}
+          ${statBox('Pipeline Value', fmtMoney(d.deals.pipelineValue), 'purple')}
+        </div>
+        ${stageEntries.length > 0 ? `
+          <div class="space-y-2.5 pt-4 border-t border-surface-100 dark:border-surface-800">
+            <p class="text-xs text-surface-400 mb-3">By Stage</p>
+            ${stageEntries.map(([stage, count]) => barRow(stage, count, maxStage, '#7c3aed')).join('')}
+          </div>
+        ` : ''}
+      </div>`;
+  }
+
+  // ── Deal Sourcing ─────────────────────────────────────────────
+  if (sections.includes('deal_sourcing') && d.deals?.bySource) {
+    const sources = Object.entries(d.deals.bySource).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
+    const maxSrc  = Math.max(...sources.map(([, v]) => v), 1);
+    if (sources.length > 0) {
+      html += `
+        <div class="bg-white dark:bg-surface-900 rounded-xl border border-surface-200 dark:border-surface-800 p-5">
+          <h2 class="text-xs font-semibold uppercase tracking-wider text-surface-400 mb-4">Deal Sourcing</h2>
+          <div class="space-y-3">${sources.map(([src, count]) => barRow(src, count, maxSrc, '#7c3aed')).join('')}</div>
+        </div>`;
+    }
+  }
+
+  // ── Deal Cards ────────────────────────────────────────────────
+  const showDetails   = sections.includes('deal_details');
+  const showDocuments = sections.includes('deal_documents');
+  if ((showDetails || showDocuments) && d.deals?.list?.length) {
+    html += `<div class="space-y-5">
+      <h2 class="text-xs font-semibold uppercase tracking-wider text-surface-400">Deals</h2>`;
+
+    for (const deal of d.deals.list) {
+      const stageCls    = STAGE_BADGE[deal.stage] || 'bg-surface-100 text-surface-700';
+      const priorityDot = { High: '🔴', Medium: '🟡', Low: '🟢' }[deal.priority] || '';
+
+      html += `
+        <div class="bg-white dark:bg-surface-900 rounded-xl border border-surface-200 dark:border-surface-800 overflow-hidden">
+
+          <!-- Deal header -->
+          <div class="px-5 py-4 border-b border-surface-100 dark:border-surface-800">
+            <div class="flex items-start justify-between gap-3 flex-wrap">
+              <div>
+                <div class="flex items-center gap-2 flex-wrap mb-1">
+                  <h3 class="text-base font-bold">${escapeHtml(deal.name)}</h3>
+                  <span class="text-xs px-2 py-0.5 rounded-full font-medium ${stageCls}">${escapeHtml(deal.stage || '—')}</span>
+                  ${deal.priority ? `<span class="text-xs text-surface-500">${priorityDot} ${escapeHtml(deal.priority)}</span>` : ''}
+                </div>
+                <p class="text-xs text-surface-400">
+                  ${[deal.sector, deal.location, deal.source ? `Source: ${deal.source}` : ''].filter(Boolean).map(s => escapeHtml(s)).join(' · ')}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          ${showDetails ? `
+            <!-- Financials -->
+            <div class="grid grid-cols-2 sm:grid-cols-4 border-b border-surface-100 dark:border-surface-800 divide-x divide-surface-100 dark:divide-surface-800">
+              ${[
+                ['Revenue',      fmtMoney(deal.revenue)],
+                ['EBITDA',       fmtMoney(deal.ebitda)],
+                ['Asking Price', fmtMoney(deal.askingPrice)],
+                ['Multiple',     deal.multiple ? `${deal.multiple}x` : '—'],
+              ].map(([label, value]) => `
+                <div class="px-4 py-3 text-center">
+                  <p class="text-xs text-surface-400 mb-0.5">${label}</p>
+                  <p class="text-sm font-bold">${value}</p>
+                </div>
+              `).join('')}
+            </div>
+
+            ${deal.employees ? `
+              <div class="px-5 pt-3 text-xs text-surface-500">${deal.employees.toLocaleString()} employees</div>
+            ` : ''}
+
+            ${deal.description ? `
+              <div class="px-5 py-3">
+                <p class="text-xs font-medium text-surface-400 mb-1">About</p>
+                <p class="text-sm text-surface-700 dark:text-surface-300 leading-relaxed">${escapeHtml(deal.description)}</p>
+              </div>
+            ` : ''}
+
+            ${deal.highlights?.length ? `
+              <div class="px-5 py-3 border-t border-surface-50 dark:border-surface-800/60">
+                <p class="text-xs font-medium text-green-600 dark:text-green-400 mb-2">✓ Highlights</p>
+                <ul class="space-y-1">
+                  ${(Array.isArray(deal.highlights) ? deal.highlights : String(deal.highlights).split('\n').filter(Boolean))
+                    .map(h => `<li class="text-xs text-surface-600 dark:text-surface-400 flex gap-2"><span class="text-green-500 shrink-0 mt-0.5">•</span>${escapeHtml(h)}</li>`)
+                    .join('')}
+                </ul>
+              </div>
+            ` : ''}
+
+            ${deal.concerns?.length ? `
+              <div class="px-5 py-3 border-t border-surface-50 dark:border-surface-800/60">
+                <p class="text-xs font-medium text-red-500 mb-2">⚠ Concerns</p>
+                <ul class="space-y-1">
+                  ${(Array.isArray(deal.concerns) ? deal.concerns : String(deal.concerns).split('\n').filter(Boolean))
+                    .map(c => `<li class="text-xs text-surface-600 dark:text-surface-400 flex gap-2"><span class="text-red-400 shrink-0 mt-0.5">•</span>${escapeHtml(c)}</li>`)
+                    .join('')}
+                </ul>
+              </div>
+            ` : ''}
+
+            ${deal.history?.length ? `
+              <div class="px-5 py-4 border-t border-surface-50 dark:border-surface-800/60">
+                <p class="text-xs font-medium text-surface-400 mb-3">Deal Timeline</p>
+                <div class="relative border-l-2 border-surface-200 dark:border-surface-700 pl-4 space-y-3 ml-1">
+                  ${deal.history.map((h, i) => `
+                    <div class="relative">
+                      <div class="absolute -left-[21px] top-1.5 w-2.5 h-2.5 rounded-full border-2 border-white dark:border-surface-900 ${i === deal.history.length - 1 ? 'bg-brand-500' : 'bg-surface-300 dark:bg-surface-600'}"></div>
+                      <p class="text-xs font-semibold text-surface-700 dark:text-surface-300">${escapeHtml(h.action)}</p>
+                      ${h.description ? `<p class="text-xs text-surface-500 mt-0.5 leading-relaxed">${escapeHtml(h.description)}</p>` : ''}
+                      <p class="text-xs text-surface-300 dark:text-surface-600 mt-0.5">${formatDate(h.timestamp)}</p>
+                    </div>
+                  `).join('')}
+                </div>
+              </div>
+            ` : ''}
+
+            ${deal.notes?.length ? `
+              <div class="px-5 py-4 border-t border-surface-50 dark:border-surface-800/60">
+                <p class="text-xs font-medium text-surface-400 mb-3">Key Notes</p>
+                <div class="space-y-3">
+                  ${deal.notes.map(n => `
+                    <div class="text-xs border-l-2 border-brand-200 dark:border-brand-800 pl-3">
+                      <p class="text-surface-300 dark:text-surface-600 mb-1">${formatDate(n.createdAt)}</p>
+                      <p class="text-surface-600 dark:text-surface-400 whitespace-pre-line leading-relaxed">${escapeHtml(n.content || '')}</p>
+                    </div>
+                  `).join('')}
+                </div>
+              </div>
+            ` : ''}
+
+            ${deal.tasks?.length ? `
+              <div class="px-5 py-4 border-t border-surface-50 dark:border-surface-800/60">
+                <p class="text-xs font-medium text-surface-400 mb-3">Open Tasks</p>
+                <div class="space-y-2">
+                  ${deal.tasks.map(t => `
+                    <div class="flex items-center gap-2 text-xs">
+                      <span class="w-1.5 h-1.5 rounded-full shrink-0 ${t.status === 'in-progress' ? 'bg-brand-500' : 'bg-surface-300'}"></span>
+                      <span class="flex-1 text-surface-600 dark:text-surface-400">${escapeHtml(t.title)}</span>
+                      ${t.dueDate ? `<span class="text-surface-300 shrink-0">${formatDate(t.dueDate)}</span>` : ''}
+                    </div>
+                  `).join('')}
+                </div>
+              </div>
+            ` : ''}
+          ` : ''}
+
+          ${showDocuments && deal.documents?.length ? `
+            <div class="px-5 py-4 border-t border-surface-100 dark:border-surface-800">
+              <p class="text-xs font-medium text-surface-400 mb-3">Documents (${deal.documents.length})</p>
+              <div class="space-y-2">
+                ${deal.documents.map(doc => `
+                  <div class="flex items-center gap-2.5 text-xs">
+                    <svg class="w-4 h-4 text-surface-300 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                    </svg>
+                    <span class="flex-1 truncate font-medium text-surface-700 dark:text-surface-300">${escapeHtml(doc.name || 'Untitled')}</span>
+                    ${doc.category ? `<span class="text-surface-400 shrink-0">${escapeHtml(doc.category)}</span>` : ''}
+                    ${doc.size ? `<span class="text-surface-300 dark:text-surface-600 shrink-0">${_fmtFileSize(doc.size)}</span>` : ''}
+                  </div>
+                `).join('')}
+              </div>
+            </div>
+          ` : ''}
+
+        </div>`;
+    }
+    html += '</div>';
+  }
+
+  // Footer
+  html += `
+    <div class="text-center py-6 border-t border-surface-200 dark:border-surface-800">
+      <p class="text-xs text-surface-400">
+        Generated by Nexus CRM ·
+        ${new Date(snapshot.generatedAt).toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+      </p>
+    </div>
+  </div>`;
+
+  view.innerHTML = html;
+}
+
+function _fmtFileSize(bytes) {
+  if (!bytes) return '';
+  if (bytes < 1024)           return `${bytes} B`;
+  if (bytes < 1024 * 1024)   return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }

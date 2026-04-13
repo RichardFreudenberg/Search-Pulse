@@ -18,9 +18,8 @@ async function renderContacts() {
     DB.getForUser(STORES.tags, currentUser.id),
   ]);
 
-  const activeContacts = contacts.filter(c => !c.archived);
-  const companyMap = {};
-  companies.forEach(c => companyMap[c.id] = c);
+  const activeContacts = getActiveContacts(contacts);
+  const companyMap = buildMap(companies);
 
   // Apply filters
   let filtered = [...activeContacts];
@@ -70,7 +69,7 @@ async function renderContacts() {
           <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-surface-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" /></svg>
           <input type="text" placeholder="Search contacts…" value="${escapeHtml(contactsFilters.search)}"
             oninput="contactsFilters.search=this.value; renderContacts()"
-            class="w-full pl-10 pr-4 py-2 text-sm bg-surface-100 dark:bg-surface-900 border-0 rounded-xl focus:ring-2 focus:ring-brand-500" />
+            class="w-full pl-10 pr-4 py-2 text-sm bg-surface-100 dark:bg-surface-900 border-0 rounded focus:ring-2 focus:ring-brand-500" />
         </div>
         <select onchange="contactsFilters.stage=this.value; renderContacts()" class="input-field w-auto text-sm" style="max-width: 180px">
           <option value="">All stages</option>
@@ -143,7 +142,7 @@ async function openNewContactModal(prefill = {}) {
       <p class="text-sm text-surface-500 mb-6">Paste a LinkedIn URL to auto-populate, or fill in manually</p>
 
       <!-- LinkedIn Auto-populate Section -->
-      <div class="bg-brand-50 dark:bg-brand-900/15 border border-brand-200 dark:border-brand-800 rounded-xl p-4 mb-6">
+      <div class="bg-brand-50 dark:bg-brand-900/15 border border-brand-200 dark:border-brand-800 rounded p-4 mb-6">
         <div class="flex items-center gap-2 mb-2">
           <svg class="w-5 h-5 text-brand-600" fill="currentColor" viewBox="0 0 24 24"><path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433c-1.144 0-2.063-.926-2.063-2.065 0-1.138.92-2.063 2.063-2.063 1.14 0 2.064.925 2.064 2.063 0 1.139-.925 2.065-2.064 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/></svg>
           <span class="text-sm font-medium text-brand-700 dark:text-brand-300">Quick Add from LinkedIn</span>
@@ -162,7 +161,7 @@ async function openNewContactModal(prefill = {}) {
 
       <form id="new-contact-form" class="space-y-4">
         <!-- Photo preview -->
-        <div id="contact-photo-preview" class="hidden flex items-center gap-4 p-3 bg-surface-50 dark:bg-surface-800/50 rounded-xl">
+        <div id="contact-photo-preview" class="hidden flex items-center gap-4 p-3 bg-surface-50 dark:bg-surface-800/50 rounded">
           <div id="contact-photo-preview-img" class="avatar avatar-lg"></div>
           <div>
             <p class="text-sm font-medium" id="contact-photo-preview-name"></p>
@@ -190,7 +189,7 @@ async function openNewContactModal(prefill = {}) {
                 <span id="cp-display" class="text-surface-400 truncate">Select or create a company…</span>
                 <svg class="w-4 h-4 text-surface-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
               </button>
-              <div id="cp-dropdown" class="hidden absolute z-50 top-full left-0 right-0 mt-1 bg-white dark:bg-surface-900 border border-surface-200 dark:border-surface-700 rounded-xl shadow-xl overflow-hidden">
+              <div id="cp-dropdown" class="hidden absolute z-50 top-full left-0 right-0 mt-1 bg-white dark:bg-surface-900 border border-surface-200 dark:border-surface-700 rounded shadow-xl overflow-hidden">
                 <div class="p-2 border-b border-surface-100 dark:border-surface-800">
                   <input type="text" id="cp-search" class="input-field py-1.5 text-sm" placeholder="Search companies…" oninput="cpFilter(this.value)" />
                 </div>
@@ -232,6 +231,21 @@ async function openNewContactModal(prefill = {}) {
             <label class="block text-sm font-medium text-surface-600 dark:text-surface-400 mb-1">Stage</label>
             <select id="contact-stage" class="input-field">
               ${STAGES.map(s => `<option value="${s}" ${(prefill.stage || 'New intro') === s ? 'selected' : ''}>${s}</option>`).join('')}
+            </select>
+          </div>
+        </div>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label class="block text-sm font-medium text-surface-600 dark:text-surface-400 mb-1">Relationship Type</label>
+            <select id="contact-relationship-type" class="input-field">
+              <option value="">— Select type —</option>
+              ${['Broker / Intermediary','Seller / Business Owner','LP / Investor','Advisor / Mentor','Operator / Executive','Investment Banker','Fellow Searcher','Attorney / Accountant','Other'].map(t => `<option value="${t}" ${(prefill.relationshipType||'')=== t?'selected':''}>${t}</option>`).join('')}
+            </select>
+          </div>
+          <div id="contact-campaign-row">
+            <label class="block text-sm font-medium text-surface-600 dark:text-surface-400 mb-1">Sourcing Campaign <span class="text-xs font-normal text-surface-400">(optional)</span></label>
+            <select id="contact-campaign-id" class="input-field">
+              <option value="">None</option>
             </select>
           </div>
         </div>
@@ -282,6 +296,20 @@ async function openNewContactModal(prefill = {}) {
     if (pre) cpSetSelected(pre.id, pre.name);
   }
 
+  // Populate sourcing campaigns dropdown
+  DB.getForUser(STORES.sourcingCampaigns, currentUser.id).then(campaigns => {
+    const sel = document.getElementById('contact-campaign-id');
+    if (sel && campaigns.length > 0) {
+      campaigns.filter(c => c.status !== 'closed').forEach(c => {
+        const opt = document.createElement('option');
+        opt.value = c.id;
+        opt.textContent = c.name;
+        if (prefill.campaignId === c.id) opt.selected = true;
+        sel.appendChild(opt);
+      });
+    }
+  }).catch(() => {});
+
   // Auto-populate if URL is pasted via keyboard
   const linkedinInput = document.getElementById('linkedin-import-url');
   linkedinInput.addEventListener('paste', () => {
@@ -296,7 +324,7 @@ async function openNewContactModal(prefill = {}) {
 // Searchable Company Picker (inside new-contact modal)
 // ============================================
 
-const COMPANY_TYPES = ['Acquisition Target', 'Portfolio Company', 'Prospect', 'Competitor', 'Partner / Advisor', 'Other'];
+// COMPANY_TYPES is defined in companies.js (shared global)
 const COMPANY_INDUSTRY_LIST = [
   'Healthcare Services','Technology','Business Services','Industrial',
   'Construction / Trades','Distribution','Food & Beverage','Consumer',
@@ -816,6 +844,8 @@ async function saveNewContact() {
     linkedInUrl: document.getElementById('contact-linkedin').value.trim(),
     photoUrl: document.getElementById('contact-photo').value.trim(),
     stage: document.getElementById('contact-stage').value,
+    relationshipType: document.getElementById('contact-relationship-type')?.value || '',
+    campaignId: document.getElementById('contact-campaign-id')?.value || null,
     tags: getTagInputValues('contact-tags'),
     notes: document.getElementById('contact-notes').value.trim(),
     lastContactDate: null,
@@ -1137,6 +1167,13 @@ async function openEditContactModal(contactId) {
             </select>
           </div>
         </div>
+        <div>
+          <label class="block text-sm font-medium text-surface-600 dark:text-surface-400 mb-1">Relationship Type</label>
+          <select id="edit-contact-relationship-type" class="input-field">
+            <option value="">— Select type —</option>
+            ${['Broker / Intermediary','Seller / Business Owner','LP / Investor','Advisor / Mentor','Operator / Executive','Investment Banker','Fellow Searcher','Attorney / Accountant','Other'].map(t => `<option value="${t}" ${(contact.relationshipType||'')=== t?'selected':''}>${t}</option>`).join('')}
+          </select>
+        </div>
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label class="block text-sm font-medium text-surface-600 dark:text-surface-400 mb-1">Photo URL</label>
@@ -1152,7 +1189,10 @@ async function openEditContactModal(contactId) {
           ${renderTagInput(contact.tags || [], tags, 'edit-contact-tags')}
         </div>
         <div class="flex justify-between items-center pt-2">
-          <button type="button" onclick="archiveContact('${contact.id}')" class="btn-ghost text-red-500 text-sm">Archive Contact</button>
+          <div class="flex gap-2">
+            <button type="button" onclick="archiveContact('${contact.id}')" class="btn-ghost text-surface-500 text-sm">Archive</button>
+            <button type="button" onclick="deleteContact('${contact.id}')" class="btn-ghost text-red-500 text-sm">Delete</button>
+          </div>
           <div class="flex gap-3">
             <button type="button" onclick="closeModal()" class="btn-secondary">Cancel</button>
             <button type="submit" class="btn-primary">Save Changes</button>
@@ -1176,6 +1216,7 @@ async function openEditContactModal(contactId) {
     contact.linkedInUrl = document.getElementById('edit-contact-linkedin').value.trim();
     contact.photoUrl = document.getElementById('edit-contact-photo').value.trim();
     contact.stage = newStage;
+    contact.relationshipType = document.getElementById('edit-contact-relationship-type')?.value || contact.relationshipType || '';
     contact.tags = getTagInputValues('edit-contact-tags');
     const followUp = document.getElementById('edit-contact-followup').value;
     contact.nextFollowUpDate = followUp ? new Date(followUp).toISOString() : null;
@@ -1216,6 +1257,34 @@ async function archiveContact(contactId) {
     showToast('Contact archived', 'success');
     navigate('contacts');
   });
+}
+
+async function deleteContact(contactId) {
+  confirmDialog(
+    'Delete Contact',
+    'This will permanently delete the contact and all their calls, notes, and reminders. This cannot be undone.',
+    async () => {
+      // Delete all related records
+      const [calls, notes, reminders, activities] = await Promise.all([
+        DB.getAllByIndex(STORES.calls,      'contactId', contactId),
+        DB.getAllByIndex(STORES.notes,      'contactId', contactId),
+        DB.getAllByIndex(STORES.reminders,  'contactId', contactId),
+        DB.getAllByIndex(STORES.activities, 'contactId', contactId),
+      ]);
+
+      await Promise.all([
+        ...calls.map(r      => DB.delete(STORES.calls,      r.id)),
+        ...notes.map(r      => DB.delete(STORES.notes,      r.id)),
+        ...reminders.map(r  => DB.delete(STORES.reminders,  r.id)),
+        ...activities.map(r => DB.delete(STORES.activities, r.id)),
+        DB.delete(STORES.contacts, contactId),
+      ]);
+
+      closeModal();
+      showToast('Contact deleted', 'success');
+      navigate('contacts');
+    }
+  );
 }
 
 async function openNewNoteModal(contactId) {

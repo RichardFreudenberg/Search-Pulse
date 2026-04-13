@@ -12,10 +12,8 @@ async function renderReminders() {
     DB.getForUser(STORES.companies, currentUser.id),
   ]);
 
-  const contactMap = {};
-  contacts.forEach(c => contactMap[c.id] = c);
-  const companyMap = {};
-  companies.forEach(c => companyMap[c.id] = c);
+  const contactMap = buildMap(contacts);
+  const companyMap = buildMap(companies);
 
   const active = reminders.filter(r => r.status === 'pending' || r.status === 'snoozed');
   const completed = reminders.filter(r => r.status === 'completed');
@@ -132,7 +130,7 @@ function renderReminderItem(reminder, contact, isCompleted = false) {
 
 async function openNewReminderModal(preselectedContactId = null) {
   const contacts = await DB.getForUser(STORES.contacts, currentUser.id);
-  const activeContacts = contacts.filter(c => !c.archived).sort((a, b) => a.fullName.localeCompare(b.fullName));
+  const activeContacts = getActiveContacts(contacts).sort((a, b) => a.fullName.localeCompare(b.fullName));
 
   openModal(`
     <div class="p-6">
@@ -301,8 +299,9 @@ async function checkReminders() {
   const overdue = active.filter(r => isOverdue(r.dueDate));
   const dueToday = active.filter(r => isDueToday(r.dueDate));
 
-  // Badge = total pending reminders (so it always matches what's actually in the list)
-  const badgeCount = active.length;
+  // Badge = reminders due within the next 7 days (overdue or due soon)
+  const sevenDaysFromNow = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+  const badgeCount = active.filter(r => r.dueDate && new Date(r.dueDate) <= sevenDaysFromNow).length;
   const badge = document.getElementById('reminder-badge');
   const notifDot = document.getElementById('notif-dot');
 

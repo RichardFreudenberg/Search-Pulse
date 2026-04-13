@@ -17,13 +17,8 @@ function openModal(contentHtmlOrTitle, optionsOrContent = {}) {
   const overlay = document.getElementById('modal-overlay');
   const content = document.getElementById('modal-content');
 
-  if (options.wide) {
-    content.className = 'bg-white dark:bg-surface-900 rounded-2xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto animate-slide-up';
-  } else if (options.small) {
-    content.className = 'bg-white dark:bg-surface-900 rounded-2xl shadow-2xl max-w-md w-full max-h-[90vh] overflow-y-auto animate-slide-up';
-  } else {
-    content.className = 'bg-white dark:bg-surface-900 rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto animate-slide-up';
-  }
+  const size = options.wide ? '4xl' : options.small ? 'md' : '2xl';
+  content.className = `bg-white dark:bg-surface-900 rounded shadow-2xl max-w-${size} w-full max-h-[90vh] overflow-y-auto animate-slide-up`;
 
   content.innerHTML = contentHtml;
   overlay.classList.remove('hidden');

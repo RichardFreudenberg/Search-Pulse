@@ -27,8 +27,8 @@
 dialog {
   padding: 0;
   border: none;
-  border-radius: 1rem;
-  box-shadow: 0 25px 50px -12px rgba(0,0,0,0.25);
+  border-radius: 4px;
+  box-shadow: 0 20px 60px -10px rgba(0,0,0,0.3), 0 0 0 1px rgba(0,0,0,0.06);
   max-height: 90vh;
   overflow-y: auto;
 }
@@ -48,15 +48,16 @@ dialog::backdrop {
   font-size: 0.875rem;
   line-height: 1.25rem;
   border: 1px solid #dee2e6;
-  border-radius: 0.75rem;
+  border-radius: 3px;
   background-color: #ffffff;
   color: #212529;
-  transition: all 0.15s ease;
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
   outline: none;
+  letter-spacing: -0.005em;
 }
 .input-field:focus {
-  border-color: #5c7cfa;
-  box-shadow: 0 0 0 3px rgba(92, 124, 250, 0.1);
+  border-color: #4c6ef5;
+  box-shadow: 0 0 0 2px rgba(76, 110, 245, 0.12);
 }
 .dark .input-field {
   background-color: #1a1d21;
@@ -96,30 +97,32 @@ select.input-field {
   align-items: center;
   justify-content: center;
   gap: 0.5rem;
-  padding: 0.625rem 1.25rem;
+  padding: 0.5625rem 1.125rem;
   font-size: 0.875rem;
   font-weight: 500;
   line-height: 1.25rem;
+  letter-spacing: -0.005em;
   color: #ffffff;
-  background-color: #4c6ef5;
-  border: none;
-  border-radius: 0.75rem;
+  background-color: #3b5bdb;
+  border: 1px solid #3b5bdb;
+  border-radius: 3px;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background-color 0.12s ease, border-color 0.12s ease;
   outline: none;
 }
 .btn-primary:hover {
-  background-color: #4263eb;
+  background-color: #364fc7;
+  border-color: #364fc7;
 }
 .btn-primary:active {
-  background-color: #3b5bdb;
-  transform: scale(0.98);
+  background-color: #3451b2;
+  border-color: #3451b2;
 }
 .btn-primary:focus-visible {
-  box-shadow: 0 0 0 3px rgba(92, 124, 250, 0.3);
+  box-shadow: 0 0 0 2px rgba(59, 91, 219, 0.3);
 }
 .btn-primary:disabled {
-  opacity: 0.5;
+  opacity: 0.45;
   cursor: not-allowed;
 }
 
@@ -128,28 +131,31 @@ select.input-field {
   align-items: center;
   justify-content: center;
   gap: 0.5rem;
-  padding: 0.625rem 1.25rem;
+  padding: 0.5625rem 1.125rem;
   font-size: 0.875rem;
   font-weight: 500;
   line-height: 1.25rem;
-  color: #495057;
-  background-color: #f1f3f5;
-  border: 1px solid #dee2e6;
-  border-radius: 0.75rem;
+  letter-spacing: -0.005em;
+  color: #343a40;
+  background-color: #ffffff;
+  border: 1px solid #ced4da;
+  border-radius: 3px;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background-color 0.12s ease, border-color 0.12s ease;
   outline: none;
 }
 .btn-secondary:hover {
-  background-color: #e9ecef;
+  background-color: #f8f9fa;
+  border-color: #adb5bd;
 }
 .dark .btn-secondary {
   color: #dee2e6;
-  background-color: #343a40;
+  background-color: #2c2f33;
   border-color: #495057;
 }
 .dark .btn-secondary:hover {
-  background-color: #495057;
+  background-color: #343a40;
+  border-color: #6c757d;
 }
 
 .btn-ghost {
@@ -160,21 +166,24 @@ select.input-field {
   padding: 0.5rem 0.75rem;
   font-size: 0.875rem;
   font-weight: 500;
+  letter-spacing: -0.005em;
   color: #495057;
   background: transparent;
   border: none;
-  border-radius: 0.75rem;
+  border-radius: 3px;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background-color 0.12s ease, color 0.12s ease;
 }
 .btn-ghost:hover {
   background-color: #f1f3f5;
+  color: #212529;
 }
 .dark .btn-ghost {
-  color: #dee2e6;
+  color: #adb5bd;
 }
 .dark .btn-ghost:hover {
-  background-color: #343a40;
+  background-color: #2c2f33;
+  color: #dee2e6;
 }
 
 .btn-danger {
@@ -182,18 +191,20 @@ select.input-field {
   align-items: center;
   justify-content: center;
   gap: 0.5rem;
-  padding: 0.625rem 1.25rem;
+  padding: 0.5625rem 1.125rem;
   font-size: 0.875rem;
   font-weight: 500;
+  letter-spacing: -0.005em;
   color: #ffffff;
-  background-color: #fa5252;
-  border: none;
-  border-radius: 0.75rem;
+  background-color: #e03131;
+  border: 1px solid #e03131;
+  border-radius: 3px;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background-color 0.12s ease, border-color 0.12s ease;
 }
 .btn-danger:hover {
-  background-color: #e03131;
+  background-color: #c92a2a;
+  border-color: #c92a2a;
 }
 
 .btn-sm {
@@ -212,55 +223,60 @@ select.input-field {
   align-items: center;
   gap: 0.75rem;
   width: 100%;
-  padding: 0.5rem 0.75rem;
-  font-size: 0.875rem;
+  padding: 0.4375rem 0.875rem;
+  font-size: 0.8125rem;
   font-weight: 400;
-  color: #495057;
+  letter-spacing: -0.005em;
+  color: #6c757d;
   background: transparent;
   border: none;
-  border-radius: 0.625rem;
+  border-left: 2px solid transparent;
+  border-radius: 0;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: color 0.12s ease, background-color 0.12s ease, border-color 0.12s ease;
   text-align: left;
 }
 .nav-item:hover {
-  background-color: #f1f3f5;
+  background-color: #f8f9fa;
   color: #212529;
+  border-left-color: transparent;
 }
 .nav-item.active {
-  background-color: #dbe4ff;
-  color: #4263eb;
+  background-color: #f0f4ff;
+  color: #3b5bdb;
   font-weight: 500;
+  border-left-color: #3b5bdb;
 }
 .dark .nav-item {
-  color: #adb5bd;
+  color: #6c757d;
 }
 .dark .nav-item:hover {
-  background-color: #2c2f33;
-  color: #f1f3f5;
+  background-color: #1e2124;
+  color: #dee2e6;
 }
 .dark .nav-item.active {
-  background-color: rgba(76, 110, 245, 0.15);
+  background-color: rgba(59, 91, 219, 0.1);
   color: #748ffc;
+  border-left-color: #748ffc;
 }
 
 /* Sidebar */
 .sidebar {
-  width: 260px;
+  width: 240px;
   height: 100vh;
   position: sticky;
   top: 0;
   display: flex;
   flex-direction: column;
-  background-color: #ffffff;
-  border-right: 1px solid #dee2e6;
+  background-color: #fafafa;
+  border-right: 1px solid #e9ecef;
   flex-shrink: 0;
   z-index: 31;
   transition: transform 0.3s ease;
 }
 .dark .sidebar {
-  background-color: #0f1114;
-  border-right-color: #343a40;
+  background-color: #0d0f12;
+  border-right-color: #1e2124;
 }
 @media (max-width: 1023px) {
   .sidebar {
@@ -277,12 +293,12 @@ select.input-field {
 .card {
   background-color: #ffffff;
   border: 1px solid #e9ecef;
-  border-radius: 1rem;
+  border-radius: 4px;
   padding: 1.5rem;
-  transition: all 0.15s ease;
+  transition: border-color 0.12s ease;
 }
 .card:hover {
-  border-color: #dee2e6;
+  border-color: #ced4da;
 }
 .dark .card {
   background-color: #1a1d21;
@@ -296,11 +312,10 @@ select.input-field {
   cursor: pointer;
 }
 .card-interactive:hover {
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
-  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
 }
 .dark .card-interactive:hover {
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
 }
 
 /* Dashboard widgets - drag and drop */
@@ -322,11 +337,13 @@ select.input-field {
 .badge {
   display: inline-flex;
   align-items: center;
-  padding: 0.125rem 0.625rem;
-  font-size: 0.75rem;
+  padding: 0.125rem 0.5rem;
+  font-size: 0.6875rem;
   font-weight: 500;
-  border-radius: 9999px;
+  border-radius: 3px;
   line-height: 1.5;
+  letter-spacing: 0.01em;
+  text-transform: uppercase;
 }
 .badge-blue { background-color: #dbe4ff; color: #3b5bdb; }
 .badge-green { background-color: #d3f9d8; color: #2b8a3e; }
@@ -366,7 +383,7 @@ select.input-field {
   font-size: 1.875rem;
   font-weight: 700;
   line-height: 1.2;
-  letter-spacing: -0.025em;
+  letter-spacing: -0.04em;
 }
 .stat-card .stat-label {
   font-size: 0.8125rem;
@@ -401,7 +418,7 @@ select.input-field {
   background: linear-gradient(90deg, #f1f3f5 25%, #e9ecef 50%, #f1f3f5 75%);
   background-size: 200% 100%;
   animation: shimmer 1.5s infinite;
-  border-radius: 0.5rem;
+  border-radius: 2px;
 }
 .dark .skeleton {
   background: linear-gradient(90deg, #2c2f33 25%, #343a40 50%, #2c2f33 75%);
@@ -528,12 +545,13 @@ select.input-field {
   display: flex;
   align-items: center;
   gap: 0.75rem;
-  padding: 0.875rem 1.25rem;
+  padding: 0.75rem 1.125rem;
   background-color: #ffffff;
-  border: 1px solid #e9ecef;
-  border-radius: 0.75rem;
-  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+  border: 1px solid #dee2e6;
+  border-radius: 3px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1), 0 1px 4px rgba(0, 0, 0, 0.06);
   font-size: 0.875rem;
+  letter-spacing: -0.005em;
   animation: slideUp 0.3s ease-out;
   min-width: 280px;
   max-width: 420px;
@@ -569,13 +587,13 @@ select.input-field {
   display: inline-flex;
   align-items: center;
   gap: 0.25rem;
-  padding: 0.25rem 0.625rem;
+  padding: 0.1875rem 0.5rem;
   font-size: 0.75rem;
   font-weight: 500;
-  border-radius: 9999px;
+  border-radius: 3px;
   background-color: #f1f3f5;
   color: #495057;
-  border: none;
+  border: 1px solid #e9ecef;
   cursor: default;
 }
 .dark .chip {
@@ -593,9 +611,9 @@ select.input-field {
 /* Progress bar */
 .progress-bar {
   width: 100%;
-  height: 0.375rem;
+  height: 3px;
   background-color: #e9ecef;
-  border-radius: 9999px;
+  border-radius: 0;
   overflow: hidden;
 }
 .dark .progress-bar {
@@ -603,7 +621,7 @@ select.input-field {
 }
 .progress-bar-fill {
   height: 100%;
-  border-radius: 9999px;
+  border-radius: 0;
   transition: width 0.3s ease;
 }
 
@@ -658,28 +676,29 @@ select.input-field {
   display: inline-flex;
   align-items: center;
   gap: 0.375rem;
-  padding: 0.375rem 0.75rem;
+  padding: 0.3125rem 0.75rem;
   font-size: 0.8125rem;
+  letter-spacing: -0.005em;
   border: 1px solid #dee2e6;
-  border-radius: 9999px;
+  border-radius: 3px;
   background: transparent;
   cursor: pointer;
-  transition: all 0.15s ease;
-  color: #495057;
+  transition: border-color 0.12s ease, color 0.12s ease, background-color 0.12s ease;
+  color: #6c757d;
 }
 .filter-pill:hover, .filter-pill.active {
-  border-color: #4c6ef5;
-  color: #4c6ef5;
+  border-color: #3b5bdb;
+  color: #3b5bdb;
   background-color: #f0f4ff;
 }
 .dark .filter-pill {
   border-color: #495057;
-  color: #adb5bd;
+  color: #868e96;
 }
 .dark .filter-pill:hover, .dark .filter-pill.active {
   border-color: #748ffc;
   color: #748ffc;
-  background-color: rgba(76, 110, 245, 0.1);
+  background-color: rgba(59, 91, 219, 0.1);
 }
 
 /* Verification badges */
@@ -718,16 +737,16 @@ select.input-field {
   text-align: center;
   font-size: 1.25rem;
   font-weight: 600;
-  border: 1.5px solid #dee2e6;
-  border-radius: 0.75rem;
+  border: 1px solid #dee2e6;
+  border-radius: 3px;
   background: #ffffff;
   color: #212529;
   outline: none;
-  transition: all 0.15s ease;
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
 }
 .otp-input:focus {
-  border-color: #5c7cfa;
-  box-shadow: 0 0 0 3px rgba(92, 124, 250, 0.15);
+  border-color: #4c6ef5;
+  box-shadow: 0 0 0 2px rgba(76, 110, 245, 0.15);
 }
 .dark .otp-input {
   background: #1a1d21;
@@ -735,8 +754,8 @@ select.input-field {
   color: #f1f3f5;
 }
 .dark .otp-input:focus {
-  border-color: #5c7cfa;
-  box-shadow: 0 0 0 3px rgba(92, 124, 250, 0.2);
+  border-color: #4c6ef5;
+  box-shadow: 0 0 0 2px rgba(76, 110, 245, 0.2);
 }
 
 @keyframes shake {
@@ -769,7 +788,7 @@ select.input-field {
 /* Kanban drag-over column highlight */
 [data-stage] {
   transition: background-color 0.15s ease;
-  border-radius: 0.75rem;
+  border-radius: 3px;
   padding: 0.25rem;
 }
 
@@ -970,18 +989,18 @@ select.input-field {
 }
 .ai-bubble {
   max-width: 85%;
-  padding: 10px 14px;
-  border-radius: 16px;
+  padding: 9px 13px;
+  border-radius: 4px;
 }
 .ai-bubble-user {
-  background: #4263eb;
+  background: #3b5bdb;
   color: white;
-  border-bottom-right-radius: 4px;
+  border-bottom-right-radius: 2px;
 }
 .ai-bubble-assistant {
   background: #f1f3f5;
   color: #212529;
-  border-bottom-left-radius: 4px;
+  border-bottom-left-radius: 2px;
 }
 .dark .ai-bubble-assistant {
   background: #343a40;

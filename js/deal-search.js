@@ -87,7 +87,7 @@ async function renderDealSearch() {
       ${renderPageHeader('Deal Search', 'Live listings from public marketplaces + Excel import')}
 
       <!-- Tab Bar -->
-      <div class="flex gap-1 p-1 bg-surface-100 dark:bg-surface-800 rounded-xl mb-6 w-fit">
+      <div class="flex gap-1 p-1 bg-surface-100 dark:bg-surface-800 rounded mb-6 w-fit">
         <button id="ds-tab-listings" onclick="dsSwitchTab('listings')" class="px-4 py-2 rounded-lg text-sm font-medium transition-colors bg-white dark:bg-surface-700 shadow-sm text-surface-900 dark:text-surface-100">
           🌐 Live Listings
         </button>
@@ -111,7 +111,7 @@ async function renderDealSearch() {
           <div class="flex flex-wrap gap-2" id="ds-source-chips">
             ${DEAL_SEARCH_SOURCES.map(s => `
               <button id="ds-chip-${s.id}" onclick="dsToggleSource('${s.id}')" title="${s.description}"
-                class="flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${_dsEnabledSources.has(s.id) ? 'bg-brand-50 dark:bg-brand-900/20 border-brand-300 dark:border-brand-600 text-brand-700 dark:text-brand-300' : 'bg-surface-50 dark:bg-surface-800 border-surface-200 dark:border-surface-700 text-surface-400 line-through'}">
+                class="flex items-center gap-2 px-3 py-1.5 rounded text-xs font-medium border transition-all ${_dsEnabledSources.has(s.id) ? 'bg-brand-50 dark:bg-brand-900/20 border-brand-300 dark:border-brand-600 text-brand-700 dark:text-brand-300' : 'bg-surface-50 dark:bg-surface-800 border-surface-200 dark:border-surface-700 text-surface-400 line-through'}">
                 <span>${s.icon}</span>
                 <span>${s.name}</span>
                 ${s.requiresLogin ? '<span class="text-surface-400">(link only)</span>' : ''}
@@ -202,7 +202,7 @@ function dsToggleSource(sourceId) {
   const chip = document.getElementById(`ds-chip-${sourceId}`);
   if (chip) {
     const on = _dsEnabledSources.has(sourceId);
-    chip.className = `flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${on ? 'bg-brand-50 dark:bg-brand-900/20 border-brand-300 dark:border-brand-600 text-brand-700 dark:text-brand-300' : 'bg-surface-50 dark:bg-surface-800 border-surface-200 dark:border-surface-700 text-surface-400 line-through'}`;
+    chip.className = `flex items-center gap-2 px-3 py-1.5 rounded text-xs font-medium border transition-all ${on ? 'bg-brand-50 dark:bg-brand-900/20 border-brand-300 dark:border-brand-600 text-brand-700 dark:text-brand-300' : 'bg-surface-50 dark:bg-surface-800 border-surface-200 dark:border-surface-700 text-surface-400 line-through'}`;
   }
   dsApplyFilters();
 }
@@ -602,7 +602,7 @@ function renderExcelImportPanel() {
         <p class="text-xs text-surface-500 mb-5">Upload a spreadsheet from any broker, platform export, or your own deal log. The AI will detect your column headers and map them to the right fields automatically. Large files (10,000+ rows) are supported.</p>
 
         <!-- Drop zone -->
-        <div id="ds-dropzone" class="border-2 border-dashed border-surface-300 dark:border-surface-600 rounded-2xl p-10 text-center cursor-pointer hover:border-brand-400 hover:bg-brand-50/30 dark:hover:bg-brand-900/10 transition-colors"
+        <div id="ds-dropzone" class="border-2 border-dashed border-surface-300 dark:border-surface-600 rounded p-10 text-center cursor-pointer hover:border-brand-400 hover:bg-brand-50/30 dark:hover:bg-brand-900/10 transition-colors"
           onclick="document.getElementById('ds-excel-input').click()"
           ondragover="event.preventDefault(); this.classList.add('border-brand-400','bg-brand-50/30')"
           ondragleave="this.classList.remove('border-brand-400','bg-brand-50/30')"

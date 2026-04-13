@@ -21,7 +21,7 @@ function renderEmailLogCard(settings) {
       </div>
       <p class="text-xs text-surface-500 mb-4">BCC this address in your emails to automatically log conversations with contacts in Pulse.</p>
 
-      <div class="bg-surface-50 dark:bg-surface-800/50 rounded-xl p-4 mb-4">
+      <div class="bg-surface-50 dark:bg-surface-800/50 rounded p-4 mb-4">
         <label class="block text-xs font-medium text-surface-500 mb-1.5">Your BCC Address</label>
         <div class="flex items-center gap-2">
           <code class="flex-1 bg-white dark:bg-surface-900 border border-surface-200 dark:border-surface-700 rounded-lg px-3 py-2 text-sm font-mono select-all">${escapeHtml(bccEmail)}</code>
@@ -32,7 +32,7 @@ function renderEmailLogCard(settings) {
         </div>
       </div>
 
-      <div class="bg-blue-50 dark:bg-blue-900/15 border border-blue-200 dark:border-blue-800 rounded-xl p-3 mb-4">
+      <div class="bg-blue-50 dark:bg-blue-900/15 border border-blue-200 dark:border-blue-800 rounded p-3 mb-4">
         <p class="text-xs text-blue-700 dark:text-blue-300"><strong>How it works:</strong> Add this email to the BCC field when emailing a contact. The tool will match the recipient to your contact list, log the interaction, and create a short summary.</p>
       </div>
 

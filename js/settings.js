@@ -22,7 +22,7 @@ async function renderSettings() {
             <label class="block text-sm font-medium text-surface-600 dark:text-surface-400 mb-1">Your LinkedIn Profile URL</label>
             <input type="url" id="settings-linkedin-url" class="input-field" placeholder="https://www.linkedin.com/in/your-profile" value="${escapeHtml(settings?.linkedInProfileUrl || '')}" />
           </div>
-          <div id="linkedin-connection-status" class="flex items-center gap-2 p-3 rounded-xl ${settings?.linkedInProfileUrl ? 'bg-green-50 dark:bg-green-900/15' : 'bg-surface-50 dark:bg-surface-800/50'}">
+          <div id="linkedin-connection-status" class="flex items-center gap-2 p-3 rounded ${settings?.linkedInProfileUrl ? 'bg-green-50 dark:bg-green-900/15' : 'bg-surface-50 dark:bg-surface-800/50'}">
             ${settings?.linkedInProfileUrl ? `
               <svg class="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
               <span class="text-sm text-green-700 dark:text-green-400 font-medium">LinkedIn connected</span>
@@ -31,7 +31,7 @@ async function renderSettings() {
               <span class="text-sm text-surface-500">Not connected — paste your LinkedIn URL above</span>
             `}
           </div>
-          <div class="bg-blue-50 dark:bg-blue-900/15 border border-blue-200 dark:border-blue-800 rounded-xl p-3">
+          <div class="bg-blue-50 dark:bg-blue-900/15 border border-blue-200 dark:border-blue-800 rounded p-3">
             <p class="text-xs text-blue-700 dark:text-blue-300"><strong>How it works:</strong> Your LinkedIn URL is used to generate personalized networking suggestions in the Suggestions tab. With a RapidAPI key (below), the tool can also pull profile data to enrich contacts automatically.</p>
           </div>
         </div>
@@ -91,7 +91,7 @@ async function renderSettings() {
           <div>
             <label class="block text-sm font-medium text-surface-600 dark:text-surface-400 mb-1">Claude API Key <span class="text-xs font-normal text-surface-400">(alternative to OpenAI)</span></label>
             <input type="password" id="settings-claude-key" class="input-field" placeholder="sk-ant-…" value="${settings?.claudeApiKey || ''}" />
-            <p class="text-xs text-surface-400 mt-1">Uses Claude 3.5 Haiku. If both keys are set, Claude takes priority. Get a key at <a href="https://console.anthropic.com/settings/keys" target="_blank" class="text-brand-600 hover:underline">console.anthropic.com</a>.</p>
+            <p class="text-xs text-surface-400 mt-1">Uses Claude 3.5 Haiku as a fallback if no OpenAI key is set. Get a key at <a href="https://console.anthropic.com/settings/keys" target="_blank" class="text-brand-600 hover:underline">console.anthropic.com</a>.</p>
           </div>
           <div>
             <label class="block text-sm font-medium text-surface-600 dark:text-surface-400 mb-1">Google Places API Key <span class="text-xs font-normal text-surface-400">(Company Scout)</span></label>
@@ -99,6 +99,61 @@ async function renderSettings() {
             <p class="text-xs text-surface-400 mt-1">Powers the Company Scout map search. Enable the <strong>Places API (New)</strong> in your Google Cloud project. Get a key at <a href="https://console.cloud.google.com/apis/credentials" target="_blank" class="text-brand-600 hover:underline">console.cloud.google.com</a>. Leave blank to use free OpenStreetMap data instead.</p>
           </div>
         </div>
+      </div>
+
+      <!-- Email Verification (EmailJS) -->
+      <div class="card mb-6" id="emailjs-settings-card">
+        <div class="flex items-center gap-3 mb-1">
+          <svg class="w-5 h-5 text-brand-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75" /></svg>
+          <h2 class="text-base font-semibold">Email Verification (EmailJS)</h2>
+        </div>
+        <p class="text-xs text-surface-500 mb-4">Send real verification emails to new users on signup. Free up to 200 emails/month via <a href="https://www.emailjs.com" target="_blank" class="text-brand-600 hover:underline">emailjs.com</a>.</p>
+        ${(() => {
+          const ejsCfg = JSON.parse(localStorage.getItem('pulse_emailjs_config') || '{}');
+          const isConfigured = !!(ejsCfg.publicKey && ejsCfg.serviceId && ejsCfg.templateId);
+          return `
+            ${isConfigured ? `
+              <div class="flex items-center gap-2 p-2.5 rounded-lg bg-green-50 dark:bg-green-900/15 border border-green-200 dark:border-green-800 mb-4">
+                <svg class="w-4 h-4 text-green-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                <span class="text-sm text-green-700 dark:text-green-400 font-medium">EmailJS configured — verification emails are live</span>
+              </div>
+            ` : `
+              <div class="flex items-start gap-2 p-2.5 rounded-lg bg-amber-50 dark:bg-amber-900/15 border border-amber-200 dark:border-amber-800 mb-4">
+                <svg class="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/></svg>
+                <div>
+                  <p class="text-sm text-amber-700 dark:text-amber-400 font-medium">Not configured</p>
+                  <p class="text-xs text-amber-600 dark:text-amber-500 mt-0.5">Verification codes are shown in the UI instead of being emailed.</p>
+                </div>
+              </div>
+            `}
+            <div class="space-y-3">
+              <div>
+                <label class="block text-xs font-medium text-surface-600 dark:text-surface-400 mb-1">EmailJS Public Key</label>
+                <input type="password" id="ejs-public-key" class="input-field" placeholder="your_public_key" value="${escapeHtml(ejsCfg.publicKey || '')}" />
+              </div>
+              <div class="grid grid-cols-2 gap-3">
+                <div>
+                  <label class="block text-xs font-medium text-surface-600 dark:text-surface-400 mb-1">Service ID</label>
+                  <input type="text" id="ejs-service-id" class="input-field" placeholder="service_xxxxxxx" value="${escapeHtml(ejsCfg.serviceId || '')}" />
+                </div>
+                <div>
+                  <label class="block text-xs font-medium text-surface-600 dark:text-surface-400 mb-1">Template ID</label>
+                  <input type="text" id="ejs-template-id" class="input-field" placeholder="template_xxxxxxx" value="${escapeHtml(ejsCfg.templateId || '')}" />
+                </div>
+              </div>
+              <div class="bg-surface-50 dark:bg-surface-800 rounded p-3 text-xs text-surface-500 space-y-1">
+                <p class="font-medium text-surface-600 dark:text-surface-400">Setup in 3 steps:</p>
+                <p>1. Create a free account at <a href="https://www.emailjs.com" target="_blank" class="text-brand-600 hover:underline">emailjs.com</a></p>
+                <p>2. Add an email service (Gmail, Outlook, etc.) and note your <strong>Service ID</strong></p>
+                <p>3. Create a template with variables <code class="bg-surface-200 dark:bg-surface-700 px-1 rounded">{{to_email}}</code> <code class="bg-surface-200 dark:bg-surface-700 px-1 rounded">{{to_name}}</code> <code class="bg-surface-200 dark:bg-surface-700 px-1 rounded">{{code}}</code> and note your <strong>Template ID</strong> and <strong>Public Key</strong></p>
+              </div>
+              <div class="flex gap-2">
+                <button onclick="saveEmailJsConfig()" class="btn-primary btn-sm">Save EmailJS Config</button>
+                ${isConfigured ? `<button onclick="clearEmailJsConfig()" class="btn-secondary btn-sm text-red-500">Clear</button>` : ''}
+              </div>
+            </div>
+          `;
+        })()}
       </div>
 
       <!-- Email BCC Logging -->
@@ -116,7 +171,7 @@ async function renderSettings() {
             <span class="inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${settings?.emailReminders ? 'translate-x-6' : 'translate-x-1'}"></span>
           </button>
         </div>
-        <div class="bg-surface-50 dark:bg-surface-800 rounded-xl p-3">
+        <div class="bg-surface-50 dark:bg-surface-800 rounded p-3">
           <p class="text-xs text-surface-500">Email reminders will be available when the app is deployed with a backend service. In local mode, use in-app notifications.</p>
         </div>
       </div>
@@ -192,6 +247,25 @@ async function toggleThemeFromSettings() {
       btn.querySelector('span').className = `inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${isDark ? 'translate-x-6' : 'translate-x-1'}`;
     }
   }, 50);
+}
+
+function saveEmailJsConfig() {
+  const publicKey = document.getElementById('ejs-public-key')?.value.trim();
+  const serviceId = document.getElementById('ejs-service-id')?.value.trim();
+  const templateId = document.getElementById('ejs-template-id')?.value.trim();
+  if (!publicKey || !serviceId || !templateId) {
+    showToast('Please fill in all three EmailJS fields', 'error');
+    return;
+  }
+  localStorage.setItem('pulse_emailjs_config', JSON.stringify({ publicKey, serviceId, templateId }));
+  showToast('EmailJS configuration saved — verification emails are now live', 'success');
+  renderSettings();
+}
+
+function clearEmailJsConfig() {
+  localStorage.removeItem('pulse_emailjs_config');
+  showToast('EmailJS configuration cleared', 'info');
+  renderSettings();
 }
 
 function toggleTheme() {
@@ -272,7 +346,7 @@ function resetAllData() {
         </div>
       </div>
 
-      <div class="bg-red-50 dark:bg-red-900/15 border border-red-200 dark:border-red-800 rounded-xl p-3 mb-5 text-sm text-red-700 dark:text-red-400">
+      <div class="bg-red-50 dark:bg-red-900/15 border border-red-200 dark:border-red-800 rounded p-3 mb-5 text-sm text-red-700 dark:text-red-400">
         All contacts, companies, calls, notes, reminders, deals, and pipeline data will be <strong>permanently deleted</strong>. Your account and settings will remain.
       </div>
 

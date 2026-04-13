@@ -42,7 +42,7 @@ function renderLoadingSkeleton(rows = 3) {
   return html;
 }
 
-function renderStatCard(label, value, icon, color = 'brand') {
+function renderStatCard(label, value, icon, color = 'brand', onclick = null) {
   const colorMap = {
     brand: 'bg-brand-50 dark:bg-brand-900/20 text-brand-600 dark:text-brand-400',
     green: 'bg-green-50 dark:bg-green-900/20 text-green-600 dark:text-green-400',
@@ -51,14 +51,18 @@ function renderStatCard(label, value, icon, color = 'brand') {
     purple: 'bg-purple-50 dark:bg-purple-900/20 text-purple-600 dark:text-purple-400',
   };
 
+  const clickAttrs = onclick
+    ? `onclick="${onclick}" role="button" tabindex="0" title="Click to see details" style="cursor:pointer"`
+    : '';
+
   return `
-    <div class="card">
+    <div class="card${onclick ? ' hover:border-brand-300 dark:hover:border-brand-700 transition-colors' : ''}" ${clickAttrs}>
       <div class="flex items-start justify-between">
         <div class="stat-card">
           <span class="stat-label">${escapeHtml(label)}</span>
           <span class="stat-value">${value}</span>
         </div>
-        <div class="p-2.5 rounded-xl ${colorMap[color] || colorMap.brand}">
+        <div class="p-2.5 rounded ${colorMap[color] || colorMap.brand}">
           ${icon}
         </div>
       </div>

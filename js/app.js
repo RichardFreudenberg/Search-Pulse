@@ -8,7 +8,7 @@ let currentPage = 'dashboard';
 const VALID_PAGES = new Set([
   'dashboard','contacts','companies','calls','reminders',
   'suggestions','news','resources','deals','deal-search',
-  'company-scout','settings',
+  'company-scout','sourcing','settings',
 ]);
 
 // Navigation
@@ -45,7 +45,9 @@ function navigate(page, { pushState = true } = {}) {
     case 'deals': renderDeals(); break;
     case 'deal-search': renderDealSearch(); break;
     case 'company-scout': renderCompanyScout(); break;
+    case 'sourcing': renderSourcing(); break;
     case 'settings': renderSettings(); break;
+    case 'shared-dashboard': renderSharedDashboardPage(); break;
     default: renderDashboard();
   }
 }
@@ -79,9 +81,8 @@ async function renderSuggestions() {
     DB.get(STORES.settings, `settings_${currentUser.id}`),
   ]);
 
-  const activeContacts = contacts.filter(c => !c.archived);
-  const companyMap = {};
-  companies.forEach(c => companyMap[c.id] = c);
+  const activeContacts = getActiveContacts(contacts);
+  const companyMap = buildMap(companies);
   const linkedInConnected = !!(settings && settings.linkedInProfileUrl);
 
   // Analyze existing network to generate suggestions
@@ -106,7 +107,7 @@ async function renderSuggestions() {
           </div>
         </div>
       ` : `
-        <div class="flex items-center gap-2 px-4 py-2 bg-green-50 dark:bg-green-900/15 border border-green-200 dark:border-green-800 rounded-xl mb-6">
+        <div class="flex items-center gap-2 px-4 py-2 bg-green-50 dark:bg-green-900/15 border border-green-200 dark:border-green-800 rounded mb-6">
           <svg class="w-4 h-4 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
           <span class="text-sm text-green-700 dark:text-green-400">LinkedIn connected — suggestions personalized to your profile</span>
           <a href="${escapeHtml(settings.linkedInProfileUrl)}" target="_blank" class="ml-auto text-xs text-green-600 hover:underline">View profile →</a>
@@ -148,7 +149,7 @@ async function renderSuggestions() {
             ${priority.map(p => {
               const company = companyMap[p.companyId];
               return `
-              <div class="flex items-start gap-3 p-4 rounded-xl border border-surface-200 dark:border-surface-700 hover:border-brand-300 dark:hover:border-brand-600 transition-colors cursor-pointer" onclick="viewContact('${p.id}')">
+              <div class="flex items-start gap-3 p-4 rounded border border-surface-200 dark:border-surface-700 hover:border-brand-300 dark:hover:border-brand-600 transition-colors cursor-pointer" onclick="viewContact('${p.id}')">
                 ${renderAvatar(p.fullName, p.photoUrl, 'md', p.linkedInUrl)}
                 <div class="flex-1 min-w-0">
                   <h3 class="text-sm font-semibold truncate">${escapeHtml(p.fullName)}</h3>
@@ -171,7 +172,7 @@ async function renderSuggestions() {
         <p class="text-xs text-surface-500 mb-4">Open these searches directly on LinkedIn to find more people.</p>
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
           ${analysis.suggestedSearches.slice(0, 6).map((s, i) => `
-            <a href="${escapeHtml(s.linkedInUrl)}" target="_blank" class="flex items-center gap-3 p-3 rounded-xl border border-surface-200 dark:border-surface-700 hover:border-brand-300 dark:hover:border-brand-600 transition-colors">
+            <a href="${escapeHtml(s.linkedInUrl)}" target="_blank" class="flex items-center gap-3 p-3 rounded border border-surface-200 dark:border-surface-700 hover:border-brand-300 dark:hover:border-brand-600 transition-colors">
               <div class="p-2 rounded-lg bg-brand-50 dark:bg-brand-900/20 text-brand-600 dark:text-brand-400 flex-shrink-0">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" /></svg>
               </div>
@@ -192,7 +193,7 @@ async function renderSuggestions() {
           <p class="text-xs text-surface-500 mb-4">Companies similar to those in your network</p>
           <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             ${analysis.suggestedCompanies.map(c => `
-              <div class="p-3 rounded-xl border border-surface-200 dark:border-surface-700">
+              <div class="p-3 rounded border border-surface-200 dark:border-surface-700">
                 <div class="flex items-center gap-2 mb-1">
                   <div class="w-6 h-6 rounded bg-white border border-surface-200 flex items-center justify-center overflow-hidden">
                     <img src="https://www.google.com/s2/favicons?sz=32&domain=${encodeURIComponent(c.name.toLowerCase().replace(/[^a-z0-9]/g,''))}.com" class="w-4 h-4" onerror="this.style.display='none'" />
@@ -268,8 +269,7 @@ function getPrioritizedContacts(contacts, companyMap, calls) {
 
 function analyzeNetwork(contacts, companies, calls) {
   // Extract patterns from existing network
-  const companyMap = {};
-  companies.forEach(c => companyMap[c.id] = c);
+  const companyMap = buildMap(companies);
 
   // Collect industries
   const industries = [...new Set(companies.map(c => c.industry).filter(Boolean))];
@@ -483,7 +483,7 @@ async function seedDemoData(userId) {
 
   const companyIds = [];
   for (const c of companies) {
-    const saved = await DB.add(STORES.companies, { ...c, userId });
+    const saved = await DB.add(STORES.companies, { ...c, userId, isDemo: true });
     companyIds.push(saved.id);
   }
 
@@ -505,6 +505,7 @@ async function seedDemoData(userId) {
     const saved = await DB.add(STORES.contacts, {
       ...c,
       userId,
+      isDemo: true,
       photoUrl: '',
       lastContactDate: addDays(new Date(), -daysAgo),
       nextFollowUpDate: addDays(new Date(), Math.floor(Math.random() * 21) - 7),
@@ -515,6 +516,7 @@ async function seedDemoData(userId) {
     // Add activity
     await DB.add(STORES.activities, {
       userId,
+      isDemo: true,
       contactId: saved.id,
       type: 'created',
       title: 'Contact created',
@@ -526,6 +528,7 @@ async function seedDemoData(userId) {
     if (c.notes) {
       await DB.add(STORES.notes, {
         userId,
+        isDemo: true,
         contactId: saved.id,
         callId: null,
         content: c.notes,
@@ -544,10 +547,11 @@ async function seedDemoData(userId) {
   ];
 
   for (const call of callsData) {
-    const saved = await DB.add(STORES.calls, { ...call, userId });
+    const saved = await DB.add(STORES.calls, { ...call, userId, isDemo: true });
 
     await DB.add(STORES.notes, {
       userId,
+      isDemo: true,
       contactId: call.contactId,
       callId: saved.id,
       content: call.notes,
@@ -556,6 +560,7 @@ async function seedDemoData(userId) {
 
     await DB.add(STORES.activities, {
       userId,
+      isDemo: true,
       contactId: call.contactId,
       type: 'call',
       title: 'Call logged',
@@ -574,7 +579,154 @@ async function seedDemoData(userId) {
   ];
 
   for (const r of remindersData) {
-    await DB.add(STORES.reminders, { ...r, userId, status: 'pending' });
+    await DB.add(STORES.reminders, { ...r, userId, isDemo: true, status: 'pending' });
+  }
+}
+
+
+// ============================================
+// Seed Demo Deal — Apex Precision Manufacturing
+// ============================================
+async function seedDemoDeal(userId) {
+  // Only seed if the user has no deals yet
+  const existing = await DB.getAll(STORES.deals).catch(() => []);
+  if (existing.some(d => d.userId === userId)) return;
+
+  // Helper: ISO date string N days from today (negative = past, positive = future)
+  const fromToday = n => addDays(new Date(), n);
+
+  // Create the acquisition target company
+  const apexCo = await DB.add(STORES.companies, {
+    userId,
+    isDemo: true,
+    name: 'Apex Precision Manufacturing',
+    industry: 'Industrial Manufacturing',
+    companyType: 'Acquisition Target',
+    size: '51-200',
+    location: 'Tulsa, OK',
+    website: '',
+    description: 'Precision CNC machining and fabrication serving oil & gas, aerospace, and industrial OEM clients. Founded 1987.',
+    logoUrl: '',
+  });
+
+  // Create the deal
+  const deal = await DB.add(STORES.deals, {
+    userId,
+    isDemo: true,
+    name: 'Apex Precision Manufacturing',
+    companyId: apexCo.id,
+    stage: 'Due Diligence',
+    status: 'Active',
+    priority: 'High',
+    source: 'Business Broker',
+    sector: 'Industrial Manufacturing',
+    location: 'Tulsa, OK',
+    revenue:     8500000,
+    ebitda:      1900000,
+    askingPrice: 11875000,
+    employees:   87,
+    description: 'Precision CNC machining and fabrication shop serving oil & gas, aerospace, and industrial OEM clients. Founded 1987. Owner seeking retirement. Strong backlog, highly recurring customer revenue, and proprietary tooling for several large accounts.',
+    highlights: [
+      '$8.5M revenue with 22% EBITDA margins — above industry average for precision machining',
+      '73% of revenue from customers with 5+ year relationships',
+      'Proprietary tooling creates meaningful switching costs for top accounts',
+      'Experienced management team (VP Ops + plant manager) willing to stay post-acquisition',
+      '$2.1M backlog as of December 2024',
+      'No single customer exceeds 18% of total revenue',
+    ],
+    concerns: [
+      'Equipment fleet aging 8–12 years — capex investment likely required in years 1–3',
+      'Oil & gas exposure (~40% of revenue) adds cyclical risk',
+      'Owner holds key customer relationships — detailed transition plan needed',
+      'Working capital intensity higher than peers (~28% of revenue)',
+    ],
+  });
+
+  // Deal history — sourced 90 days ago, now in DD
+  const historyItems = [
+    { action: 'Sourced',               description: 'Received teaser from broker Rachel Abramson at Sunbelt Business Brokers. Precision machining, $8.5M revenue, 22% margins — fits our target profile.',       daysAgo: 90 },
+    { action: 'NDA Signed',            description: 'Executed mutual NDA with seller. Received CIM and preliminary financial model from broker.',                                                               daysAgo: 75 },
+    { action: 'CIM Review',            description: 'Completed internal CIM review. Revenue and EBITDA confirmed directionally with seller. Flagged capex cycle and oil & gas concentration as key DD items.', daysAgo: 58 },
+    { action: 'Management Meeting',    description: 'Met with owner Bill Kowalski (CEO) and Sandra Reyes (VP Operations) at the plant in Tulsa. Toured facility. Strong team — Sandra is clearly running day-to-day. Confirmed $2.1M backlog. Owner looking for 18–24 month transition period.',  daysAgo: 43 },
+    { action: 'LOI Submitted',         description: 'Submitted LOI at $11.875M (6.25x trailing EBITDA, 1.40x revenue). Requested 45-day exclusivity for due diligence. Seller countered at $13M — broker indicated $12M range is workable.',                                                     daysAgo: 21 },
+    { action: 'Due Diligence Started', description: 'DD kickoff with seller and broker. Engaged Dixon Hughes Goodman for QoE (4-week timeline). Received data room access. LOI accepted at $11.875M after seller negotiation.',                                                                    daysAgo: 10 },
+  ];
+
+  for (const h of historyItems) {
+    await DB.add(STORES.dealHistory, {
+      dealId:      deal.id,
+      userId,
+      isDemo:      true,
+      action:      h.action,
+      description: h.description,
+      timestamp:   fromToday(-h.daysAgo),
+    });
+  }
+
+  // Deal documents (metadata only — data is null, not stored)
+  const docItems = [
+    { name: 'Apex Precision — Confidential Information Memorandum.pdf', category: 'CIM',         type: 'pdf',  size: 4310000, daysAgo: 73 },
+    { name: 'Apex — 3-Year P&L 2022–2024.xlsx',                         category: 'Financials',  type: 'xlsx', size: 284000,  daysAgo: 72 },
+    { name: 'Apex — Balance Sheet December 2024.xlsx',                   category: 'Financials',  type: 'xlsx', size: 148000,  daysAgo: 72 },
+    { name: 'Executed NDA — Apex Precision Manufacturing.pdf',           category: 'Legal',       type: 'pdf',  size: 318000,  daysAgo: 74 },
+    { name: 'LOI — Apex Precision Manufacturing (Signed).pdf',           category: 'Legal',       type: 'pdf',  size: 183000,  daysAgo: 20 },
+    { name: 'Customer Revenue Concentration Analysis.xlsx',              category: 'DD Materials', type: 'xlsx', size: 97000,   daysAgo: 9  },
+    { name: 'Equipment List & Independent Appraisal 2024.pdf',           category: 'DD Materials', type: 'pdf',  size: 763000,  daysAgo: 7  },
+    { name: 'QoE Engagement Letter — Dixon Hughes Goodman.pdf',          category: 'DD Materials', type: 'pdf',  size: 213000,  daysAgo: 9  },
+  ];
+
+  for (const doc of docItems) {
+    await DB.add(STORES.dealDocuments, {
+      dealId:     deal.id,
+      userId,
+      isDemo:     true,
+      name:       doc.name,
+      category:   doc.category,
+      type:       doc.type,
+      size:       doc.size,
+      data:       null,
+      uploadedAt: fromToday(-doc.daysAgo),
+    });
+  }
+
+  // Deal notes
+  const noteItems = [
+    { content: 'Initial impression: solid business. 37-year track record, established customer relationships, and strong EBITDA margins for precision machining. Main risks are capex cycle and oil & gas exposure. Worth proceeding to management meeting.', daysAgo: 70 },
+    { content: 'Post-management meeting notes:\n\nBill (owner) is genuinely motivated — health concerns, no family successor. Sandra (VP Ops) is clearly running the plant day-to-day and is open to staying. Backlog feels real and was confirmed with specific customer names.\n\nKey items to focus on in DD:\n1. Customer contract stickiness and switching costs\n2. Capex requirements for the next 3–5 years (equipment aging)\n3. Revenue bridge 2022–2024 (slight dip in \'23 recovered in \'24)\n4. Owner\'s personal customer relationships — how transferable?', daysAgo: 40 },
+    { content: 'LOI notes:\n\nSubmitted at $11.875M (6.25x trailing EBITDA). Justified to seller as in-line with comparable precision machining transactions in the lower middle market. Seller countered at $13M — broker signaled $12M range is workable. Standing firm at $11.875M and will use capex concerns from DD to justify. Exclusivity secured for 45 days.', daysAgo: 18 },
+    { content: 'DD kickoff summary:\n\n• QoE firm: Dixon Hughes Goodman — 4-week timeline, prelim findings in week 3\n• Data room is well-organized; CIM financials appear to match QuickBooks exports\n• Open items: AR aging schedule, backlog detail by customer, equipment appraisal, top-5 customer reference calls\n• Legal: schedule SPA drafting for week 3 once QoE preliminary received\n• Environmental: Phase I report ordered, results expected in 2 weeks', daysAgo: 8 },
+  ];
+
+  for (const note of noteItems) {
+    await DB.add(STORES.dealNotes, {
+      dealId:    deal.id,
+      userId,
+      isDemo:    true,
+      content:   note.content,
+      createdAt: fromToday(-note.daysAgo),
+    });
+  }
+
+  // Open deal tasks
+  const taskItems = [
+    { title: 'Review QoE preliminary findings from Dixon Hughes Goodman', status: 'in-progress', priority: 'High',   dueDate: fromToday(7)  },
+    { title: 'Conduct top-3 customer reference calls',                    status: 'pending',     priority: 'High',   dueDate: fromToday(5)  },
+    { title: 'Review independent equipment appraisal report',             status: 'pending',     priority: 'High',   dueDate: fromToday(3)  },
+    { title: 'Confirm Phase I environmental report is clean',             status: 'pending',     priority: 'High',   dueDate: fromToday(5)  },
+    { title: 'Model capex scenarios — maintenance vs. growth',            status: 'pending',     priority: 'Medium', dueDate: fromToday(10) },
+    { title: 'Negotiate SPA terms with seller counsel',                   status: 'pending',     priority: 'Medium', dueDate: fromToday(14) },
+  ];
+
+  for (const task of taskItems) {
+    await DB.add(STORES.dealTasks, {
+      dealId:   deal.id,
+      userId,
+      isDemo:   true,
+      title:    task.title,
+      status:   task.status,
+      priority: task.priority,
+      dueDate:  task.dueDate,
+    });
   }
 }
 
@@ -583,6 +735,8 @@ async function seedDemoData(userId) {
 // App Initialization
 // ============================================
 async function initApp() {
+  // Migrate any data from the legacy "nexus_crm" database before opening the current one.
+  await migrateLegacyDB();
   await openDB();
 
   // Check for shared dashboard link before anything else

@@ -2,6 +2,12 @@
    Nexus CRM — Companies Management
    ============================================ */
 
+const COMPANY_TYPES = ['Acquisition Target', 'Portfolio Company', 'Prospect', 'Competitor', 'Partner / Advisor', 'Other'];
+
+function companyTypeOptions(selected = '') {
+  return COMPANY_TYPES.map(t => `<option value="${t}"${selected === t ? ' selected' : ''}>${t}</option>`).join('');
+}
+
 async function renderCompanies() {
   const pageContent = document.getElementById('page-content');
   pageContent.innerHTML = `<div class="p-4 lg:p-8 max-w-7xl mx-auto">${renderLoadingSkeleton(5)}</div>`;
@@ -11,7 +17,7 @@ async function renderCompanies() {
     DB.getForUser(STORES.contacts, currentUser.id),
   ]);
 
-  const activeContacts = contacts.filter(c => !c.archived);
+  const activeContacts = getActiveContacts(contacts);
 
   // Count contacts per company
   const contactCounts = {};
@@ -74,8 +80,7 @@ async function viewCompany(companyId) {
 
   const companyContacts = contacts.filter(c => c.companyId === companyId && !c.archived);
   const companies = await DB.getForUser(STORES.companies, currentUser.id);
-  const companyMap = {};
-  companies.forEach(c => companyMap[c.id] = c);
+  const companyMap = buildMap(companies);
 
   const pageContent = document.getElementById('page-content');
   pageContent.innerHTML = `
@@ -125,12 +130,7 @@ async function openNewCompanyModal() {
             <label class="block text-sm font-medium text-surface-600 dark:text-surface-400 mb-1">Company Type</label>
             <select id="company-type" class="input-field">
               <option value="">— Select type —</option>
-              <option value="Acquisition Target">Acquisition Target</option>
-              <option value="Portfolio Company">Portfolio Company</option>
-              <option value="Prospect">Prospect</option>
-              <option value="Competitor">Competitor</option>
-              <option value="Partner / Advisor">Partner / Advisor</option>
-              <option value="Other">Other</option>
+              ${companyTypeOptions()}
             </select>
           </div>
         </div>
@@ -204,12 +204,7 @@ async function openEditCompanyModal(companyId) {
             <label class="block text-sm font-medium text-surface-600 dark:text-surface-400 mb-1">Company Type</label>
             <select id="edit-company-type" class="input-field">
               <option value="">— Select type —</option>
-              <option value="Acquisition Target" ${company.companyType === 'Acquisition Target' ? 'selected' : ''}>Acquisition Target</option>
-              <option value="Portfolio Company" ${company.companyType === 'Portfolio Company' ? 'selected' : ''}>Portfolio Company</option>
-              <option value="Prospect" ${company.companyType === 'Prospect' ? 'selected' : ''}>Prospect</option>
-              <option value="Competitor" ${company.companyType === 'Competitor' ? 'selected' : ''}>Competitor</option>
-              <option value="Partner / Advisor" ${company.companyType === 'Partner / Advisor' ? 'selected' : ''}>Partner / Advisor</option>
-              <option value="Other" ${company.companyType === 'Other' ? 'selected' : ''}>Other</option>
+              ${companyTypeOptions(company.companyType)}
             </select>
           </div>
         </div>

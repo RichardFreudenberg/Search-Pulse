@@ -337,7 +337,7 @@ function renderDiligenceReport(report) {
           <span class="text-sm text-surface-500">Analysis in progress...</span>
         </div>
       ` : `
-        <div class="p-4 bg-red-50 dark:bg-red-900/15 rounded-xl">
+        <div class="p-4 bg-red-50 dark:bg-red-900/15 rounded">
           <p class="text-sm text-red-600">${escapeHtml(report.response)}</p>
         </div>
       `}

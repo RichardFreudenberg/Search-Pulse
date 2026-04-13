@@ -59,7 +59,7 @@ async function renderNews() {
       <div class="flex gap-2 overflow-x-auto pb-2 mb-4 -mx-1 px-1">
         ${NEWS_REGIONS.map(r => `
           <button onclick="switchNewsRegion('${r.id}')" id="news-tab-${r.id}"
-            class="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium whitespace-nowrap transition-all ${currentNewsRegion === r.id
+            class="flex items-center gap-2 px-4 py-2.5 rounded text-sm font-medium whitespace-nowrap transition-all ${currentNewsRegion === r.id
               ? 'bg-brand-600 text-white shadow-sm'
               : 'bg-white dark:bg-surface-900 border border-surface-200 dark:border-surface-700 text-surface-600 dark:text-surface-400 hover:border-brand-300 dark:hover:border-brand-700'}">
             <span>${r.icon}</span>
@@ -177,9 +177,9 @@ async function switchNewsRegion(regionId) {
     const tab = document.getElementById(`news-tab-${r.id}`);
     if (tab) {
       if (r.id === regionId) {
-        tab.className = 'flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium whitespace-nowrap transition-all bg-brand-600 text-white shadow-sm';
+        tab.className = 'flex items-center gap-2 px-4 py-2.5 rounded text-sm font-medium whitespace-nowrap transition-all bg-brand-600 text-white shadow-sm';
       } else {
-        tab.className = 'flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium whitespace-nowrap transition-all bg-white dark:bg-surface-900 border border-surface-200 dark:border-surface-700 text-surface-600 dark:text-surface-400 hover:border-brand-300 dark:hover:border-brand-700';
+        tab.className = 'flex items-center gap-2 px-4 py-2.5 rounded text-sm font-medium whitespace-nowrap transition-all bg-white dark:bg-surface-900 border border-surface-200 dark:border-surface-700 text-surface-600 dark:text-surface-400 hover:border-brand-300 dark:hover:border-brand-700';
       }
     }
   });
@@ -373,7 +373,7 @@ function renderNewsFallback(regionId, industryId) {
 
   return `
     <div class="text-center py-6 mb-6">
-      <div class="inline-flex items-center gap-2 px-4 py-2 bg-yellow-50 dark:bg-yellow-900/15 border border-yellow-200 dark:border-yellow-800 rounded-xl">
+      <div class="inline-flex items-center gap-2 px-4 py-2 bg-yellow-50 dark:bg-yellow-900/15 border border-yellow-200 dark:border-yellow-800 rounded">
         <svg class="w-4 h-4 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" /></svg>
         <span class="text-sm text-yellow-700 dark:text-yellow-400">Live news feed unavailable — try the Resources tab for curated sources</span>
       </div>
@@ -392,7 +392,7 @@ function renderNewsFallback(regionId, industryId) {
       <h3 class="text-sm font-semibold mb-3">Quick Search by Region</h3>
       <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
         ${NEWS_REGIONS.filter(r => r.id !== 'all').map(r => `
-          <a href="${googleSearches[r.id]}" target="_blank" class="flex items-center gap-2 p-3 rounded-xl border border-surface-200 dark:border-surface-700 hover:border-brand-300 dark:hover:border-brand-700 transition-colors">
+          <a href="${googleSearches[r.id]}" target="_blank" class="flex items-center gap-2 p-3 rounded border border-surface-200 dark:border-surface-700 hover:border-brand-300 dark:hover:border-brand-700 transition-colors">
             <span class="text-lg">${r.icon}</span>
             <span class="text-sm font-medium">${r.label}</span>
           </a>

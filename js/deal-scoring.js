@@ -59,7 +59,7 @@ function renderScoreBar(score, size = 'md') {
 
   return `
     <div class="flex items-center gap-2">
-      <div class="flex-1 bg-surface-200 dark:bg-surface-700 rounded-full ${sizeClass} min-w-[60px]">
+      <div class="flex-1 bg-surface-200 dark:bg-surface-700 rounded-sm ${sizeClass} min-w-[60px]">
         <div class="rounded-full ${sizeClass}" style="width: ${pct}%; background-color: ${color}"></div>
       </div>
       <span class="text-xs font-semibold" style="color: ${color}">${score.toFixed(1)}</span>
@@ -83,7 +83,7 @@ function renderScoreBreakdown(breakdown, criteria) {
               <span class="text-xs text-surface-600 dark:text-surface-400">${escapeHtml(config.label)} <span class="text-surface-400">(${config.weight}%)</span></span>
               <span class="text-xs font-semibold" style="color: ${color}">${val !== undefined ? val + '/10' : '—'}</span>
             </div>
-            <div class="bg-surface-200 dark:bg-surface-700 rounded-full h-1.5">
+            <div class="bg-surface-200 dark:bg-surface-700 rounded-sm h-1.5">
               <div class="rounded-full h-1.5 transition-all" style="width: ${pct}%; background-color: ${color}"></div>
             </div>
           </div>
@@ -151,5 +151,5 @@ function renderScoreBadge(score) {
   const color = score >= 7 ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
     : score >= 5 ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400'
     : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400';
-  return `<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${color}">${score.toFixed(1)}</span>`;
+  return `<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold ${color}">${score.toFixed(1)}</span>`;
 }

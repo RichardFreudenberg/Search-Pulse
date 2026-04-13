@@ -43,6 +43,9 @@ function createBarChart(canvasId, labels, data, options = {}) {
     options: {
       responsive: true,
       maintainAspectRatio: false,
+      onClick: options.onClickLabel ? (e, elements, chart) => {
+        if (elements.length) options.onClickLabel(chart.data.labels[elements[0].index]);
+      } : undefined,
       plugins: {
         legend: { display: false },
         tooltip: {
@@ -68,6 +71,7 @@ function createBarChart(canvasId, labels, data, options = {}) {
       }
     }
   });
+  if (options.onClickLabel) ctx.style.cursor = 'pointer';
 }
 
 function createDoughnutChart(canvasId, labels, data, options = {}) {
@@ -97,6 +101,9 @@ function createDoughnutChart(canvasId, labels, data, options = {}) {
       responsive: true,
       maintainAspectRatio: false,
       cutout: '65%',
+      onClick: options.onClickLabel ? (e, elements, chart) => {
+        if (elements.length) options.onClickLabel(chart.data.labels[elements[0].index]);
+      } : undefined,
       plugins: {
         legend: {
           position: 'bottom',
@@ -120,6 +127,7 @@ function createDoughnutChart(canvasId, labels, data, options = {}) {
       }
     }
   });
+  if (options.onClickLabel) ctx.style.cursor = 'pointer';
 }
 
 function createLineChart(canvasId, labels, datasets, options = {}) {

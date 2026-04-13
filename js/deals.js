@@ -21,6 +21,15 @@ const DEAL_STAGE_COLORS = {
 const DEAL_SOURCES = ['Broker', 'Proprietary', 'Referral', 'Online Listing', 'Conference', 'Cold Outreach', 'Advisor', 'Other'];
 const DEAL_SECTORS = ['Business Services', 'Healthcare Services', 'Technology', 'Industrial', 'Consumer', 'Education', 'Construction / Trades', 'Distribution', 'Food & Beverage', 'Financial Services', 'Other'];
 
+// Hex colors for stage funnel bars (Tailwind CSS variables are not available at runtime)
+const DEAL_STAGE_HEX = {
+  'blue': '#3b82f6', 'indigo': '#6366f1', 'violet': '#8b5cf6',
+  'purple': '#a855f7', 'fuchsia': '#d946ef', 'pink': '#ec4899',
+  'yellow': '#eab308', 'amber': '#f59e0b', 'orange': '#f97316',
+  'rose': '#f43f5e', 'cyan': '#06b6d4', 'green': '#22c55e',
+  'red': '#ef4444', 'gray': '#6b7280', 'brand': '#4c6ef5',
+};
+
 let dealsViewMode = 'board'; // 'board' or 'table'
 let dealsFilter = { stage: 'active', source: '', search: '', sort: 'newest' };
 
@@ -77,12 +86,16 @@ async function renderDeals() {
 
       <!-- Stats Row -->
       <div class="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-6">
-        ${renderStatCard('Active Deals', activeDeals.length, '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M20.25 14.15v4.25c0 1.094-.787 2.036-1.872 2.18-2.087.277-4.216.42-6.378.42s-4.291-.143-6.378-.42c-1.085-.144-1.872-1.086-1.872-2.18v-4.25m16.5 0a2.18 2.18 0 00.75-1.661V8.706c0-1.081-.768-2.015-1.837-2.175a48.114 48.114 0 00-3.413-.387m4.5 8.006c-.194.165-.42.295-.673.38A23.978 23.978 0 0112 15.75c-2.648 0-5.195-.429-7.577-1.22a2.016 2.016 0 01-.673-.38m0 0A2.18 2.18 0 013 12.489V8.706c0-1.081.768-2.015 1.837-2.175a48.111 48.111 0 013.413-.387m7.5 0V5.25A2.25 2.25 0 0013.5 3h-3a2.25 2.25 0 00-2.25 2.25v.894m7.5 0a48.667 48.667 0 00-7.5 0" /></svg>', 'brand')}
-        ${renderStatCard('Hot Deals', hotDeals.length, '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15.362 5.214A8.252 8.252 0 0112 21 8.25 8.25 0 016.038 7.048 8.287 8.287 0 009 9.6a8.983 8.983 0 013.361-6.867 8.21 8.21 0 003 2.48z" /></svg>', 'red')}
-        ${renderStatCard('In Diligence', activeDeals.filter(d => ['Due Diligence', 'Exclusivity'].includes(d.stage)).length, '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" /></svg>', 'purple')}
-        ${renderStatCard('Overdue Tasks', overdueTasks.length, '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" /></svg>', 'yellow')}
-        ${renderStatCard('Total Deals', deals.length, '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3.75 12h16.5m-16.5 3.75h16.5M3.75 19.5h16.5M5.625 4.5h12.75a1.875 1.875 0 010 3.75H5.625a1.875 1.875 0 010-3.75z" /></svg>', 'green')}
+        ${renderStatCard('Active Deals', activeDeals.length, '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M20.25 14.15v4.25c0 1.094-.787 2.036-1.872 2.18-2.087.277-4.216.42-6.378.42s-4.291-.143-6.378-.42c-1.085-.144-1.872-1.086-1.872-2.18v-4.25m16.5 0a2.18 2.18 0 00.75-1.661V8.706c0-1.081-.768-2.015-1.837-2.175a48.114 48.114 0 00-3.413-.387m4.5 8.006c-.194.165-.42.295-.673.38A23.978 23.978 0 0112 15.75c-2.648 0-5.195-.429-7.577-1.22a2.016 2.016 0 01-.673-.38m0 0A2.18 2.18 0 013 12.489V8.706c0-1.081.768-2.015 1.837-2.175a48.111 48.111 0 013.413-.387m7.5 0V5.25A2.25 2.25 0 0013.5 3h-3a2.25 2.25 0 00-2.25 2.25v.894m7.5 0a48.667 48.667 0 00-7.5 0" /></svg>', 'brand', "showPipelineStatsModal('active')")}
+        ${renderStatCard('Hot Deals', hotDeals.length, '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15.362 5.214A8.252 8.252 0 0112 21 8.25 8.25 0 016.038 7.048 8.287 8.287 0 009 9.6a8.983 8.983 0 013.361-6.867 8.21 8.21 0 003 2.48z" /></svg>', 'red', "showPipelineStatsModal('hot')")}
+        ${renderStatCard('In Diligence', activeDeals.filter(d => ['Due Diligence', 'Exclusivity'].includes(d.stage)).length, '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" /></svg>', 'purple', "showPipelineStatsModal('diligence')")}
+        ${renderStatCard('Overdue Tasks', overdueTasks.length, '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" /></svg>', 'yellow', "showOverdueTasksModal()")}
+        ${renderStatCard('Total Deals', deals.length, '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3.75 12h16.5m-16.5 3.75h16.5M3.75 19.5h16.5M5.625 4.5h12.75a1.875 1.875 0 010 3.75H5.625a1.875 1.875 0 010-3.75z" /></svg>', 'green', "showPipelineStatsModal('all')")}
       </div>
+
+      ${deals.length > 0 ? renderPipelineAnalyticsSection(deals, activeDeals) : ''}
+
+      ${deals.length > 0 ? `<div id="funnel-conversion-section"></div>` : ''}
 
       <!-- Sourcing Breakdown -->
       ${deals.length > 0 ? (() => {
@@ -148,6 +161,651 @@ async function renderDeals() {
       ${dealsViewMode === 'board' ? renderDealsPipelineBoard(filtered) : renderDealsTableView(filtered)}
     </div>
   `;
+
+  // Load funnel analytics asynchronously (needs DB read for deal history)
+  if (deals.length > 0) {
+    setTimeout(() => loadFunnelConversionSection(deals), 0);
+  }
+}
+
+// === PIPELINE ANALYTICS ===
+function renderPipelineAnalyticsSection(deals, activeDeals) {
+  const withPrice = activeDeals.filter(d => d.askingPrice);
+  const withRevenue = activeDeals.filter(d => d.revenue);
+  const withEbitda = activeDeals.filter(d => d.ebitda && d.revenue);
+  const withMultiple = activeDeals.filter(d => d.askingMultiple || (d.askingPrice && d.ebitda));
+  const getM = d => d.askingMultiple || (d.askingPrice && d.ebitda ? d.askingPrice / d.ebitda : null);
+
+  const totalValue = withPrice.reduce((s, d) => s + d.askingPrice, 0);
+  const avgRevenue = withRevenue.length ? withRevenue.reduce((s, d) => s + d.revenue, 0) / withRevenue.length : null;
+  const avgMultiple = withMultiple.length ? withMultiple.reduce((s, d) => s + getM(d), 0) / withMultiple.length : null;
+  const avgMargin = withEbitda.length ? withEbitda.reduce((s, d) => s + (d.ebitda / d.revenue * 100), 0) / withEbitda.length : null;
+
+  const stageCounts = {};
+  DEAL_ACTIVE_STAGES.forEach(s => { stageCounts[s] = 0; });
+  activeDeals.forEach(d => { if (stageCounts[d.stage] !== undefined) stageCounts[d.stage]++; });
+  const maxStageCount = Math.max(1, ...Object.values(stageCounts));
+  const funnelStages = DEAL_ACTIVE_STAGES.filter(s => stageCounts[s] > 0);
+
+  const hasAnyMetric = totalValue > 0 || avgRevenue || avgMultiple || avgMargin;
+
+  return `
+    <div class="card mb-6">
+      <div class="flex items-center justify-between mb-4">
+        <h3 class="text-sm font-semibold">Pipeline Analytics</h3>
+        <button onclick="showPipelineStatsModal()" class="text-xs text-brand-600 dark:text-brand-400 hover:underline font-medium">Full Report →</button>
+      </div>
+      ${hasAnyMetric ? `
+      <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
+        ${totalValue > 0 ? `
+          <button onclick="showPipelineStatsModal('value')" class="text-left p-3 rounded-lg bg-surface-50 dark:bg-surface-800 hover:bg-brand-50 dark:hover:bg-brand-900/20 transition-colors border border-transparent hover:border-brand-200 dark:hover:border-brand-800">
+            <p class="text-xs text-surface-500 mb-1">Pipeline Value</p>
+            <p class="text-xl font-bold">$${(totalValue / 1e6).toFixed(1)}M</p>
+            <p class="text-xs text-surface-400 mt-0.5">${withPrice.length} deal${withPrice.length !== 1 ? 's' : ''} with price</p>
+          </button>
+        ` : ''}
+        ${avgRevenue ? `
+          <button onclick="showPipelineStatsModal('revenue')" class="text-left p-3 rounded-lg bg-surface-50 dark:bg-surface-800 hover:bg-brand-50 dark:hover:bg-brand-900/20 transition-colors border border-transparent hover:border-brand-200 dark:hover:border-brand-800">
+            <p class="text-xs text-surface-500 mb-1">Avg Revenue</p>
+            <p class="text-xl font-bold">$${(avgRevenue / 1e6).toFixed(1)}M</p>
+            <p class="text-xs text-surface-400 mt-0.5">${withRevenue.length} deal${withRevenue.length !== 1 ? 's' : ''}</p>
+          </button>
+        ` : ''}
+        ${avgMultiple ? `
+          <button onclick="showPipelineStatsModal('multiples')" class="text-left p-3 rounded-lg bg-surface-50 dark:bg-surface-800 hover:bg-brand-50 dark:hover:bg-brand-900/20 transition-colors border border-transparent hover:border-brand-200 dark:hover:border-brand-800">
+            <p class="text-xs text-surface-500 mb-1">Avg EBITDA Multiple</p>
+            <p class="text-xl font-bold">${avgMultiple.toFixed(1)}x</p>
+            <p class="text-xs text-surface-400 mt-0.5">${withMultiple.length} deal${withMultiple.length !== 1 ? 's' : ''}</p>
+          </button>
+        ` : ''}
+        ${avgMargin ? `
+          <button onclick="showPipelineStatsModal('margins')" class="text-left p-3 rounded-lg bg-surface-50 dark:bg-surface-800 hover:bg-brand-50 dark:hover:bg-brand-900/20 transition-colors border border-transparent hover:border-brand-200 dark:hover:border-brand-800">
+            <p class="text-xs text-surface-500 mb-1">Avg EBITDA Margin</p>
+            <p class="text-xl font-bold">${avgMargin.toFixed(0)}%</p>
+            <p class="text-xs text-surface-400 mt-0.5">${withEbitda.length} deal${withEbitda.length !== 1 ? 's' : ''}</p>
+          </button>
+        ` : ''}
+      </div>
+      ` : ''}
+      ${funnelStages.length > 0 ? `
+        <div>
+          <p class="text-xs font-semibold text-surface-400 uppercase tracking-wide mb-2">Stage Funnel — click to filter</p>
+          <div class="space-y-1.5">
+            ${funnelStages.map(stage => {
+              const count = stageCounts[stage];
+              const pct = Math.round(count / maxStageCount * 100);
+              const color = DEAL_STAGE_COLORS[stage] || 'gray';
+              const isFiltered = dealsFilter.stage === stage;
+              return `
+                <button onclick="dealsFilter.stage = dealsFilter.stage === '${stage}' ? 'active' : '${stage}'; renderDeals()" class="w-full flex items-center gap-3 px-2 py-1 rounded-lg transition-colors ${isFiltered ? 'bg-brand-50 dark:bg-brand-900/20' : 'hover:bg-surface-50 dark:hover:bg-surface-800'} text-left">
+                  <span class="text-xs text-surface-600 dark:text-surface-400 w-32 flex-shrink-0 truncate font-medium">${stage}</span>
+                  <div class="flex-1 bg-surface-100 dark:bg-surface-700 rounded-full h-2 min-w-0">
+                    <div class="h-2 rounded-full transition-all" style="width:${pct}%; background: ${DEAL_STAGE_HEX[color] || '#6366f1'}"></div>
+                  </div>
+                  <span class="text-xs font-semibold text-surface-700 dark:text-surface-300 w-5 text-right flex-shrink-0">${count}</span>
+                </button>
+              `;
+            }).join('')}
+          </div>
+        </div>
+      ` : ''}
+    </div>
+  `;
+}
+
+// === FUNNEL CONVERSION ANALYTICS ===
+async function loadFunnelConversionSection(deals) {
+  const el = document.getElementById('funnel-conversion-section');
+  if (!el) return;
+
+  const history = await DB.getForUser(STORES.dealHistory, currentUser.id).catch(() => []);
+  const stageChanges = history.filter(h => h.action === 'stage_change');
+
+  // Build a map of dealId → sorted stage history
+  const dealStageHistory = {};
+  stageChanges.forEach(h => {
+    if (!dealStageHistory[h.dealId]) dealStageHistory[h.dealId] = [];
+    dealStageHistory[h.dealId].push(h);
+  });
+  Object.values(dealStageHistory).forEach(arr => arr.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp)));
+
+  const activeDeals = deals.filter(d => !['Closed - Won', 'Closed - Lost', 'Rejected'].includes(d.stage));
+
+  // For each active stage, calculate:
+  // - current count
+  // - avg days in stage (time since last stage_change, or since createdAt)
+  // - stale deals (> 30 days in stage with no movement)
+  const stageStats = DEAL_ACTIVE_STAGES.map(stage => {
+    const inStage = activeDeals.filter(d => d.stage === stage);
+    const now = new Date();
+    const daysInStage = inStage.map(d => {
+      const history = dealStageHistory[d.id] || [];
+      // Find when this deal entered its current stage
+      const entryEvent = [...history].reverse().find(h => h.details?.to === stage || h.details?.newStage === stage);
+      const entryDate = entryEvent ? new Date(entryEvent.timestamp) : new Date(d.createdAt);
+      return Math.floor((now - entryDate) / 86400000);
+    });
+    const avgDays = daysInStage.length ? Math.round(daysInStage.reduce((a, b) => a + b, 0) / daysInStage.length) : null;
+    const staleDeals = inStage.filter((d, i) => daysInStage[i] > 30);
+    return { stage, count: inStage.length, avgDays, staleDeals, deals: inStage };
+  }).filter(s => s.count > 0);
+
+  // Conversion rates: of deals that have EVER been in stage N, how many reached stage N+1?
+  const stageIndexMap = Object.fromEntries(DEAL_ACTIVE_STAGES.map((s, i) => [s, i]));
+  const conversionRates = DEAL_ACTIVE_STAGES.map((stage, idx) => {
+    if (idx === DEAL_ACTIVE_STAGES.length - 1) return null;
+    const nextStage = DEAL_ACTIVE_STAGES[idx + 1];
+    // A deal "reached" a stage if it's currently at or past that stage
+    const reachedThis = deals.filter(d => {
+      const dIdx = DEAL_ACTIVE_STAGES.indexOf(d.stage);
+      const closedPast = ['Closed - Won', 'Closed - Lost', 'Rejected'].includes(d.stage);
+      return dIdx >= idx || closedPast || d.stage === 'Closed - Won';
+    }).length;
+    const reachedNext = deals.filter(d => {
+      const dIdx = DEAL_ACTIVE_STAGES.indexOf(d.stage);
+      const closedWon = d.stage === 'Closed - Won';
+      return dIdx >= idx + 1 || closedWon;
+    }).length;
+    if (reachedThis === 0) return null;
+    return { from: stage, to: nextStage, rate: Math.round(reachedNext / reachedThis * 100), reachedThis, reachedNext };
+  }).filter(Boolean);
+
+  // Total stale count
+  const totalStale = stageStats.reduce((s, st) => s + st.staleDeals.length, 0);
+
+  // Avg time to close (Closed Won deals)
+  const closedWon = deals.filter(d => d.stage === 'Closed - Won');
+  const avgCloseTime = closedWon.length ? Math.round(
+    closedWon.reduce((s, d) => s + Math.floor((new Date() - new Date(d.createdAt)) / 86400000), 0) / closedWon.length
+  ) : null;
+
+  el.innerHTML = `
+    <div class="card mb-6">
+      <div class="flex items-center justify-between mb-4">
+        <div>
+          <h3 class="text-sm font-semibold">Funnel Conversion</h3>
+          <p class="text-xs text-surface-400 mt-0.5">Stage velocity &amp; conversion rates</p>
+        </div>
+        <div class="flex items-center gap-3">
+          ${totalStale > 0 ? `<button onclick="showStaleDealsModal()" class="text-xs px-2.5 py-1 rounded-lg bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400 font-medium hover:bg-amber-100 transition-colors">${totalStale} stale deal${totalStale !== 1 ? 's' : ''} &gt;30 days →</button>` : ''}
+          ${avgCloseTime ? `<span class="text-xs text-surface-400">Avg close time: <strong>${avgCloseTime}d</strong></span>` : ''}
+        </div>
+      </div>
+
+      <!-- Stage velocity table -->
+      <div class="overflow-x-auto rounded-lg border border-surface-200 dark:border-surface-700 mb-5">
+        <table class="w-full text-sm">
+          <thead>
+            <tr class="bg-surface-50 dark:bg-surface-800 border-b border-surface-200 dark:border-surface-700">
+              <th class="text-left text-xs font-semibold text-surface-500 px-3 py-2">Stage</th>
+              <th class="text-center text-xs font-semibold text-surface-500 px-3 py-2">Deals</th>
+              <th class="text-center text-xs font-semibold text-surface-500 px-3 py-2">Avg Days Here</th>
+              <th class="text-center text-xs font-semibold text-surface-500 px-3 py-2">Stale (&gt;30d)</th>
+              <th class="text-center text-xs font-semibold text-surface-500 px-3 py-2">→ Next Stage</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${stageStats.map(s => {
+              const hex = DEAL_STAGE_HEX[DEAL_STAGE_COLORS[s.stage] || 'gray'] || '#6b7280';
+              const conv = conversionRates.find(c => c.from === s.stage);
+              const staleClass = s.staleDeals.length > 0 ? 'text-amber-600 dark:text-amber-400 font-semibold' : 'text-surface-400';
+              const daysClass = s.avgDays > 30 ? 'text-red-500 font-semibold' : s.avgDays > 14 ? 'text-amber-500 font-medium' : 'text-surface-700 dark:text-surface-300';
+              return `
+                <tr class="border-b border-surface-100 dark:border-surface-800 hover:bg-surface-50 dark:hover:bg-surface-800/50 cursor-pointer" onclick="showPipelineStatsModal('stage_${encodeURIComponent(s.stage)}')">
+                  <td class="px-3 py-2">
+                    <div class="flex items-center gap-2">
+                      <div class="w-2 h-2 rounded-full flex-shrink-0" style="background:${hex}"></div>
+                      <span class="font-medium text-surface-800 dark:text-surface-200">${s.stage}</span>
+                    </div>
+                  </td>
+                  <td class="px-3 py-2 text-center font-semibold">${s.count}</td>
+                  <td class="px-3 py-2 text-center ${daysClass}">${s.avgDays !== null ? s.avgDays + 'd' : '—'}</td>
+                  <td class="px-3 py-2 text-center ${staleClass}">${s.staleDeals.length > 0 ? `<button onclick="event.stopPropagation(); showStageStaleDrilldown('${encodeURIComponent(s.stage)}')" class="hover:underline">${s.staleDeals.length}</button>` : '—'}</td>
+                  <td class="px-3 py-2 text-center">
+                    ${conv ? `
+                      <div class="flex items-center justify-center gap-1.5">
+                        <div class="w-16 bg-surface-100 dark:bg-surface-700 rounded-full h-1.5">
+                          <div class="h-1.5 rounded-full ${conv.rate >= 50 ? 'bg-green-500' : conv.rate >= 25 ? 'bg-amber-500' : 'bg-red-400'}" style="width:${conv.rate}%"></div>
+                        </div>
+                        <span class="text-xs font-semibold ${conv.rate >= 50 ? 'text-green-600' : conv.rate >= 25 ? 'text-amber-600' : 'text-red-500'}">${conv.rate}%</span>
+                      </div>
+                    ` : '<span class="text-surface-300">—</span>'}
+                  </td>
+                </tr>
+              `;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Mini funnel visualisation -->
+      ${conversionRates.length > 0 ? `
+        <div>
+          <p class="text-xs font-semibold text-surface-400 uppercase tracking-wide mb-2">Pipeline drop-off</p>
+          <div class="flex items-center gap-1 flex-wrap">
+            ${conversionRates.slice(0, 8).map(c => `
+              <div class="flex items-center gap-1">
+                <span class="text-xs text-surface-500 whitespace-nowrap">${c.from.split(' ')[0]}</span>
+                <span class="text-xs font-bold ${c.rate >= 50 ? 'text-green-600' : c.rate >= 25 ? 'text-amber-500' : 'text-red-500'}">${c.rate}%→</span>
+              </div>
+            `).join('')}
+            <span class="text-xs text-surface-400 ml-1">Close</span>
+          </div>
+        </div>
+      ` : ''}
+    </div>
+  `;
+}
+
+async function showStaleDealsModal() {
+  const deals = await DB.getForUser(STORES.deals, currentUser.id);
+  const history = await DB.getForUser(STORES.dealHistory, currentUser.id).catch(() => []);
+  const stageChanges = history.filter(h => h.action === 'stage_change');
+  const dealStageHistory = {};
+  stageChanges.forEach(h => {
+    if (!dealStageHistory[h.dealId]) dealStageHistory[h.dealId] = [];
+    dealStageHistory[h.dealId].push(h);
+  });
+
+  const now = new Date();
+  const activeDeals = deals.filter(d => !['Closed - Won', 'Closed - Lost', 'Rejected'].includes(d.stage));
+  const stale = activeDeals.map(d => {
+    const hist = (dealStageHistory[d.id] || []).sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+    const entryEvent = [...hist].reverse().find(h => h.details?.to === d.stage || h.details?.newStage === d.stage);
+    const entryDate = entryEvent ? new Date(entryEvent.timestamp) : new Date(d.createdAt);
+    const days = Math.floor((now - entryDate) / 86400000);
+    return { ...d, daysInStage: days };
+  }).filter(d => d.daysInStage > 30).sort((a, b) => b.daysInStage - a.daysInStage);
+
+  _renderDealListModal(
+    `${stale.length} Stale Deal${stale.length !== 1 ? 's' : ''}`,
+    'Deals that have not moved stages in over 30 days — sorted by time stuck',
+    stale.map(d => ({
+      ...d,
+      _subtitle: `${d.daysInStage} days in ${d.stage}`,
+    })),
+    'No stale deals! All active deals have moved stages recently.'
+  );
+}
+
+async function showStageStaleDrilldown(encodedStage) {
+  const stage = decodeURIComponent(encodedStage);
+  const deals = await DB.getForUser(STORES.deals, currentUser.id);
+  const history = await DB.getForUser(STORES.dealHistory, currentUser.id).catch(() => []);
+  const stageChanges = history.filter(h => h.action === 'stage_change');
+  const dealStageHistory = {};
+  stageChanges.forEach(h => {
+    if (!dealStageHistory[h.dealId]) dealStageHistory[h.dealId] = [];
+    dealStageHistory[h.dealId].push(h);
+  });
+  const now = new Date();
+  const inStage = deals.filter(d => d.stage === stage).map(d => {
+    const hist = (dealStageHistory[d.id] || []).sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+    const entryEvent = [...hist].reverse().find(h => h.details?.to === stage || h.details?.newStage === stage);
+    const entryDate = entryEvent ? new Date(entryEvent.timestamp) : new Date(d.createdAt);
+    return { ...d, daysInStage: Math.floor((now - entryDate) / 86400000) };
+  }).filter(d => d.daysInStage > 30).sort((a, b) => b.daysInStage - a.daysInStage);
+  _renderDealListModal(`Stale in "${stage}"`, `${inStage.length} deal${inStage.length !== 1 ? 's' : ''} stuck here for 30+ days`, inStage, 'No stale deals in this stage.');
+}
+
+function _renderDealListModal(title, subtitle, dealsList, emptyMsg) {
+  const rows = dealsList.map(deal => {
+    const stageColor = DEAL_STAGE_HEX[DEAL_STAGE_COLORS[deal.stage] || 'gray'] || '#6b7280';
+    const revenue = deal.revenue ? '$' + (deal.revenue / 1e6).toFixed(1) + 'M' : '—';
+    const margin = deal.revenue && deal.ebitda ? ((deal.ebitda / deal.revenue) * 100).toFixed(0) + '%' : '—';
+    const multiple = deal.askingMultiple
+      ? deal.askingMultiple.toFixed(1) + 'x'
+      : (deal.askingPrice && deal.ebitda ? (deal.askingPrice / deal.ebitda).toFixed(1) + 'x' : '—');
+    return `
+      <div class="flex items-center gap-3 p-3 rounded-lg border border-surface-200 dark:border-surface-700 hover:bg-surface-50 dark:hover:bg-surface-800 cursor-pointer transition-colors" onclick="closeModal(); viewDeal('${deal.id}')">
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center gap-2 flex-wrap">
+            <p class="text-sm font-semibold text-surface-900 dark:text-surface-100">${escapeHtml(deal.name)}</p>
+            <span class="text-xs px-2 py-0.5 rounded-full font-medium" style="background:${stageColor}20; color:${stageColor}">${escapeHtml(deal.stage)}</span>
+            ${deal.priority === 'high' ? '<span class="w-2 h-2 rounded-full bg-red-500 flex-shrink-0 inline-block" title="High priority"></span>' : ''}
+          </div>
+          ${deal.sector || deal.location ? `<p class="text-xs text-surface-400 mt-0.5">${[deal.sector, deal.location].filter(Boolean).join(' · ')}</p>` : ''}
+        </div>
+        <div class="flex items-center gap-4 flex-shrink-0 text-right">
+          <div class="hidden sm:block">
+            <p class="text-xs text-surface-400">Revenue</p>
+            <p class="text-sm font-semibold">${revenue}</p>
+          </div>
+          <div class="hidden sm:block">
+            <p class="text-xs text-surface-400">Margin</p>
+            <p class="text-sm font-semibold">${margin}</p>
+          </div>
+          <div>
+            <p class="text-xs text-surface-400">Multiple</p>
+            <p class="text-sm font-semibold">${multiple}</p>
+          </div>
+          ${deal.score != null ? `<div>${renderScoreBar(deal.score, 'sm')}</div>` : ''}
+          <svg class="w-4 h-4 text-surface-300 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8.25 4.5l7.5 7.5-7.5 7.5"/></svg>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  openModal(`
+    <div class="p-6">
+      <div class="flex items-start justify-between mb-1">
+        <h2 class="text-lg font-bold">${escapeHtml(title)}</h2>
+        <button onclick="closeModal()" class="p-1 rounded-lg hover:bg-surface-100 dark:hover:bg-surface-800 text-surface-400 flex-shrink-0"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M6 18L18 6M6 6l12 12"/></svg></button>
+      </div>
+      ${subtitle ? `<p class="text-sm text-surface-500 mb-4">${escapeHtml(subtitle)}</p>` : '<div class="mb-4"></div>'}
+      ${dealsList.length === 0
+        ? `<div class="text-center py-10 text-surface-400"><p class="text-sm">${emptyMsg || 'No deals found.'}</p></div>`
+        : `<div class="space-y-2 max-h-[65vh] overflow-y-auto">${rows}</div>`
+      }
+    </div>
+  `, { wide: true });
+}
+
+async function showPipelineStatsModal(section = 'overview') {
+  const deals = await DB.getForUser(STORES.deals, currentUser.id);
+  if (deals.length === 0) { showToast('No deals to analyze', 'info'); return; }
+
+  const activeDeals = deals.filter(d => !['Closed - Won', 'Closed - Lost', 'Rejected'].includes(d.stage));
+  const closedWon = deals.filter(d => d.stage === 'Closed - Won');
+  const withPrice = deals.filter(d => d.askingPrice);
+  const withRevenue = deals.filter(d => d.revenue);
+  const withEbitda = deals.filter(d => d.ebitda && d.revenue);
+  const getM = d => d.askingMultiple || (d.askingPrice && d.ebitda ? d.askingPrice / d.ebitda : null);
+  const withMultiple = deals.filter(d => getM(d) !== null);
+
+  // Section-specific filtered views — show the actual deals behind the number
+  if (section === 'hot') {
+    const hotDeals = activeDeals.filter(d => d.priority === 'high' || (d.score && d.score >= 7))
+      .sort((a, b) => (b.score || 0) - (a.score || 0));
+    return _renderDealListModal('Hot Deals', `${hotDeals.length} deal${hotDeals.length !== 1 ? 's' : ''} with high priority or score ≥ 7`, hotDeals, 'No hot deals right now. Mark a deal as high priority or score it 7+.');
+  }
+  if (section === 'value') {
+    const priceDeals = withPrice.filter(d => activeDeals.includes(d)).sort((a, b) => b.askingPrice - a.askingPrice);
+    return _renderDealListModal('Pipeline Value', `${priceDeals.length} active deal${priceDeals.length !== 1 ? 's' : ''} with asking price — sorted by value`, priceDeals, 'No deals have an asking price set.');
+  }
+  if (section === 'revenue') {
+    const revDeals = withRevenue.filter(d => activeDeals.includes(d)).sort((a, b) => b.revenue - a.revenue);
+    return _renderDealListModal('Revenue Breakdown', `${revDeals.length} deal${revDeals.length !== 1 ? 's' : ''} with revenue data — sorted by revenue`, revDeals, 'No deals have revenue data set.');
+  }
+  if (section === 'multiples') {
+    const multDeals = withMultiple.filter(d => activeDeals.includes(d)).sort((a, b) => getM(a) - getM(b));
+    return _renderDealListModal('EBITDA Multiples', `${multDeals.length} deal${multDeals.length !== 1 ? 's' : ''} with multiple data — sorted by multiple`, multDeals, 'No deals have multiple data set.');
+  }
+  if (section === 'margins') {
+    const marginDeals = withEbitda.filter(d => activeDeals.includes(d))
+      .sort((a, b) => (b.ebitda / b.revenue) - (a.ebitda / a.revenue));
+    return _renderDealListModal('EBITDA Margins', `${marginDeals.length} deal${marginDeals.length !== 1 ? 's' : ''} with margin data — sorted by margin`, marginDeals, 'No deals have both revenue and EBITDA set.');
+  }
+  if (section === 'diligence') {
+    const ddDeals = activeDeals.filter(d => ['Due Diligence', 'Exclusivity'].includes(d.stage))
+      .sort((a, b) => DEAL_STAGES.indexOf(b.stage) - DEAL_STAGES.indexOf(a.stage));
+    return _renderDealListModal('In Diligence', `${ddDeals.length} deal${ddDeals.length !== 1 ? 's' : ''} in Due Diligence or Exclusivity`, ddDeals, 'No deals currently in diligence.');
+  }
+  if (section === 'active') {
+    return _renderDealListModal('Active Deals', `${activeDeals.length} deal${activeDeals.length !== 1 ? 's' : ''} in the pipeline`, activeDeals.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)), 'No active deals.');
+  }
+  if (section === 'all') {
+    return _renderDealListModal('All Deals', `${deals.length} total deal${deals.length !== 1 ? 's' : ''}`, deals.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)), 'No deals yet.');
+  }
+  if (section.startsWith('stage_')) {
+    const stage = decodeURIComponent(section.replace('stage_', ''));
+    const stageDeals = deals.filter(d => d.stage === stage).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    return _renderDealListModal(`${stage}`, `${stageDeals.length} deal${stageDeals.length !== 1 ? 's' : ''} in this stage`, stageDeals, `No deals in ${stage}.`);
+  }
+
+  const totalActivePipelineValue = activeDeals.filter(d => d.askingPrice).reduce((s, d) => s + d.askingPrice, 0);
+  const avgRevenue = withRevenue.length ? withRevenue.reduce((s, d) => s + d.revenue, 0) / withRevenue.length : null;
+  const avgEbitda = deals.filter(d => d.ebitda).length ? deals.filter(d => d.ebitda).reduce((s, d) => s + d.ebitda, 0) / deals.filter(d => d.ebitda).length : null;
+  const avgMultiple = withMultiple.length ? withMultiple.reduce((s, d) => s + getM(d), 0) / withMultiple.length : null;
+  const avgMargin = withEbitda.length ? withEbitda.reduce((s, d) => s + (d.ebitda / d.revenue * 100), 0) / withEbitda.length : null;
+
+  // Revenue distribution buckets
+  const revBuckets = [
+    { label: '< $2M', min: 0, max: 2e6 },
+    { label: '$2–5M', min: 2e6, max: 5e6 },
+    { label: '$5–10M', min: 5e6, max: 10e6 },
+    { label: '$10–20M', min: 10e6, max: 20e6 },
+    { label: '$20M+', min: 20e6, max: Infinity },
+  ];
+  const revDist = revBuckets.map(b => ({
+    ...b,
+    count: withRevenue.filter(d => d.revenue >= b.min && d.revenue < b.max).length,
+  })).filter(b => b.count > 0);
+
+  // Multiple distribution
+  const multBuckets = [
+    { label: '< 4x', min: 0, max: 4 },
+    { label: '4–5x', min: 4, max: 5 },
+    { label: '5–6x', min: 5, max: 6 },
+    { label: '6–7x', min: 6, max: 7 },
+    { label: '7–8x', min: 7, max: 8 },
+    { label: '8x+', min: 8, max: Infinity },
+  ];
+  const multDist = multBuckets.map(b => ({
+    ...b,
+    count: withMultiple.filter(d => { const m = getM(d); return m >= b.min && m < b.max; }).length,
+  })).filter(b => b.count > 0);
+
+  // Sector breakdown
+  const sectorGroups = {};
+  deals.forEach(d => {
+    const s = d.sector || 'Unknown';
+    if (!sectorGroups[s]) sectorGroups[s] = [];
+    sectorGroups[s].push(d);
+  });
+  const sectorsSorted = Object.entries(sectorGroups).sort((a, b) => b[1].length - a[1].length);
+
+  // Source breakdown
+  const srcGroups = {};
+  deals.forEach(d => {
+    const s = d.source || 'Unknown';
+    if (!srcGroups[s]) srcGroups[s] = [];
+    srcGroups[s].push(d);
+  });
+  const srcsSorted = Object.entries(srcGroups).sort((a, b) => b[1].length - a[1].length);
+  const maxSrc = srcsSorted.length ? srcsSorted[0][1].length : 1;
+
+  const formatM = v => v !== null && v !== undefined ? '$' + (v / 1e6).toFixed(1) + 'M' : '—';
+
+  openModal(`
+    <div class="p-6 max-h-[85vh] overflow-y-auto space-y-7">
+      <div class="flex items-center justify-between">
+        <h2 class="text-lg font-bold">Pipeline Statistics</h2>
+        <button onclick="closeModal()" class="p-1 rounded-lg hover:bg-surface-100 dark:hover:bg-surface-800 text-surface-400"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M6 18L18 6M6 6l12 12"/></svg></button>
+      </div>
+
+      <!-- Summary KPIs -->
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div class="bg-brand-50 dark:bg-brand-900/20 rounded-xl p-4 text-center">
+          <p class="text-2xl font-bold text-brand-700 dark:text-brand-300">${activeDeals.length}</p>
+          <p class="text-xs text-brand-600 dark:text-brand-400 mt-0.5">Active Deals</p>
+        </div>
+        <div class="bg-green-50 dark:bg-green-900/20 rounded-xl p-4 text-center">
+          <p class="text-2xl font-bold text-green-700 dark:text-green-300">${totalActivePipelineValue > 0 ? '$' + (totalActivePipelineValue / 1e6).toFixed(1) + 'M' : '—'}</p>
+          <p class="text-xs text-green-600 dark:text-green-400 mt-0.5">Active Pipeline Value</p>
+        </div>
+        <div class="bg-purple-50 dark:bg-purple-900/20 rounded-xl p-4 text-center">
+          <p class="text-2xl font-bold text-purple-700 dark:text-purple-300">${avgMultiple ? avgMultiple.toFixed(1) + 'x' : '—'}</p>
+          <p class="text-xs text-purple-600 dark:text-purple-400 mt-0.5">Avg EBITDA Multiple</p>
+        </div>
+        <div class="bg-amber-50 dark:bg-amber-900/20 rounded-xl p-4 text-center">
+          <p class="text-2xl font-bold text-amber-700 dark:text-amber-300">${closedWon.length}</p>
+          <p class="text-xs text-amber-600 dark:text-amber-400 mt-0.5">Closed Won</p>
+        </div>
+      </div>
+
+      <!-- Financial Benchmarks -->
+      <div>
+        <h3 class="text-sm font-semibold mb-3">Financial Benchmarks</h3>
+        <div class="grid grid-cols-2 md:grid-cols-3 gap-3">
+          ${[
+            ['Avg Revenue', avgRevenue ? formatM(avgRevenue) : '—', withRevenue.length + ' deals'],
+            ['Avg EBITDA', avgEbitda ? formatM(avgEbitda) : '—', deals.filter(d => d.ebitda).length + ' deals'],
+            ['Avg EBITDA Margin', avgMargin ? avgMargin.toFixed(0) + '%' : '—', withEbitda.length + ' deals'],
+            ['Avg EBITDA Multiple', avgMultiple ? avgMultiple.toFixed(1) + 'x' : '—', withMultiple.length + ' deals'],
+            ['Total Pipeline Value', formatM(totalActivePipelineValue), withPrice.filter(d => !['Closed - Won', 'Closed - Lost', 'Rejected'].includes(d.stage)).length + ' with price'],
+            ['Median Revenue', (() => { const rs = withRevenue.map(d => d.revenue).sort((a, b) => a - b); return rs.length ? formatM(rs[Math.floor(rs.length / 2)]) : '—'; })(), ''],
+          ].map(([label, value, sub]) => `
+            <div class="p-3 rounded-lg bg-surface-50 dark:bg-surface-800 border border-surface-200 dark:border-surface-700">
+              <p class="text-xs text-surface-500 mb-1">${label}</p>
+              <p class="text-lg font-bold text-surface-900 dark:text-surface-100">${value}</p>
+              ${sub ? `<p class="text-xs text-surface-400 mt-0.5">${sub}</p>` : ''}
+            </div>
+          `).join('')}
+        </div>
+      </div>
+
+      <!-- Revenue Distribution -->
+      ${revDist.length > 0 ? `
+        <div>
+          <h3 class="text-sm font-semibold mb-3">Revenue Distribution</h3>
+          <div class="space-y-2">
+            ${revDist.map(b => `
+              <div class="flex items-center gap-3">
+                <span class="text-xs text-surface-500 w-16 flex-shrink-0">${b.label}</span>
+                <div class="flex-1 bg-surface-100 dark:bg-surface-700 rounded-full h-2.5">
+                  <div class="h-2.5 rounded-full bg-brand-500" style="width:${Math.round(b.count / withRevenue.length * 100)}%"></div>
+                </div>
+                <span class="text-xs font-semibold text-surface-700 dark:text-surface-300 w-4 text-right">${b.count}</span>
+                <span class="text-xs text-surface-400 w-8">${Math.round(b.count / withRevenue.length * 100)}%</span>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      ` : ''}
+
+      <!-- Multiple Distribution -->
+      ${multDist.length > 1 ? `
+        <div>
+          <h3 class="text-sm font-semibold mb-3">Multiple Distribution</h3>
+          <div class="space-y-2">
+            ${multDist.map(b => `
+              <div class="flex items-center gap-3">
+                <span class="text-xs text-surface-500 w-16 flex-shrink-0">${b.label}</span>
+                <div class="flex-1 bg-surface-100 dark:bg-surface-700 rounded-full h-2.5">
+                  <div class="h-2.5 rounded-full bg-purple-500" style="width:${Math.round(b.count / withMultiple.length * 100)}%"></div>
+                </div>
+                <span class="text-xs font-semibold text-surface-700 dark:text-surface-300 w-4 text-right">${b.count}</span>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      ` : ''}
+
+      <!-- By Sector -->
+      ${sectorsSorted.length > 0 ? `
+        <div>
+          <h3 class="text-sm font-semibold mb-3">By Sector</h3>
+          <div class="overflow-x-auto">
+            <table class="data-table text-sm">
+              <thead><tr><th>Sector</th><th>Deals</th><th>Avg Revenue</th><th>Avg Multiple</th></tr></thead>
+              <tbody>
+                ${sectorsSorted.map(([sector, sDeals]) => {
+                  const sRev = sDeals.filter(d => d.revenue);
+                  const sMult = sDeals.filter(d => getM(d) !== null);
+                  return `
+                    <tr>
+                      <td class="font-medium">${escapeHtml(sector)}</td>
+                      <td>${sDeals.length}</td>
+                      <td>${sRev.length ? '$' + (sRev.reduce((s, d) => s + d.revenue, 0) / sRev.length / 1e6).toFixed(1) + 'M' : '—'}</td>
+                      <td>${sMult.length ? (sMult.reduce((s, d) => s + getM(d), 0) / sMult.length).toFixed(1) + 'x' : '—'}</td>
+                    </tr>
+                  `;
+                }).join('')}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ` : ''}
+
+      <!-- By Source -->
+      <div>
+        <h3 class="text-sm font-semibold mb-3">By Source</h3>
+        <div class="space-y-2">
+          ${srcsSorted.map(([src, sDeals]) => `
+            <div class="flex items-center gap-3">
+              <span class="text-xs text-surface-600 dark:text-surface-400 font-medium w-28 flex-shrink-0">${escapeHtml(src)}</span>
+              <div class="flex-1 bg-surface-100 dark:bg-surface-700 rounded-full h-2.5">
+                <div class="h-2.5 rounded-full bg-green-500" style="width:${Math.round(sDeals.length / maxSrc * 100)}%"></div>
+              </div>
+              <span class="text-xs font-semibold w-4 text-right">${sDeals.length}</span>
+              <span class="text-xs text-surface-400 w-8">${Math.round(sDeals.length / deals.length * 100)}%</span>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+
+      <!-- All Deals Table -->
+      <div>
+        <h3 class="text-sm font-semibold mb-3">All Deals (${deals.length})</h3>
+        <div class="overflow-x-auto rounded-lg border border-surface-200 dark:border-surface-700">
+          <table class="data-table">
+            <thead><tr><th>Deal</th><th>Stage</th><th>Revenue</th><th>EBITDA</th><th>Margin</th><th>Multiple</th><th>Score</th></tr></thead>
+            <tbody>
+              ${deals.sort((a, b) => (b.askingPrice || 0) - (a.askingPrice || 0)).map(deal => {
+                const m = getM(deal);
+                const margin = deal.revenue && deal.ebitda ? (deal.ebitda / deal.revenue * 100).toFixed(0) + '%' : '—';
+                const stageColor = DEAL_STAGE_COLORS[deal.stage] || 'gray';
+                return `
+                  <tr class="clickable" onclick="closeModal(); viewDeal('${deal.id}')">
+                    <td>
+                      <div class="font-medium">${escapeHtml(deal.name)}</div>
+                      ${deal.sector ? `<div class="text-xs text-surface-400">${escapeHtml(deal.sector)}</div>` : ''}
+                    </td>
+                    <td><span class="badge bg-${stageColor}-100 text-${stageColor}-700 dark:bg-${stageColor}-900/30 dark:text-${stageColor}-400">${escapeHtml(deal.stage)}</span></td>
+                    <td>${deal.revenue ? '$' + (deal.revenue / 1e6).toFixed(1) + 'M' : '—'}</td>
+                    <td>${deal.ebitda ? '$' + (deal.ebitda / 1e6).toFixed(1) + 'M' : '—'}</td>
+                    <td>${margin}</td>
+                    <td>${m ? m.toFixed(1) + 'x' : '—'}</td>
+                    <td>${renderScoreBar(deal.score, 'sm')}</td>
+                  </tr>
+                `;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  `);
+}
+
+async function showOverdueTasksModal() {
+  const allTasks = await DB.getForUser(STORES.dealTasks, currentUser.id);
+  const overdue = allTasks.filter(t => t.status !== 'done' && t.dueDate && new Date(t.dueDate) < new Date())
+    .sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate));
+
+  if (overdue.length === 0) { showToast('No overdue tasks!', 'success'); return; }
+
+  const deals = await DB.getForUser(STORES.deals, currentUser.id);
+  const dealMap = Object.fromEntries(deals.map(d => [d.id, d]));
+
+  openModal(`
+    <div class="p-6">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="text-base font-semibold">${overdue.length} Overdue Task${overdue.length !== 1 ? 's' : ''}</h2>
+        <button onclick="closeModal()" class="p-1 rounded-lg hover:bg-surface-100 dark:hover:bg-surface-800 text-surface-400"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M6 18L18 6M6 6l12 12"/></svg></button>
+      </div>
+      <div class="space-y-2">
+        ${overdue.map(task => {
+          const deal = dealMap[task.dealId];
+          const daysPast = Math.floor((new Date() - new Date(task.dueDate)) / 86400000);
+          return `
+            <div class="flex items-start gap-3 p-3 rounded-lg border border-red-200 dark:border-red-800 bg-red-50/50 dark:bg-red-900/10">
+              <button onclick="toggleDealTaskStatus('${task.id}')" class="mt-0.5 flex-shrink-0" title="Mark done">
+                <svg class="w-5 h-5 text-surface-300 hover:text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" stroke-width="1.5"/></svg>
+              </button>
+              <div class="flex-1 min-w-0">
+                <p class="text-sm font-medium text-surface-900 dark:text-surface-100">${escapeHtml(task.title)}</p>
+                ${deal ? `<button onclick="closeModal(); viewDeal('${deal.id}')" class="text-xs text-brand-600 hover:underline mt-0.5">${escapeHtml(deal.name)}</button>` : ''}
+                <p class="text-xs text-red-600 dark:text-red-400 mt-0.5">${daysPast} day${daysPast !== 1 ? 's' : ''} overdue — was due ${formatDate(task.dueDate)}</p>
+              </div>
+              <span class="text-xs px-2 py-0.5 rounded ${task.priority === 'high' ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' : task.priority === 'low' ? 'bg-blue-100 text-blue-700' : 'bg-yellow-100 text-yellow-700'}">${task.priority || 'medium'}</span>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    </div>
+  `);
 }
 
 // === PIPELINE BOARD (KANBAN) ===
@@ -170,9 +828,9 @@ function renderDealsPipelineBoard(deals) {
           const color = DEAL_STAGE_COLORS[stage] || 'gray';
           return `
             <div class="flex-shrink-0 w-[240px]" data-stage="${stage}"
-              ondragover="event.preventDefault(); this.classList.add('ring-2', 'ring-brand-400', 'rounded-xl')"
-              ondragleave="this.classList.remove('ring-2', 'ring-brand-400', 'rounded-xl')"
-              ondrop="onDealDrop(event, '${stage}'); this.classList.remove('ring-2', 'ring-brand-400', 'rounded-xl')">
+              ondragover="event.preventDefault(); this.classList.add('ring-2', 'ring-brand-400', 'rounded')"
+              ondragleave="this.classList.remove('ring-2', 'ring-brand-400', 'rounded')"
+              ondrop="onDealDrop(event, '${stage}'); this.classList.remove('ring-2', 'ring-brand-400', 'rounded')">
               <div class="flex items-center justify-between mb-3 px-1">
                 <div class="flex items-center gap-2">
                   <div class="w-2 h-2 rounded-full bg-${color}-500"></div>
@@ -193,22 +851,48 @@ function renderDealsPipelineBoard(deals) {
 
 function renderDealCard(deal) {
   const hasScore = deal.score !== null && deal.score !== undefined;
+  const margin = deal.revenue && deal.ebitda ? ((deal.ebitda / deal.revenue) * 100).toFixed(0) : null;
+  const multiple = deal.askingMultiple
+    ? deal.askingMultiple.toFixed(1)
+    : (deal.askingPrice && deal.ebitda ? (deal.askingPrice / deal.ebitda).toFixed(1) : null);
+  const stageColor = DEAL_STAGE_COLORS[deal.stage] || 'gray';
+
   return `
-    <div class="card p-3 cursor-pointer hover:shadow-md transition-shadow group"
+    <div class="card p-3 cursor-pointer hover:shadow-md hover:border-brand-300 dark:hover:border-brand-700 transition-all group"
       draggable="true"
       ondragstart="event.dataTransfer.setData('text/plain', '${deal.id}'); event.dataTransfer.effectAllowed='move'"
       onclick="viewDeal('${deal.id}')">
+
+      <!-- Name + priority dot -->
       <div class="flex items-start justify-between mb-1">
-        <h4 class="text-sm font-medium truncate flex-1">${escapeHtml(deal.name)}</h4>
-        ${deal.priority === 'high' ? '<span class="w-2 h-2 rounded-full bg-red-500 flex-shrink-0 mt-1.5"></span>' : ''}
+        <h4 class="text-sm font-semibold truncate flex-1 group-hover:text-brand-600 dark:group-hover:text-brand-400 transition-colors">${escapeHtml(deal.name)}</h4>
+        ${deal.priority === 'high' ? '<span class="w-2 h-2 rounded-full bg-red-500 flex-shrink-0 mt-1.5 ml-1" title="High priority"></span>' : ''}
       </div>
-      ${deal.sector ? `<p class="text-xs text-surface-500 truncate">${escapeHtml(deal.sector)}</p>` : ''}
-      <div class="flex items-center gap-2 mt-2">
-        ${deal.revenue ? `<span class="text-xs text-surface-400">$${(deal.revenue / 1e6).toFixed(1)}M</span>` : ''}
-        ${deal.ebitda ? `<span class="text-xs text-surface-400">${deal.revenue ? ((deal.ebitda / deal.revenue) * 100).toFixed(0) + '%' : '$' + (deal.ebitda / 1e6).toFixed(1) + 'M'}</span>` : ''}
-        ${hasScore ? renderScoreBadge(deal.score) : ''}
+
+      <!-- Sector + Location -->
+      ${deal.sector || deal.location ? `<p class="text-xs text-surface-400 truncate mb-2">${[deal.sector, deal.location].filter(Boolean).join(' · ')}</p>` : ''}
+
+      <!-- Key financial metrics -->
+      ${(deal.revenue || deal.ebitda || multiple) ? `
+        <div class="flex flex-wrap gap-x-3 gap-y-0.5 mb-2">
+          ${deal.revenue ? `<span class="text-xs font-medium text-surface-700 dark:text-surface-300">$${(deal.revenue / 1e6).toFixed(1)}M rev</span>` : ''}
+          ${margin ? `<span class="text-xs text-green-600 dark:text-green-400 font-medium">${margin}% margin</span>` : ''}
+          ${multiple ? `<span class="text-xs text-purple-600 dark:text-purple-400 font-medium">${multiple}x</span>` : ''}
+        </div>
+      ` : ''}
+
+      <!-- Score + Source -->
+      <div class="flex items-center justify-between">
+        ${hasScore ? renderScoreBadge(deal.score) : '<span></span>'}
+        ${deal.source ? `<span class="text-xs text-surface-400 truncate ml-2">${escapeHtml(deal.source)}</span>` : ''}
       </div>
-      ${deal.nextActionDate ? `<p class="text-xs mt-1.5 ${new Date(deal.nextActionDate) < new Date() ? 'text-red-500 font-medium' : 'text-surface-400'}">${deal.nextAction ? escapeHtml(deal.nextAction) : 'Follow-up'}: ${formatDate(deal.nextActionDate)}</p>` : ''}
+
+      <!-- Next action -->
+      ${deal.nextActionDate ? `
+        <p class="text-xs mt-2 pt-2 border-t border-surface-100 dark:border-surface-800 ${new Date(deal.nextActionDate) < new Date() ? 'text-red-500 font-medium' : 'text-surface-400'}">
+          ${deal.nextAction ? escapeHtml(deal.nextAction) : '📅 Action'}: ${formatDate(deal.nextActionDate)}
+        </p>
+      ` : ''}
     </div>
   `;
 }
@@ -301,7 +985,7 @@ async function openEditDealModal(dealId) {
   openModal(deal ? 'Edit Deal' : 'New Deal', `
     <div class="p-6 space-y-4 max-h-[80vh] overflow-y-auto">
       <!-- PDF Import Banner -->
-      <div class="bg-brand-50 dark:bg-brand-900/20 border border-brand-200 dark:border-brand-800 rounded-xl p-3">
+      <div class="bg-brand-50 dark:bg-brand-900/20 border border-brand-200 dark:border-brand-800 rounded p-3">
         <div class="flex items-center gap-3">
           <svg class="w-5 h-5 text-brand-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" /></svg>
           <div class="flex-1">
@@ -537,7 +1221,7 @@ function openDealImportModal() {
         <input type="file" id="csv-import-file" accept=".csv" class="input-field" />
         <p class="text-xs text-surface-400 mt-1">Expected columns: name, sector, location, source, revenue, ebitda, asking_price, multiple, employees, description</p>
       </div>
-      <div class="bg-surface-50 dark:bg-surface-800 rounded-xl p-3">
+      <div class="bg-surface-50 dark:bg-surface-800 rounded p-3">
         <p class="text-xs text-surface-500"><strong>Column mapping:</strong> The importer matches columns by name (case-insensitive). Unrecognized columns are ignored. Revenue, EBITDA, and price values should be numbers (no $ or commas).</p>
       </div>
       <div id="csv-preview" class="hidden"></div>
@@ -703,11 +1387,11 @@ function openKillDealModal(dealId, dealName) {
       <div>
         <label class="block text-sm font-medium mb-2">Outcome</label>
         <div class="grid grid-cols-2 gap-3">
-          <label class="flex items-center gap-2 p-3 border-2 border-surface-200 dark:border-surface-700 rounded-xl cursor-pointer hover:border-brand-400 has-[:checked]:border-red-500 has-[:checked]:bg-red-50 dark:has-[:checked]:bg-red-900/10">
+          <label class="flex items-center gap-2 p-3 border-2 border-surface-200 dark:border-surface-700 rounded cursor-pointer hover:border-brand-400 has-[:checked]:border-red-500 has-[:checked]:bg-red-50 dark:has-[:checked]:bg-red-900/10">
             <input type="radio" name="kill-stage" value="Closed - Lost" class="accent-red-500" checked />
             <div><p class="text-sm font-medium">Closed — Lost</p><p class="text-xs text-surface-500">Passed on or lost to competitor</p></div>
           </label>
-          <label class="flex items-center gap-2 p-3 border-2 border-surface-200 dark:border-surface-700 rounded-xl cursor-pointer hover:border-brand-400 has-[:checked]:border-gray-500 has-[:checked]:bg-gray-50 dark:has-[:checked]:bg-gray-900/10">
+          <label class="flex items-center gap-2 p-3 border-2 border-surface-200 dark:border-surface-700 rounded cursor-pointer hover:border-brand-400 has-[:checked]:border-gray-500 has-[:checked]:bg-gray-50 dark:has-[:checked]:bg-gray-900/10">
             <input type="radio" name="kill-stage" value="Rejected" class="accent-gray-500" />
             <div><p class="text-sm font-medium">Rejected</p><p class="text-xs text-surface-500">Not fit for criteria</p></div>
           </label>

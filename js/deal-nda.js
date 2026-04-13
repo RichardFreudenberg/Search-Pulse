@@ -170,7 +170,7 @@ async function runNdaReview(dealId) {
   }
 
   const resultDiv = document.getElementById('nda-review-result');
-  resultDiv.innerHTML = `<div class="p-4 bg-surface-50 dark:bg-surface-800 rounded-xl text-sm text-surface-500 animate-pulse">Extracting text and analyzing NDA...</div>`;
+  resultDiv.innerHTML = `<div class="p-4 bg-surface-50 dark:bg-surface-800 rounded text-sm text-surface-500 animate-pulse">Extracting text and analyzing NDA...</div>`;
 
   try {
     // Extract text from submitted NDA
@@ -238,15 +238,15 @@ ${templateContext}`;
 
     resultDiv.innerHTML = `
       <div class="space-y-3 max-h-96 overflow-y-auto">
-        <div class="flex items-center gap-2 p-3 bg-${statusColor}-50 dark:bg-${statusColor}-900/20 rounded-xl border border-${statusColor}-200 dark:border-${statusColor}-800">
+        <div class="flex items-center gap-2 p-3 bg-${statusColor}-50 dark:bg-${statusColor}-900/20 rounded border border-${statusColor}-200 dark:border-${statusColor}-800">
           <span class="font-semibold text-${statusColor}-700 dark:text-${statusColor}-300 text-sm">NDA Status: ${statusText}</span>
         </div>
-        <div class="deal-ai-output text-sm p-3 bg-surface-50 dark:bg-surface-800 rounded-xl">
+        <div class="deal-ai-output text-sm p-3 bg-surface-50 dark:bg-surface-800 rounded">
           ${renderMarkdown(analysis)}
         </div>
       </div>
     `;
   } catch (e) {
-    resultDiv.innerHTML = `<div class="p-3 bg-red-50 dark:bg-red-900/20 rounded-xl text-red-700 dark:text-red-300 text-sm">Error: ${escapeHtml(e.message)}</div>`;
+    resultDiv.innerHTML = `<div class="p-3 bg-red-50 dark:bg-red-900/20 rounded text-red-700 dark:text-red-300 text-sm">Error: ${escapeHtml(e.message)}</div>`;
   }
 }

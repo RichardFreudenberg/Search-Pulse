@@ -52,7 +52,7 @@ function openDocUploadModal(dealId) {
         </select>
       </div>
       <div id="doc-preview-area" class="hidden">
-        <div class="p-3 bg-surface-50 dark:bg-surface-800 rounded-xl text-sm">
+        <div class="p-3 bg-surface-50 dark:bg-surface-800 rounded text-sm">
           <div class="flex items-center gap-2">
             <svg class="w-5 h-5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
             <span id="doc-file-name" class="font-medium"></span>
@@ -312,7 +312,7 @@ function renderDocumentCard(doc) {
   const hasText = !!doc.extractedText;
 
   return `
-    <div class="flex items-center gap-3 p-3 rounded-xl border border-surface-200 dark:border-surface-700 hover:border-surface-300 dark:hover:border-surface-600 transition-colors">
+    <div class="flex items-center gap-3 p-3 rounded border border-surface-200 dark:border-surface-700 hover:border-surface-300 dark:hover:border-surface-600 transition-colors">
       <div class="p-2 rounded-lg bg-surface-100 dark:bg-surface-800 text-surface-500">
         ${icon}
       </div>
@@ -350,7 +350,7 @@ async function viewExtractedText(docId) {
         <span class="text-xs text-surface-400">${formatFileSize(doc.size)}</span>
         <span class="text-xs text-surface-400">${doc.extractedText.length.toLocaleString()} characters</span>
       </div>
-      <div class="max-h-96 overflow-y-auto bg-surface-50 dark:bg-surface-800 rounded-xl p-4">
+      <div class="max-h-96 overflow-y-auto bg-surface-50 dark:bg-surface-800 rounded p-4">
         <pre class="text-xs text-surface-700 dark:text-surface-300 whitespace-pre-wrap font-mono leading-relaxed">${escapeHtml(doc.extractedText.substring(0, 20000))}</pre>
         ${doc.extractedText.length > 20000 ? '<p class="text-xs text-surface-400 mt-2 italic">Showing first 20,000 characters...</p>' : ''}
       </div>

@@ -56,7 +56,7 @@ async function buildAiContext() {
     DB.getAll(STORES.deals).then(all => all.filter(d => d.userId === currentUser.id)),
   ]);
 
-  const active = contacts.filter(c => !c.archived);
+  const active = getActiveContacts(contacts);
   const overdue = active.filter(c => c.nextFollowUpDate && new Date(c.nextFollowUpDate) < new Date());
   const dealsByStage = {};
   deals.forEach(d => { dealsByStage[d.stage] = (dealsByStage[d.stage] || 0) + 1; });

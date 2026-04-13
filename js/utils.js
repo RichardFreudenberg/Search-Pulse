@@ -223,6 +223,18 @@ async function getContactsForCompany(companyId) {
   return DB.getAllByIndex(STORES.contacts, 'companyId', companyId);
 }
 
+// Build a lookup map from an array keyed by a field (default 'id')
+function buildMap(arr, key = 'id') {
+  const map = {};
+  arr.forEach(item => { map[item[key]] = item; });
+  return map;
+}
+
+// Return only non-archived contacts
+function getActiveContacts(contacts) {
+  return contacts.filter(c => !c.archived);
+}
+
 function sortByDate(arr, field, desc = true) {
   return arr.sort((a, b) => {
     const da = new Date(a[field] || 0);
@@ -267,8 +279,30 @@ async function callAIMessages(messagesArr, maxTokens = 500, temperature = 0.2) {
 }
 
 // Internal router — called by both wrappers
+// Priority: OpenAI first (GPT-4o-mini), then Claude as fallback
 async function _routeAI(settings, messagesArr, maxTokens, temperature) {
-  if (settings?.claudeApiKey) {
+  if (settings?.openaiApiKey) {
+    // OpenAI GPT-4o-mini
+    const resp = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${settings.openaiApiKey}`,
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages: messagesArr,
+        max_tokens: maxTokens,
+        temperature,
+      }),
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.error?.message || `OpenAI API error: ${resp.status}`);
+    }
+    const data = await resp.json();
+    return data.choices[0].message.content;
+  } else if (settings?.claudeApiKey) {
     // Anthropic Claude — system prompt is a top-level field, not a message
     const systemMsg = messagesArr.find(m => m.role === 'system')?.content || '';
     const nonSystem = messagesArr.filter(m => m.role !== 'system');
@@ -294,27 +328,6 @@ async function _routeAI(settings, messagesArr, maxTokens, temperature) {
     }
     const data = await resp.json();
     return data.content[0].text;
-  } else if (settings?.openaiApiKey) {
-    // OpenAI GPT-4o-mini
-    const resp = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${settings.openaiApiKey}`,
-      },
-      body: JSON.stringify({
-        model: 'gpt-4o-mini',
-        messages: messagesArr,
-        max_tokens: maxTokens,
-        temperature,
-      }),
-    });
-    if (!resp.ok) {
-      const err = await resp.json().catch(() => ({}));
-      throw new Error(err.error?.message || `OpenAI API error: ${resp.status}`);
-    }
-    const data = await resp.json();
-    return data.choices[0].message.content;
   } else {
     throw new Error('No AI API key configured. Add an OpenAI or Claude API key in Settings.');
   }
