@@ -79,6 +79,28 @@ async function renderSettings() {
         <p class="text-xs text-surface-500 mb-4">API keys are stored locally in your browser and never sent to our servers.</p>
         <div class="space-y-4">
           <div>
+            <label class="block text-sm font-medium text-surface-600 dark:text-surface-400 mb-1">
+              Tavily API Key <span class="text-xs font-normal text-green-600 dark:text-green-400">(Recommended — powers web research)</span>
+            </label>
+            <input type="password" id="settings-tavily-key" class="input-field" placeholder="tvly-…" value="${escapeHtml(settings?.tavilyApiKey || '')}" />
+            <p class="text-xs text-surface-400 mt-1">
+              Powers contact research, call prep news, investment memo market data, and sourcing intelligence.
+              Free tier: 1,000 searches/month. Get a key at
+              <a href="https://tavily.com" target="_blank" class="text-brand-600 hover:underline">tavily.com</a>.
+            </p>
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-surface-600 dark:text-surface-400 mb-1">
+              Firecrawl API Key <span class="text-xs font-normal text-surface-400">(optional — better website reading)</span>
+            </label>
+            <input type="password" id="settings-firecrawl-key" class="input-field" placeholder="fc-…" value="${escapeHtml(settings?.firecrawlApiKey || '')}" />
+            <p class="text-xs text-surface-400 mt-1">
+              Reads JavaScript-rendered company websites for investment memos. Falls back to Jina.ai (free) without this key.
+              Get a key at <a href="https://firecrawl.dev" target="_blank" class="text-brand-600 hover:underline">firecrawl.dev</a>
+              — 500 free scrapes/month.
+            </p>
+          </div>
+          <div>
             <label class="block text-sm font-medium text-surface-600 dark:text-surface-400 mb-1">RapidAPI Key (LinkedIn enrichment)</label>
             <input type="password" id="settings-rapidapi-key" class="input-field" placeholder="Paste your RapidAPI key…" value="${settings?.rapidApiKey || ''}" />
             <p class="text-xs text-surface-400 mt-1">Get a key at <a href="https://rapidapi.com/freshdata-freshdata-default/api/fresh-linkedin-profile-data" target="_blank" class="text-brand-600 hover:underline">RapidAPI — Fresh LinkedIn Profile Data</a> — enables full LinkedIn profile auto-populate (name, title, company, photo, location, bio)</p>
@@ -200,6 +222,13 @@ async function renderSettings() {
               <input type="file" accept=".json" onchange="importData(event)" class="hidden" />
             </label>
           </div>
+          <div class="flex items-center justify-between">
+            <div>
+              <p class="text-sm font-medium">Web Research Cache</p>
+              <p class="text-xs text-surface-500" id="research-cache-stats">Loading…</p>
+            </div>
+            <button onclick="clearResearchCacheFromSettings()" class="btn-secondary btn-sm">Clear Cache</button>
+          </div>
           <div class="border-t border-surface-200 dark:border-surface-800 pt-3">
             <div class="flex items-center justify-between">
               <div>
@@ -217,11 +246,29 @@ async function renderSettings() {
       </div>
     </div>
   `;
+
+  // Populate cache stats
+  if (typeof getResearchCacheStats === 'function') {
+    const stats = getResearchCacheStats();
+    const el = document.getElementById('research-cache-stats');
+    if (el) el.textContent = `${stats.count} cached entries · ${stats.totalKB} KB · ${stats.expiredCount} expired`;
+  }
+}
+
+function clearResearchCacheFromSettings() {
+  if (typeof clearResearchCache === 'function') {
+    const n = clearResearchCache();
+    showToast(`Cleared ${n} cached research entries`, 'success');
+    const el = document.getElementById('research-cache-stats');
+    if (el) el.textContent = '0 cached entries · 0 KB · 0 expired';
+  }
 }
 
 async function saveSettings() {
   const settings = await DB.get(STORES.settings, `settings_${currentUser.id}`);
   settings.defaultFollowUpDays = parseInt(document.getElementById('settings-default-followup').value) || 14;
+  settings.tavilyApiKey = document.getElementById('settings-tavily-key')?.value.trim() || '';
+  settings.firecrawlApiKey = document.getElementById('settings-firecrawl-key')?.value.trim() || '';
   settings.openaiApiKey = document.getElementById('settings-openai-key').value.trim();
   settings.claudeApiKey = document.getElementById('settings-claude-key').value.trim();
   settings.googlePlacesApiKey = document.getElementById('settings-google-places-key').value.trim();

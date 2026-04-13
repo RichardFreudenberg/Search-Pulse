@@ -238,51 +238,22 @@ async function fetchAndRenderNews(regionId, industryId) {
 }
 
 async function fetchNewsArticles(query, regionId) {
-  const rssUrl = `https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=en&gl=US&ceid=US:en`;
+  // Use newsSearch() from web-research.js (Tavily if key available, falls back to Google News via Jina)
+  const results = await newsSearch(query, 12);
 
-  // Ordered list of CORS-capable RSS fetchers — rss2json is most reliable
-  const fetchers = [
-    async () => {
-      const r = await fetch(`https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(rssUrl)}&count=20`, { signal: AbortSignal.timeout(8000) });
-      if (!r.ok) throw new Error('rss2json ' + r.status);
-      const json = await r.json();
-      if (json.status !== 'ok' || !json.items?.length) throw new Error('rss2json empty');
-      return json.items.map(item => ({
-        title: (item.title || '').replace(/ - .*$/, ''),
-        link: item.link || item.guid || '',
-        pubDate: item.pubDate || '',
-        description: (item.description || '').replace(/<[^>]+>/g, '').substring(0, 200),
-        source: item.author || extractSourceFromTitle(item.title || ''),
-        region: regionId,
-      }));
-    },
-    async () => {
-      const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(rssUrl)}`;
-      const r = await fetch(proxyUrl, { signal: AbortSignal.timeout(8000) });
-      if (!r.ok) throw new Error('allorigins ' + r.status);
-      const text = await r.text();
-      if (!text.includes('<item>')) throw new Error('allorigins no items');
-      return parseRssXml(text, regionId);
-    },
-    async () => {
-      const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(rssUrl)}`;
-      const r = await fetch(proxyUrl, { signal: AbortSignal.timeout(8000) });
-      if (!r.ok) throw new Error('corsproxy ' + r.status);
-      const text = await r.text();
-      if (!text.includes('<item>')) throw new Error('corsproxy no items');
-      return parseRssXml(text, regionId);
-    },
-  ];
-
-  for (const fetcher of fetchers) {
-    try {
-      const articles = await fetcher();
-      if (articles && articles.length > 0) return articles;
-    } catch (e) {
-      continue;
-    }
+  if (!results || results.length === 0) {
+    throw new Error('No news results returned');
   }
-  throw new Error('All news sources failed');
+
+  // Map {title, url, snippet, publishedDate} → shape expected by renderNewsItems()
+  return results.map(item => ({
+    title: (item.title || '').replace(/ - .*$/, ''),
+    link: item.url || '',
+    pubDate: item.publishedDate || '',
+    description: (item.snippet || '').substring(0, 200),
+    source: extractSourceFromTitle(item.title || ''),
+    region: regionId,
+  }));
 }
 
 function parseRssXml(text, regionId) {

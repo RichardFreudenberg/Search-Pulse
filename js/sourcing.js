@@ -192,12 +192,30 @@ async function generateOutreachLetter() {
   if (tone)         userPrompt += `Tone: ${tone}\n`;
   if (referral)     userPrompt += `Referral/Connection: ${referral}\n`;
 
+  // Research the target company to personalize the letter
+  let companyResearch = '';
+  if (companyName) {
+    if (btn) btn.textContent = 'Researching company…';
+    try {
+      const results = await webSearch(`"${companyName}" ${sector} owner history background`, { maxResults: 3 });
+      if (results.length > 0) {
+        companyResearch = '\n\nPublicly available information about the company:\n' +
+          results.map(r => `- ${r.title}: ${r.snippet}`).join('\n');
+      }
+    } catch (_) {}
+    if (btn) btn.textContent = 'Generating…';
+  }
+
+  userPrompt += companyResearch;
+
   const systemPrompt =
     'You are an expert acquisition entrepreneur coach helping a Search Fund entrepreneur write a first-touch ' +
     'acquisition inquiry letter. The letter should be warm, genuine, respectful of the owner\'s life work, and ' +
     'clearly state the searcher\'s intent to acquire and operate the business. Do NOT use corporate buzzwords. ' +
     'Write in first person. Max 350 words. Do not include [placeholder] brackets in the output — use realistic ' +
-    'placeholder names only where absolutely necessary and note them with (customize this).';
+    'placeholder names only where absolutely necessary and note them with (customize this). ' +
+    'Use any specific company details provided to make the letter more personal and specific. If company details ' +
+    'are available, reference something concrete about the business.';
 
   try {
     const letterText = await callAI(systemPrompt, userPrompt, 800, 0.6);

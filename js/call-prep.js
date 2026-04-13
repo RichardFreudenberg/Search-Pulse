@@ -68,7 +68,7 @@ async function openCallPrepBriefing(contactId) {
         </div>
         <div>
           <h3 class="text-lg font-semibold">Call Prep Briefing</h3>
-          <p class="text-xs text-surface-500">Generating AI briefing…</p>
+          <p id="call-prep-modal-subtitle" class="text-xs text-surface-500">Gathering contact data and recent news…</p>
         </div>
       </div>
       <div class="flex items-center justify-center py-12">
@@ -82,17 +82,28 @@ async function openCallPrepBriefing(contactId) {
 
   // ── 2. Load data in parallel ─────────────────────────────────────────────────
   let contact, allCalls, allNotes, reminders, company;
+  let contactNews = [], companyNews = [];
   try {
-    [contact, allCalls, allNotes, reminders] = await Promise.all([
-      DB.get(STORES.contacts, contactId),
+    // First load the contact so we have the name for news searches
+    contact = await DB.get(STORES.contacts, contactId);
+    if (!contact) throw new Error('Contact not found.');
+
+    const contactFullName = contact.fullName || '';
+    company = contact.companyId ? await DB.get(STORES.companies, contact.companyId).catch(() => null) : null;
+    const companyName = company?.name || '';
+
+    // Run all remaining DB loads and both news searches in parallel
+    [allCalls, allNotes, reminders, contactNews, companyNews] = await Promise.all([
       DB.getAllByIndex(STORES.calls, 'contactId', contactId).catch(() => []),
       DB.getAllByIndex(STORES.notes, 'contactId', contactId).catch(() => []),
       DB.getAllByIndex(STORES.reminders, 'contactId', contactId).catch(() => []),
+      newsSearch(`"${contactFullName}" "${companyName}"`, 3),
+      newsSearch(`"${companyName}" news recent`, 3),
     ]);
 
-    if (!contact) throw new Error('Contact not found.');
-
-    company = contact.companyId ? await DB.get(STORES.companies, contact.companyId).catch(() => null) : null;
+    // Update loading subtitle now that data is ready
+    const subtitle = document.querySelector('#call-prep-modal-subtitle');
+    if (subtitle) subtitle.textContent = 'Synthesizing with AI…';
   } catch (err) {
     closeModal();
     openModal(`
@@ -163,6 +174,23 @@ async function openCallPrepBriefing(contactId) {
       const dueStr = r.dueDate ? new Date(r.dueDate).toLocaleDateString() : 'No due date';
       context += `- ${dueStr}: ${r.title || r.content || 'Reminder'}\n`;
     }
+  }
+
+  // ── 4b. Append news sections ──────────────────────────────────────────────────
+  context += `\n=== RECENT NEWS ===\n`;
+  if (contactNews && contactNews.length > 0) {
+    context += contactNews.map(n => `- ${n.title} (${n.publishedDate})\n  ${n.snippet}`).join('\n');
+    context += '\n';
+  } else {
+    context += `No recent news found.\n`;
+  }
+
+  context += `\n=== COMPANY NEWS ===\n`;
+  if (companyNews && companyNews.length > 0) {
+    context += companyNews.map(n => `- ${n.title} (${n.publishedDate})\n  ${n.snippet}`).join('\n');
+    context += '\n';
+  } else {
+    context += `No recent news found.\n`;
   }
 
   // ── 5. Call AI ────────────────────────────────────────────────────────────────

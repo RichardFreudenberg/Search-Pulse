@@ -1,5 +1,5 @@
 /* ============================================
-   Nexus CRM — AI Contact Research (Jina.ai)
+   Nexus CRM — AI Contact Research
    ============================================ */
 
 /**
@@ -31,13 +31,13 @@ async function openContactResearch(contactId) {
         </div>
         <div>
           <h3 class="text-lg font-semibold">Researching ${contactName}…</h3>
-          <p class="text-xs text-surface-500">Searching public web data</p>
+          <p id="contact-research-modal-subtitle" class="text-xs text-surface-500">Searching the web for public information…</p>
         </div>
       </div>
       <div class="flex items-center justify-center py-12">
         <div class="flex flex-col items-center gap-3">
           <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div>
-          <p class="text-sm text-surface-500">Searching the web and synthesizing results…</p>
+          <p class="text-sm text-surface-500">This may take a few seconds…</p>
         </div>
       </div>
     </div>
@@ -48,49 +48,26 @@ async function openContactResearch(contactId) {
     ? await DB.get(STORES.companies, contact.companyId).catch(() => null)
     : null;
 
-  // ── 4. Build search query ─────────────────────────────────────────────────────
-  const nameQuoted = `"${contact.fullName}"`;
-  const orgPart = company?.name
-    ? `"${company.name}"`
-    : contact.title
-      ? `"${contact.title}"`
-      : '';
-  const query = [nameQuoted, orgPart, 'personal background hobbies interests'].filter(Boolean).join(' ');
+  const companyName = company?.name || '';
 
-  // ── 5. Fetch from Jina.ai ─────────────────────────────────────────────────────
-  let searchResults = '';
-  try {
-    const jinaUrl = `https://s.jina.ai/${encodeURIComponent(query)}`;
-    const resp = await fetch(jinaUrl, {
-      headers: { 'Accept': 'text/plain' },
-    });
-    if (resp.ok) {
-      const text = await resp.text();
-      searchResults = text ? text.slice(0, 3000) : '';
-    }
-  } catch (fetchErr) {
-    // Silently fall through — we'll use the fallback context
-    searchResults = '';
-  }
+  // ── 4. Web research via researchPerson() ──────────────────────────────────────
+  const webContext = await researchPerson(contact.fullName, companyName, contact.title || '');
 
-  // ── 6. Fallback if no useful results ─────────────────────────────────────────
-  const hasResults = searchResults && searchResults.trim().length > 80;
-  if (!hasResults) {
-    searchResults = [
-      `Name: ${contact.fullName}`,
-      company ? `Company: ${company.name}` : '',
-      contact.title ? `Title: ${contact.title}` : '',
-      contact.location ? `Location: ${contact.location}` : '',
-    ].filter(Boolean).join('\n');
-  }
+  // Update subtitle to show AI synthesis stage
+  const subtitle = document.querySelector('#contact-research-modal-subtitle');
+  if (subtitle) subtitle.textContent = 'Synthesizing with AI…';
 
-  // ── 7. Call AI ────────────────────────────────────────────────────────────────
+  // ── 5. Call AI ────────────────────────────────────────────────────────────────
+  const fullName = contact.fullName || 'Unknown';
+  const title = contact.title || '';
+  const company_ = companyName || title;
+
   let rawAiOutput = '';
   try {
     rawAiOutput = await callAI(
       'You are an assistant helping a Search Fund entrepreneur build a personal connection with a contact before a call. Based on search results, extract and summarize personal information. Respond with these exact sections: ## Personal Background, ## Family & Personal Life, ## Hobbies & Interests, ## Career Journey, ## Conversation Starters. If information is not found for a section, say \'Not found publicly\'. Always note which details are inferred vs confirmed. Keep it professional and respectful.',
-      `Research results for ${contact.fullName}:\n\n${searchResults}`,
-      1000,
+      `Contact: ${fullName}, ${title} at ${company_}\n\nWeb research results:\n\n${webContext}`,
+      1200,
       0.3
     );
   } catch (err) {

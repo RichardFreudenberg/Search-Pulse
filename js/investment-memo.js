@@ -88,7 +88,7 @@ async function openDealMemo(dealId) {
       <div class="animate-spin w-8 h-8 border-2 border-brand-500 border-t-transparent rounded-full"></div>
       <div class="text-center">
         <h3 class="font-semibold text-base mb-1">Generating Investment Memo</h3>
-        <p class="text-sm text-surface-500">Analyzing deal data…</p>
+        <p id="deal-memo-modal-subtitle" class="text-sm text-surface-500">Analyzing deal data…</p>
       </div>
     </div>
   `);
@@ -141,8 +141,22 @@ async function openDealMemo(dealId) {
       }
     }
 
-    // 4. Call AI
-    const rawOutput = await callAI(MEMO_SYSTEM_PROMPT, context, 2000, 0.2);
+    // 4. Fetch real-world web context
+    const memoSubtitle = document.querySelector('#deal-memo-modal-subtitle');
+    if (memoSubtitle) memoSubtitle.textContent = 'Researching company…';
+
+    const companyContext = await researchCompany(
+      deal.name || deal.companyName || '',
+      deal.website || '',
+      deal.sector || ''
+    );
+
+    context += `\n=== REAL-WORLD WEB RESEARCH ===\n${companyContext}`;
+
+    if (memoSubtitle) memoSubtitle.textContent = 'Writing memo…';
+
+    // 5. Call AI
+    const rawOutput = await callAI(MEMO_SYSTEM_PROMPT, context, 2500, 0.2);
 
     // 5. Re-render modal with result
     window._memoCurrentRaw = rawOutput;
@@ -248,55 +262,70 @@ async function _fetchAndGenerateMemo() {
     btn.innerHTML   = `
       <span class="inline-flex items-center gap-2">
         <span class="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full"></span>
-        Fetching…
+        Researching…
       </span>
     `;
   }
 
-  let websiteText = '';
+  // Switch to a full-screen loading modal so the subtitle can be updated
+  closeModal();
+  openModal(`
+    <div class="p-8 flex flex-col items-center gap-4">
+      <div class="animate-spin w-8 h-8 border-2 border-brand-500 border-t-transparent rounded-full"></div>
+      <div class="text-center">
+        <h3 class="font-semibold text-base mb-1">Generating Investment Memo</h3>
+        <p id="fetch-memo-modal-subtitle" class="text-sm text-surface-500">Researching company…</p>
+      </div>
+    </div>
+  `);
 
-  // Fetch via Jina reader
-  if (url) {
-    try {
-      const jinaUrl = `https://r.jina.ai/${encodeURIComponent(url)}`;
-      const res = await fetch(jinaUrl, { headers: { Accept: 'text/plain' } });
-      if (res.ok) {
-        const fullText = await res.text();
-        websiteText = fullText.slice(0, 4000);
-      } else {
-        websiteText = '';
-      }
-    } catch (_err) {
-      websiteText = '';
-    }
-  }
+  const companyNameInput = companyName;
+
+  // Fetch website content and news in parallel
+  const [websiteText, newsResults] = await Promise.all([
+    url ? readUrl(url, { maxChars: 4000, cacheType: 'company' }) : Promise.resolve(''),
+    newsSearch(`"${companyNameInput || url}" recent news`, 4),
+  ]);
+
+  // Update subtitle before AI call
+  const fetchSubtitle = document.querySelector('#fetch-memo-modal-subtitle');
+  if (fetchSubtitle) fetchSubtitle.textContent = 'Writing memo…';
 
   // Build user prompt
   let userPrompt = '';
-  if (companyName) userPrompt += `Company: ${companyName}\n\n`;
-  if (websiteText) {
-    userPrompt += `Company website content:\n\n${websiteText}\n\n`;
-  } else if (url) {
-    userPrompt += `Company website URL (could not fetch content): ${url}\n\n`;
-  }
+  if (companyNameInput) userPrompt += `Company: ${companyNameInput}\n\n`;
+
+  userPrompt += `Company website content:\n${websiteText || 'Could not read website.'}\n\n`;
+
+  userPrompt += `Recent news:\n${
+    newsResults && newsResults.length > 0
+      ? newsResults.map(n => `- ${n.title}: ${n.snippet}`).join('\n')
+      : 'No recent news found.'
+  }\n\n`;
+
   if (additionalContext) {
-    userPrompt += `Additional context: ${additionalContext}`;
+    userPrompt += `Additional context provided by user:\n${additionalContext}`;
   }
 
   try {
-    const rawOutput = await callAI(MEMO_SYSTEM_PROMPT, userPrompt, 2000, 0.2);
+    const rawOutput = await callAI(MEMO_SYSTEM_PROMPT, userPrompt, 2500, 0.2);
 
     window._memoCurrentRaw = rawOutput;
 
     // Re-open result modal (no save button for ad-hoc tool)
-    const title = companyName || (url ? new URL(url).hostname.replace(/^www\./, '') : 'Company');
+    const title = companyNameInput || (url ? new URL(url).hostname.replace(/^www\./, '') : 'Company');
     closeModal();
     openModal(_memoResultHtml(title, 'Investment Memo', rawOutput, false, null), { wide: true });
   } catch (err) {
-    showToast('Failed to generate memo: ' + err.message, 'error');
-    if (btn) {
-      btn.disabled  = false;
-      btn.textContent = 'Generate Memo';
-    }
+    closeModal();
+    openModal(`
+      <div class="p-6 max-w-lg w-full">
+        <h3 class="font-semibold text-base mb-2">Error Generating Memo</h3>
+        <p class="text-sm text-red-600 dark:text-red-400 mb-4">${escapeHtml(err.message)}</p>
+        <div class="flex justify-end">
+          <button onclick="closeModal()" class="btn-primary">Close</button>
+        </div>
+      </div>
+    `);
   }
 }

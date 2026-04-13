@@ -13,14 +13,14 @@ const DILIGENCE_TYPES = {
   deal_snapshot: { label: 'One-Page Snapshot', icon: '📄', description: 'Quick deal summary for stakeholders' },
 };
 
-async function callDealOpenAI(messages, temperature = 0.25) {
+async function callDealOpenAI(messages, temperature = 0.25, maxTokens = 4096) {
   const settings = await DB.get(STORES.settings, `settings_${currentUser.id}`);
   if (!settings?.openaiApiKey && !settings?.claudeApiKey) {
     throw new Error('No AI API key configured. Add an OpenAI or Claude API key in Settings.');
   }
 
   const startTime = Date.now();
-  const content = await callAIMessages(messages, 4096, temperature);
+  const content = await callAIMessages(messages, maxTokens, temperature);
   return {
     content,
     tokensUsed: 0,
@@ -206,9 +206,30 @@ async function runDiligenceAnalysis(dealId, type = 'full_diligence') {
   const context = buildDealContext(deal, documents, notes);
   const analysisPrompt = getAnalysisPrompt(type);
 
+  // Web research: fetch industry benchmarks and company news
+  let industryContext = '';
+  try {
+    const dealName = deal?.name || deal?.companyName || '';
+    const sector = deal?.sector || '';
+    const [benchmarks, companyNews] = await Promise.all([
+      webSearch(`${sector} industry EBITDA multiple acquisition benchmark ${new Date().getFullYear()}`, { maxResults: 3 }),
+      newsSearch(`"${dealName}" ${sector}`, 3),
+    ]);
+
+    if (benchmarks.length > 0 || companyNews.length > 0) {
+      industryContext = '\n\n=== MARKET CONTEXT (from web research) ===\n';
+      if (benchmarks.length > 0) {
+        industryContext += '\nIndustry benchmarks:\n' + benchmarks.map(r => `- ${r.title}: ${r.snippet}`).join('\n');
+      }
+      if (companyNews.length > 0) {
+        industryContext += '\n\nRecent company/sector news:\n' + companyNews.map(n => `- ${n.title}: ${n.snippet}`).join('\n');
+      }
+    }
+  } catch (_) { /* web research is best-effort */ }
+
   const messages = [
     { role: 'system', content: SYSTEM_PROMPT },
-    { role: 'user', content: `${context}\n\n---\n\n${analysisPrompt}` },
+    { role: 'user', content: `${context}${industryContext}\n\n---\n\n${analysisPrompt}` },
   ];
 
   // Create diligence record in "running" state
@@ -232,7 +253,7 @@ async function runDiligenceAnalysis(dealId, type = 'full_diligence') {
   await DB.put(STORES.dealDiligence, diligenceRecord);
 
   try {
-    const result = await callDealOpenAI(messages);
+    const result = await callDealOpenAI(messages, 0.25, 4596);
 
     // Update record with results
     diligenceRecord.status = 'completed';
