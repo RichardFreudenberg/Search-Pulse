@@ -481,4 +481,7 @@ function showApp() {
       if (typeof startTutorial === 'function') startTutorial();
     }, 600);
   }
+
+  // Restore Gmail token if user had connected previously
+  if (typeof initGmailSync === 'function') initGmailSync();
 }

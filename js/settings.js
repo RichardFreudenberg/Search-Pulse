@@ -101,6 +101,9 @@ async function renderSettings() {
         </div>
       </div>
 
+      <!-- Gmail Sync -->
+      ${typeof renderGmailSyncCard === 'function' ? renderGmailSyncCard(settings) : ''}
+
       <!-- Email Verification (EmailJS) -->
       <div class="card mb-6" id="emailjs-settings-card">
         <div class="flex items-center gap-3 mb-1">
