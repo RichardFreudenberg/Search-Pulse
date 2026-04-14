@@ -11,6 +11,22 @@ const VALID_PAGES = new Set([
   'company-scout','sourcing','settings','shared-dashboard',
 ]);
 
+// Nav tab switcher
+const DEALS_PAGES = new Set(['deals','deal-search','company-scout','sourcing','shared-dashboard']);
+
+function switchNavTab(tab) {
+  const relPanel  = document.getElementById('nav-panel-relationships');
+  const dealPanel = document.getElementById('nav-panel-deals');
+  const relTab    = document.getElementById('tab-relationships');
+  const dealTab   = document.getElementById('tab-deals');
+  if (!relPanel || !dealPanel) return;
+  const isDeals = tab === 'deals';
+  relPanel.classList.toggle('hidden', isDeals);
+  dealPanel.classList.toggle('hidden', !isDeals);
+  relTab?.classList.toggle('active', !isDeals);
+  dealTab?.classList.toggle('active', isDeals);
+}
+
 // Navigation
 function navigate(page, { pushState = true } = {}) {
   if (!VALID_PAGES.has(page)) page = 'dashboard';
@@ -20,6 +36,9 @@ function navigate(page, { pushState = true } = {}) {
   if (pushState) {
     history.pushState({ page }, '', '#' + page);
   }
+
+  // Switch sidebar tab to match the page
+  switchNavTab(DEALS_PAGES.has(page) ? 'deals' : 'relationships');
 
   // Update nav active states
   document.querySelectorAll('.nav-item[data-page]').forEach(el => {

@@ -111,6 +111,26 @@ select.input-field {
 .nav-item:hover { background: rgba(255,255,255,0.04); color: var(--text-primary); }
 .nav-item.active { background: rgba(200,169,110,0.09); color: var(--gold); font-weight: 500; }
 
+/* Nav tab switcher */
+.nav-tabs {
+  display: flex; gap: 2px; padding: 3px;
+  background: rgba(255,255,255,0.04); border-radius: 9px;
+  margin: 0 0 8px 0;
+}
+.nav-tab {
+  flex: 1; padding: 5px 8px; font-size: 0.75rem; font-weight: 500;
+  border: none; border-radius: 6px; cursor: pointer;
+  background: transparent; color: var(--text-muted);
+  transition: color 0.15s, background 0.15s;
+  font-family: 'DM Sans', 'Inter', sans-serif; letter-spacing: 0.01em;
+}
+.nav-tab:hover { color: var(--text-secondary); }
+.nav-tab.active {
+  background: rgba(200,169,110,0.12); color: var(--gold); font-weight: 600;
+}
+.nav-panel { display: flex; flex-direction: column; gap: 1px; }
+.nav-panel.hidden { display: none; }
+
 /* Sidebar */
 .sidebar {
   width: 240px; height: 100vh; position: sticky; top: 0;
