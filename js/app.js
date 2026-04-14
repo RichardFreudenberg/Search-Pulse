@@ -8,7 +8,7 @@ let currentPage = 'dashboard';
 const VALID_PAGES = new Set([
   'dashboard','contacts','companies','calls','reminders',
   'suggestions','news','resources','deals','deal-search',
-  'company-scout','sourcing','settings',
+  'company-scout','sourcing','settings','shared-dashboard',
 ]);
 
 // Navigation

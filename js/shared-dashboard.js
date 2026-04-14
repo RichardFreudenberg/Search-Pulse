@@ -117,13 +117,19 @@ async function renderSharedDashboardPage() {
             <button onclick="saveDashboardSettings()" class="btn-primary w-full">
               Save Settings
             </button>
-            <button onclick="generateAndCopyLink()" class="btn-secondary w-full flex items-center justify-center gap-2">
+            <button onclick="openShareEmailModal()" class="btn-secondary w-full flex items-center justify-center gap-2">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75"/>
+              </svg>
+              Share via Email
+            </button>
+            <button onclick="generateAndCopyLink()" class="btn-ghost w-full flex items-center justify-center gap-2 text-sm">
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/>
               </svg>
-              Generate &amp; Copy Link
+              Copy Link Only
             </button>
-            <button onclick="previewSharedDashboard()" class="btn-ghost text-brand-600 w-full text-sm">
+            <button onclick="previewSharedDashboard()" class="btn-ghost w-full text-sm" style="color:var(--text-muted);">
               Preview as viewer →
             </button>
           </div>
@@ -160,42 +166,65 @@ async function renderSharedDashboardPage() {
           <div class="card">
             <div class="flex items-center justify-between mb-4">
               <div>
-                <h3 class="font-semibold text-sm">Who you've shared with</h3>
-                <p class="text-xs text-surface-500 mt-0.5">${config.invites?.length || 0} ${(config.invites?.length || 0) === 1 ? 'person' : 'people'} tracked</p>
+                <h3 class="font-semibold text-sm">Shared with</h3>
+                <p class="text-xs text-surface-500 mt-0.5">${config.invites?.length || 0} ${(config.invites?.length || 0) === 1 ? 'recipient' : 'recipients'}</p>
               </div>
-              <button onclick="openAddInviteModal()" class="btn-primary btn-sm flex items-center gap-1.5">
-                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
-                </svg>
-                Add
-              </button>
+              <div class="flex items-center gap-2">
+                <button onclick="openShareEmailModal()" class="btn-primary btn-sm flex items-center gap-1.5">
+                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+                  </svg>
+                  Send
+                </button>
+                <button onclick="openAddInviteModal()" class="btn-ghost btn-sm" title="Track without emailing">
+                  + Track
+                </button>
+              </div>
             </div>
 
             ${!config.invites?.length ? `
-              <div class="text-center py-8 text-surface-400">
-                <svg class="w-8 h-8 mx-auto mb-2 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z"/>
+              <div class="text-center py-8">
+                <svg class="w-8 h-8 mx-auto mb-2" style="color:var(--text-muted);opacity:0.4;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75"/>
                 </svg>
-                <p class="text-xs text-surface-400">Track who you've shared the link with (optional)</p>
+                <p class="text-xs" style="color:var(--text-muted);">Click <strong style="color:var(--text-secondary);">Send</strong> to email the dashboard link to someone</p>
               </div>
             ` : `
-              <div class="divide-y divide-surface-100 dark:divide-surface-800">
+              <div class="space-y-0">
                 ${config.invites.map((inv, idx) => `
-                  <div class="py-3 flex items-center gap-3">
-                    <div class="w-8 h-8 rounded-full bg-brand-100 dark:bg-brand-900/30 flex items-center justify-center text-brand-700 dark:text-brand-300 font-semibold text-xs shrink-0">
+                  <div class="py-3 flex items-center gap-3 border-b last:border-0" style="border-color:var(--border-subtle);">
+                    <div class="w-8 h-8 rounded-full flex items-center justify-center font-semibold text-xs shrink-0"
+                      style="background:rgba(200,169,110,0.12);color:var(--gold);border:0.5px solid var(--gold-border);">
                       ${escapeHtml((inv.name || inv.email || '?').charAt(0).toUpperCase())}
                     </div>
                     <div class="flex-1 min-w-0">
-                      <p class="text-sm font-medium truncate">${escapeHtml(inv.name || '—')}</p>
-                      ${inv.email ? `<p class="text-xs text-surface-400 truncate">${escapeHtml(inv.email)}</p>` : ''}
-                      <p class="text-xs text-surface-300 dark:text-surface-600">Tracked ${formatDate(inv.addedAt)}</p>
+                      <div class="flex items-center gap-2 flex-wrap">
+                        <p class="text-sm font-medium truncate">${escapeHtml(inv.name || inv.email || '—')}</p>
+                        ${inv.method === 'email'
+                          ? `<span class="text-xs px-1.5 py-0.5 rounded" style="background:rgba(125,186,138,0.12);color:var(--green);">Emailed</span>`
+                          : `<span class="text-xs px-1.5 py-0.5 rounded" style="background:rgba(255,255,255,0.06);color:var(--text-muted);">Tracked</span>`}
+                      </div>
+                      ${inv.email && inv.name ? `<p class="text-xs truncate" style="color:var(--text-muted);">${escapeHtml(inv.email)}</p>` : ''}
+                      <p class="text-xs" style="color:var(--text-muted);">${formatDate(inv.addedAt)}</p>
                     </div>
-                    <button data-idx="${idx}" onclick="removeInvite(parseInt(this.dataset.idx))"
-                      class="p-1.5 text-surface-300 hover:text-red-500 transition-colors shrink-0" title="Remove">
-                      <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
-                      </svg>
-                    </button>
+                    <div class="flex items-center gap-1 shrink-0">
+                      ${inv.email ? `
+                        <button data-idx="${idx}" onclick="emailInviteAgain(parseInt(this.dataset.idx))"
+                          class="p-1.5 transition-colors" style="color:var(--text-muted);" title="Send again"
+                          onmouseover="this.style.color='var(--gold)'" onmouseout="this.style.color='var(--text-muted)'">
+                          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+                          </svg>
+                        </button>
+                      ` : ''}
+                      <button data-idx="${idx}" onclick="removeInvite(parseInt(this.dataset.idx))"
+                        class="p-1.5 transition-colors" style="color:var(--text-muted);" title="Remove"
+                        onmouseover="this.style.color='var(--red)'" onmouseout="this.style.color='var(--text-muted)'">
+                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                        </svg>
+                      </button>
+                    </div>
                   </div>
                 `).join('')}
               </div>
@@ -241,24 +270,147 @@ async function saveDashboardSettings() {
   showToast('Settings saved', 'success');
 }
 
-// ── Invite Tracker ────────────────────────────────────────────────
+// ── Invite / Email Sharing ────────────────────────────────────────
+
+async function openShareEmailModal() {
+  // Save settings first so the link reflects the latest choices
+  await saveDashboardSettings();
+  const config = await _loadDashConfig();
+  if (!config.token) config.token = generateId();
+  config.lastGeneratedAt = new Date().toISOString();
+  const snapshot = await _buildSnapshot(config);
+  try { localStorage.setItem(_SHARE_LS_PREFIX + config.token, JSON.stringify(snapshot)); } catch (e) {}
+  const url = _snapshotToUrl(config.token, snapshot);
+  await _saveDashConfig(config);
+
+  openModal(`
+    <div class="p-6 space-y-5">
+      <div>
+        <h2 class="text-lg font-semibold mb-1">Share Dashboard via Email</h2>
+        <p class="text-sm text-surface-500">Fill in the recipient's details and click <strong>Open Email</strong> — your email client will open with a pre-composed message.</p>
+      </div>
+
+      <div class="space-y-4">
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-medium mb-1.5" style="color:var(--text-secondary);letter-spacing:0.06em;text-transform:uppercase;">Recipient Name</label>
+            <input type="text" id="share-to-name" class="input-field" placeholder="e.g. Sarah Chen" />
+          </div>
+          <div>
+            <label class="block text-xs font-medium mb-1.5" style="color:var(--text-secondary);letter-spacing:0.06em;text-transform:uppercase;">Recipient Email <span style="color:var(--text-muted);">*</span></label>
+            <input type="email" id="share-to-email" class="input-field" placeholder="sarah@example.com" />
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-xs font-medium mb-1.5" style="color:var(--text-secondary);letter-spacing:0.06em;text-transform:uppercase;">Personal Note <span style="color:var(--text-muted);font-weight:400;">(optional)</span></label>
+          <textarea id="share-note" class="input-field" rows="3"
+            placeholder="e.g. Wanted to loop you in on our current pipeline before our call next week."></textarea>
+        </div>
+
+        <div class="rounded-lg p-3" style="background:rgba(255,255,255,0.03);border:0.5px solid var(--border-subtle);">
+          <p class="text-xs font-medium mb-1" style="color:var(--text-muted);">Link that will be shared</p>
+          <p class="text-xs font-mono break-all" style="color:var(--gold);opacity:0.8;">${escapeHtml(url.length > 80 ? url.slice(0, 80) + '…' : url)}</p>
+          ${config.passcode ? `<p class="text-xs mt-1.5" style="color:var(--text-muted);">Passcode: <strong style="color:var(--text-secondary);">${escapeHtml(config.passcode)}</strong> (will be included in email)</p>` : ''}
+        </div>
+      </div>
+
+      <div class="flex justify-between items-center pt-3" style="border-top:0.5px solid var(--border-subtle);">
+        <button onclick="closeModal()" class="btn-ghost btn-sm" style="color:var(--text-muted);">Cancel</button>
+        <button onclick="_sendShareEmail('${escapeHtml(url)}')" class="btn-primary flex items-center gap-2">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5"/>
+          </svg>
+          Open Email
+        </button>
+      </div>
+    </div>
+  `);
+
+  setTimeout(() => document.getElementById('share-to-name')?.focus(), 100);
+}
+
+async function _sendShareEmail(url) {
+  const toName  = (document.getElementById('share-to-name')?.value  || '').trim();
+  const toEmail = (document.getElementById('share-to-email')?.value || '').trim();
+  const note    = (document.getElementById('share-note')?.value     || '').trim();
+
+  if (!toEmail) { showToast('Enter a recipient email address', 'error'); return; }
+
+  const config  = await _loadDashConfig();
+  const fromName = currentUser?.name || 'A SearchPulse user';
+  const greeting = toName ? `Hi ${toName},` : 'Hi,';
+  const passcodeSection = config.passcode ? `\nPasscode: ${config.passcode}\n` : '';
+  const noteSection = note ? `\n${note}\n` : '';
+
+  const body =
+`${greeting}
+
+I'd like to share my current search fund pipeline and CRM overview with you via SearchPulse.
+
+Click the link below to view the dashboard — no sign-in required:
+${url}
+${passcodeSection}${noteSection}
+Best,
+${fromName}`;
+
+  const subject = `SearchPulse Dashboard — ${fromName}`;
+  window.location.href = `mailto:${encodeURIComponent(toEmail)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+
+  // Record the invite
+  if (!Array.isArray(config.invites)) config.invites = [];
+  config.invites.push({ name: toName, email: toEmail, addedAt: new Date().toISOString(), method: 'email' });
+  await _saveDashConfig(config);
+
+  closeModal();
+  showToast('Email client opened — your message is ready to send', 'success');
+  renderSharedDashboardPage();
+}
+
+async function emailInviteAgain(idx) {
+  const config = await _loadDashConfig();
+  const inv = config.invites?.[idx];
+  if (!inv?.email) return;
+
+  if (!config.token) { showToast('Generate a link first', 'error'); return; }
+  const snapshot = await _buildSnapshot(config);
+  try { localStorage.setItem(_SHARE_LS_PREFIX + config.token, JSON.stringify(snapshot)); } catch (e) {}
+  const url = _snapshotToUrl(config.token, snapshot);
+
+  const fromName = currentUser?.name || 'A SearchPulse user';
+  const greeting = inv.name ? `Hi ${inv.name},` : 'Hi,';
+  const passcodeSection = config.passcode ? `\nPasscode: ${config.passcode}\n` : '';
+
+  const body =
+`${greeting}
+
+Here's a refreshed link to my SearchPulse dashboard with the latest data:
+${url}
+${passcodeSection}
+Best,
+${fromName}`;
+
+  const subject = `SearchPulse Dashboard — Updated — ${fromName}`;
+  window.location.href = `mailto:${encodeURIComponent(inv.email)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+  showToast('Email client opened', 'success');
+}
 
 function openAddInviteModal() {
   openModal(`
     <div class="p-6">
-      <h2 class="text-lg font-semibold mb-1">Track an invite</h2>
-      <p class="text-sm text-surface-500 mb-5">Keep a record of who you've shared the dashboard with.</p>
+      <h2 class="text-lg font-semibold mb-1">Track a recipient</h2>
+      <p class="text-sm text-surface-500 mb-5">Log someone you've shared the dashboard link with another way (call, Slack, etc.).</p>
       <div class="space-y-4">
         <div>
-          <label class="block text-sm font-medium mb-1">Name</label>
+          <label class="block text-xs font-medium mb-1.5" style="color:var(--text-secondary);letter-spacing:0.06em;text-transform:uppercase;">Name</label>
           <input type="text" id="inv-name" class="input-field" placeholder="e.g. Sarah Chen" />
         </div>
         <div>
-          <label class="block text-sm font-medium mb-1">Email <span class="text-surface-400 font-normal text-xs">(optional)</span></label>
+          <label class="block text-xs font-medium mb-1.5" style="color:var(--text-secondary);letter-spacing:0.06em;text-transform:uppercase;">Email <span style="color:var(--text-muted);font-weight:400;">(optional)</span></label>
           <input type="email" id="inv-email" class="input-field" placeholder="sarah@example.com" />
         </div>
-        <div class="flex justify-end gap-3 pt-3 border-t border-surface-100 dark:border-surface-800">
-          <button onclick="closeModal()" class="btn-secondary">Cancel</button>
+        <div class="flex justify-end gap-3 pt-3" style="border-top:0.5px solid var(--border-subtle);">
+          <button onclick="closeModal()" class="btn-ghost">Cancel</button>
           <button onclick="addInvite()" class="btn-primary">Save</button>
         </div>
       </div>
@@ -272,10 +424,10 @@ async function addInvite() {
   if (!name && !email) { showToast('Enter a name or email', 'error'); return; }
   const config = await _loadDashConfig();
   if (!Array.isArray(config.invites)) config.invites = [];
-  config.invites.push({ name, email, addedAt: new Date().toISOString() });
+  config.invites.push({ name, email, addedAt: new Date().toISOString(), method: 'tracked' });
   await _saveDashConfig(config);
   closeModal();
-  showToast('Invite tracked', 'success');
+  showToast('Recipient tracked', 'success');
   renderSharedDashboardPage();
 }
 
