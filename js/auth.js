@@ -103,9 +103,10 @@ async function restoreSession() {
   if (user) {
     setCurrentUser(user);
     const settings = await DB.get(STORES.settings, `settings_${user.id}`);
-    if (settings && settings.theme === 'dark') {
-      document.documentElement.classList.add('dark');
-      document.documentElement.classList.remove('light');
+    if (settings && settings.theme) {
+      const html = document.documentElement;
+      html.classList.remove('dark', 'light');
+      html.classList.add(settings.theme);
     }
   }
   return user;
