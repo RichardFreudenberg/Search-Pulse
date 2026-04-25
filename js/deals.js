@@ -21,6 +21,136 @@ const DEAL_STAGE_COLORS = {
 const DEAL_SOURCES = ['Broker', 'Proprietary', 'Referral', 'Online Listing', 'Conference', 'Cold Outreach', 'Advisor', 'Other'];
 const DEAL_SECTORS = ['Business Services', 'Healthcare Services', 'Technology', 'Industrial', 'Consumer', 'Education', 'Construction / Trades', 'Distribution', 'Food & Beverage', 'Financial Services', 'Other'];
 
+// ─── Currency & FX Module ─────────────────────────────────────────────────────
+
+const CURRENCIES = [
+  { code: 'USD', symbol: '$',    name: 'US Dollar' },
+  { code: 'EUR', symbol: '€',    name: 'Euro' },
+  { code: 'GBP', symbol: '£',    name: 'British Pound' },
+  { code: 'CHF', symbol: 'CHF ', name: 'Swiss Franc' },
+  { code: 'CAD', symbol: 'C$',   name: 'Canadian Dollar' },
+  { code: 'AUD', symbol: 'A$',   name: 'Australian Dollar' },
+  { code: 'SEK', symbol: 'kr ',  name: 'Swedish Krona' },
+  { code: 'NOK', symbol: 'kr ',  name: 'Norwegian Krone' },
+  { code: 'DKK', symbol: 'kr ',  name: 'Danish Krone' },
+  { code: 'JPY', symbol: '¥',    name: 'Japanese Yen' },
+];
+
+const _FX_CACHE_KEY = 'pulse_fx_rates_v1';
+const _FX_CACHE_TTL = 3_600_000; // 1 hour
+
+// Module-level FX state (loaded once per render cycle)
+let _fxRates       = null;  // { USD:1, EUR:0.92, ... }
+let _fxBaseCurrency = 'USD';
+let _fxRatesAge     = null;  // ISO string of last fetch
+
+async function fxLoadRates() {
+  // 1. Try localStorage cache
+  try {
+    const cached = JSON.parse(localStorage.getItem(_FX_CACHE_KEY) || '{}');
+    if (cached.ts && Date.now() - cached.ts < _FX_CACHE_TTL && cached.rates) {
+      _fxRates = cached.rates;
+      _fxRatesAge = new Date(cached.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      return;
+    }
+  } catch {}
+
+  // 2. Fetch live rates (Open Exchange Rates — free, no key required)
+  try {
+    const r = await fetch('https://open.er-api.com/v6/latest/USD', { signal: AbortSignal.timeout(6000) });
+    if (r.ok) {
+      const json = await r.json();
+      if (json.result === 'success' && json.rates) {
+        _fxRates = json.rates;
+        const now = Date.now();
+        _fxRatesAge = new Date(now).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        localStorage.setItem(_FX_CACHE_KEY, JSON.stringify({ ts: now, rates: _fxRates }));
+        return;
+      }
+    }
+  } catch {}
+
+  // 3. Static fallback (approximate rates as of 2025)
+  _fxRates = { USD: 1, EUR: 0.92, GBP: 0.79, CHF: 0.90, CAD: 1.37, AUD: 1.55, SEK: 10.5, NOK: 10.7, DKK: 6.90, JPY: 149 };
+  _fxRatesAge = 'offline';
+}
+
+/** Convert amount from one currency to another using loaded rates. */
+function fxConvert(amount, fromCurrency, toCurrency) {
+  if (!amount || !_fxRates) return amount || 0;
+  const from = fromCurrency || 'USD';
+  const to   = toCurrency   || 'USD';
+  if (from === to) return amount;
+  const fromRate = _fxRates[from] || 1;
+  const toRate   = _fxRates[to]   || 1;
+  return amount * (toRate / fromRate);
+}
+
+/** Currency symbol for a code. */
+function fxSymbol(code) {
+  return (CURRENCIES.find(c => c.code === (code || 'USD'))?.symbol || '$').trim();
+}
+
+/** Format a monetary amount in its native deal currency (for deal cards / tables). */
+function fxFmtNative(amount, currencyCode) {
+  if (!amount) return '—';
+  return fmtDealMoney(amount, fxSymbol(currencyCode));
+}
+
+/** Format an amount already converted to the base currency. */
+function fxFmtBase(amount) {
+  return fxFmtNative(amount, _fxBaseCurrency);
+}
+
+// ─── Number Display Format ─────────────────────────────────────────────────────
+// Controlled globally so board / table / cards / deal detail all share one mode.
+
+let _dealNumFormat = 'auto'; // 'auto' | 'K' | 'M' | 'raw'
+
+/**
+ * Format a raw dollar amount using the current display mode.
+ * @param {number|string|null} n   - Raw value in full units (e.g. 2500000)
+ * @param {string}             sym - Currency symbol (e.g. '$', '€')
+ */
+function fmtDealMoney(n, sym) {
+  if (n == null || n === '' || isNaN(Number(n))) return '—';
+  n   = Number(n);
+  sym = (sym || '$').replace(/\s+/g, '');
+  const abs = Math.abs(n);
+  switch (_dealNumFormat) {
+    case 'M':
+      return sym + (n / 1e6).toFixed(2) + 'M';
+    case 'K': {
+      const kVal = n / 1e3;
+      return sym + (abs < 10e3 ? kVal.toFixed(1) : Math.round(kVal).toLocaleString()) + 'K';
+    }
+    case 'raw':
+      return sym + Math.round(n).toLocaleString();
+    default: // 'auto' — pick the most readable unit
+      if (abs >= 1e9) return sym + (n / 1e9).toFixed(2) + 'B';
+      if (abs >= 1e6) return sym + (n / 1e6).toFixed(2) + 'M';
+      if (abs >= 1e3) return sym + Math.round(n / 1e3).toLocaleString() + 'K';
+      return sym + Math.round(n).toLocaleString();
+  }
+}
+
+/** Change the global number format and refresh the current deal view. */
+async function _setDealNumFormat(fmt) {
+  _dealNumFormat = fmt;
+  // Persist to settings
+  try {
+    const settings = await DB.get(STORES.settings, `settings_${currentUser.id}`);
+    if (settings) {
+      settings.numberDisplayFormat = fmt;
+      await DB.put(STORES.settings, settings);
+    }
+  } catch (_) {}
+  // Refresh deal page if open
+  if (typeof currentDealId !== 'undefined' && currentDealId) {
+    viewDeal(currentDealId);
+  }
+}
+
 // Hex colors for stage funnel bars (Tailwind CSS variables are not available at runtime)
 const DEAL_STAGE_HEX = {
   'blue': '#3b82f6', 'indigo': '#6366f1', 'violet': '#8b5cf6',
@@ -32,6 +162,7 @@ const DEAL_STAGE_HEX = {
 
 let dealsViewMode = 'board'; // 'board' or 'table'
 let dealsFilter = { stage: 'active', source: '', search: '', sort: 'newest' };
+let dealsBoardHideEmpty = true; // hide columns with no deals by default
 
 // === AUDIT TRAIL ===
 async function logDealHistory(dealId, action, details = {}) {
@@ -50,7 +181,13 @@ async function renderDeals() {
   const pageContent = document.getElementById('page-content');
   pageContent.innerHTML = `<div class="p-4 lg:p-8 max-w-7xl mx-auto">${renderLoadingSkeleton(6)}</div>`;
 
-  const deals = await DB.getForUser(STORES.deals, currentUser.id);
+  // Load FX rates and base currency preference in parallel with DB fetch
+  const [deals, userSettings] = await Promise.all([
+    DB.getForUser(STORES.deals, currentUser.id),
+    DB.get(STORES.settings, `settings_${currentUser.id}`).catch(() => null),
+    fxLoadRates(),
+  ]);
+  _fxBaseCurrency = userSettings?.baseCurrency || 'USD';
   const allTasks = await DB.getForUser(STORES.dealTasks, currentUser.id);
   const allDiligence = await DB.getForUser(STORES.dealDiligence, currentUser.id);
 
@@ -152,13 +289,18 @@ async function renderDeals() {
           ${DEAL_SOURCES.map(s => `<option value="${s}" ${dealsFilter.source === s ? 'selected' : ''}>${s}</option>`).join('')}
         </select>
         <div class="flex rounded-lg border border-surface-200 dark:border-surface-700 overflow-hidden">
-          <button onclick="dealsViewMode='board'; renderDeals()" class="px-3 py-2 text-sm ${dealsViewMode === 'board' ? 'bg-brand-50 dark:bg-brand-900/30 text-brand-600' : 'text-surface-500 hover:bg-surface-50 dark:hover:bg-surface-800'}">
+          <button onclick="dealsViewMode='board'; renderDeals()" class="px-3 py-2 text-sm ${dealsViewMode === 'board' ? 'bg-brand-50 dark:bg-brand-900/30 text-brand-600' : 'text-surface-500 hover:bg-surface-50 dark:hover:bg-surface-800'}" title="Kanban board">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 4.5v15m6-15v15m-10.875 0h15.75c.621 0 1.125-.504 1.125-1.125V5.625c0-.621-.504-1.125-1.125-1.125H4.125C3.504 4.5 3 5.004 3 5.625v12.75c0 .621.504 1.125 1.125 1.125z" /></svg>
           </button>
-          <button onclick="dealsViewMode='table'; renderDeals()" class="px-3 py-2 text-sm ${dealsViewMode === 'table' ? 'bg-brand-50 dark:bg-brand-900/30 text-brand-600' : 'text-surface-500 hover:bg-surface-50 dark:hover:bg-surface-800'}">
+          <button onclick="dealsViewMode='table'; renderDeals()" class="px-3 py-2 text-sm ${dealsViewMode === 'table' ? 'bg-brand-50 dark:bg-brand-900/30 text-brand-600' : 'text-surface-500 hover:bg-surface-50 dark:hover:bg-surface-800'}" title="Table view">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3.75 5.25h16.5m-16.5 4.5h16.5m-16.5 4.5h16.5m-16.5 4.5h16.5" /></svg>
           </button>
         </div>
+        ${dealsViewMode === 'board' ? `
+        <button onclick="dealsBoardHideEmpty=!dealsBoardHideEmpty; renderDeals()" class="px-3 py-2 text-sm rounded-lg border border-surface-200 dark:border-surface-700 flex items-center gap-1.5 ${dealsBoardHideEmpty ? 'text-surface-500 hover:bg-surface-50 dark:hover:bg-surface-800' : 'bg-brand-50 dark:bg-brand-900/30 text-brand-600'}" title="${dealsBoardHideEmpty ? 'Show empty stages' : 'Hide empty stages'}">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88"/></svg>
+          <span class="text-xs">${dealsBoardHideEmpty ? 'Show all' : 'Hide empty'}</span>
+        </button>` : ''}
       </div>
 
       <!-- Content -->
@@ -180,10 +322,15 @@ function renderPipelineAnalyticsSection(deals, activeDeals) {
   const withMultiple = activeDeals.filter(d => d.askingMultiple || (d.askingPrice && d.ebitda));
   const getM = d => d.askingMultiple || (d.askingPrice && d.ebitda ? d.askingPrice / d.ebitda : null);
 
-  const totalValue = withPrice.reduce((s, d) => s + d.askingPrice, 0);
-  const avgRevenue = withRevenue.length ? withRevenue.reduce((s, d) => s + d.revenue, 0) / withRevenue.length : null;
-  const avgMultiple = withMultiple.length ? withMultiple.reduce((s, d) => s + getM(d), 0) / withMultiple.length : null;
-  const avgMargin = withEbitda.length ? withEbitda.reduce((s, d) => s + (d.ebitda / d.revenue * 100), 0) / withEbitda.length : null;
+  // Convert all financial values to base currency before summing
+  const toBase = (amount, currency) => fxConvert(amount, currency || 'USD', _fxBaseCurrency);
+  const totalValue  = withPrice.reduce((s, d) => s + toBase(d.askingPrice, d.currency), 0);
+  const avgRevenue  = withRevenue.length  ? withRevenue.reduce((s, d)  => s + toBase(d.revenue,  d.currency), 0) / withRevenue.length  : null;
+  const avgMultiple = withMultiple.length ? withMultiple.reduce((s, d) => s + getM(d), 0)                       / withMultiple.length : null;
+  const avgMargin   = withEbitda.length   ? withEbitda.reduce((s, d)  => s + (d.ebitda / d.revenue * 100), 0)  / withEbitda.length   : null;
+
+  // Detect if any deal uses a non-base currency (to show FX note)
+  const hasMixedCurrencies = activeDeals.some(d => d.currency && d.currency !== _fxBaseCurrency);
 
   const stageCounts = {};
   DEAL_ACTIVE_STAGES.forEach(s => { stageCounts[s] = 0; });
@@ -192,41 +339,49 @@ function renderPipelineAnalyticsSection(deals, activeDeals) {
   const funnelStages = DEAL_ACTIVE_STAGES.filter(s => stageCounts[s] > 0);
 
   const hasAnyMetric = totalValue > 0 || avgRevenue || avgMultiple || avgMargin;
+  const baseSym = fxSymbol(_fxBaseCurrency);
 
   return `
     <div class="card mb-6">
       <div class="flex items-center justify-between mb-4">
-        <h3 class="text-sm font-semibold">Pipeline Analytics</h3>
+        <div class="flex items-center gap-2 flex-wrap">
+          <h3 class="text-sm font-semibold">Pipeline Analytics</h3>
+          ${hasMixedCurrencies ? `
+            <span class="text-xs px-2 py-0.5 rounded-full bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 font-medium" title="Live exchange rates applied — converted to ${_fxBaseCurrency}">
+              ≈ ${_fxBaseCurrency}${_fxRatesAge ? ` · rates ${_fxRatesAge}` : ''}
+            </span>
+          ` : ''}
+        </div>
         <button onclick="showPipelineStatsModal()" class="text-xs text-brand-600 dark:text-brand-400 hover:underline font-medium">Full Report →</button>
       </div>
       ${hasAnyMetric ? `
       <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
         ${totalValue > 0 ? `
-          <button onclick="showPipelineStatsModal('value')" class="text-left p-3 rounded-lg bg-surface-50 dark:bg-surface-800 hover:bg-brand-50 dark:hover:bg-brand-900/20 transition-colors border border-transparent hover:border-brand-200 dark:hover:border-brand-800">
-            <p class="text-xs text-surface-500 mb-1">Pipeline Value</p>
-            <p class="text-xl font-bold">$${(totalValue / 1e6).toFixed(1)}M</p>
-            <p class="text-xs text-surface-400 mt-0.5">${withPrice.length} deal${withPrice.length !== 1 ? 's' : ''} with price</p>
+          <button onclick="showPipelineStatsModal('value')" class="kpi-card text-left">
+            <div class="kpi-label">Pipeline Value</div>
+            <div class="kpi-value" style="font-size:20px">${fxFmtBase(totalValue)}</div>
+            <div class="kpi-delta up">↑ ${withPrice.length} deal${withPrice.length !== 1 ? 's' : ''} with price</div>
           </button>
         ` : ''}
         ${avgRevenue ? `
-          <button onclick="showPipelineStatsModal('revenue')" class="text-left p-3 rounded-lg bg-surface-50 dark:bg-surface-800 hover:bg-brand-50 dark:hover:bg-brand-900/20 transition-colors border border-transparent hover:border-brand-200 dark:hover:border-brand-800">
-            <p class="text-xs text-surface-500 mb-1">Avg Revenue</p>
-            <p class="text-xl font-bold">$${(avgRevenue / 1e6).toFixed(1)}M</p>
-            <p class="text-xs text-surface-400 mt-0.5">${withRevenue.length} deal${withRevenue.length !== 1 ? 's' : ''}</p>
+          <button onclick="showPipelineStatsModal('revenue')" class="kpi-card text-left">
+            <div class="kpi-label">Avg Revenue</div>
+            <div class="kpi-value" style="font-size:20px">${fxFmtBase(avgRevenue)}</div>
+            <div class="kpi-delta up">↑ ${withRevenue.length} deal${withRevenue.length !== 1 ? 's' : ''}</div>
           </button>
         ` : ''}
         ${avgMultiple ? `
-          <button onclick="showPipelineStatsModal('multiples')" class="text-left p-3 rounded-lg bg-surface-50 dark:bg-surface-800 hover:bg-brand-50 dark:hover:bg-brand-900/20 transition-colors border border-transparent hover:border-brand-200 dark:hover:border-brand-800">
-            <p class="text-xs text-surface-500 mb-1">Avg EBITDA Multiple</p>
-            <p class="text-xl font-bold">${avgMultiple.toFixed(1)}x</p>
-            <p class="text-xs text-surface-400 mt-0.5">${withMultiple.length} deal${withMultiple.length !== 1 ? 's' : ''}</p>
+          <button onclick="showPipelineStatsModal('multiples')" class="kpi-card text-left">
+            <div class="kpi-label">Avg EBITDA Multiple</div>
+            <div class="kpi-value" style="font-size:20px">${avgMultiple.toFixed(1)}x</div>
+            <div class="kpi-delta up">↑ ${withMultiple.length} deal${withMultiple.length !== 1 ? 's' : ''}</div>
           </button>
         ` : ''}
         ${avgMargin ? `
-          <button onclick="showPipelineStatsModal('margins')" class="text-left p-3 rounded-lg bg-surface-50 dark:bg-surface-800 hover:bg-brand-50 dark:hover:bg-brand-900/20 transition-colors border border-transparent hover:border-brand-200 dark:hover:border-brand-800">
-            <p class="text-xs text-surface-500 mb-1">Avg EBITDA Margin</p>
-            <p class="text-xl font-bold">${avgMargin.toFixed(0)}%</p>
-            <p class="text-xs text-surface-400 mt-0.5">${withEbitda.length} deal${withEbitda.length !== 1 ? 's' : ''}</p>
+          <button onclick="showPipelineStatsModal('margins')" class="kpi-card text-left">
+            <div class="kpi-label">Avg EBITDA Margin</div>
+            <div class="kpi-value" style="font-size:20px">${avgMargin.toFixed(0)}%</div>
+            <div class="kpi-delta up">↑ ${withEbitda.length} deal${withEbitda.length !== 1 ? 's' : ''}</div>
           </button>
         ` : ''}
       </div>
@@ -455,7 +610,7 @@ async function showStageStaleDrilldown(encodedStage) {
 function _renderDealListModal(title, subtitle, dealsList, emptyMsg) {
   const rows = dealsList.map(deal => {
     const stageColor = DEAL_STAGE_HEX[DEAL_STAGE_COLORS[deal.stage] || 'gray'] || '#6b7280';
-    const revenue = deal.revenue ? '$' + (deal.revenue / 1e6).toFixed(1) + 'M' : '—';
+    const revenue = fxFmtNative(deal.revenue, deal.currency);
     const margin = deal.revenue && deal.ebitda ? ((deal.ebitda / deal.revenue) * 100).toFixed(0) + '%' : '—';
     const multiple = deal.askingMultiple
       ? deal.askingMultiple.toFixed(1) + 'x'
@@ -557,9 +712,10 @@ async function showPipelineStatsModal(section = 'overview') {
     return _renderDealListModal(`${stage}`, `${stageDeals.length} deal${stageDeals.length !== 1 ? 's' : ''} in this stage`, stageDeals, `No deals in ${stage}.`);
   }
 
-  const totalActivePipelineValue = activeDeals.filter(d => d.askingPrice).reduce((s, d) => s + d.askingPrice, 0);
-  const avgRevenue = withRevenue.length ? withRevenue.reduce((s, d) => s + d.revenue, 0) / withRevenue.length : null;
-  const avgEbitda = deals.filter(d => d.ebitda).length ? deals.filter(d => d.ebitda).reduce((s, d) => s + d.ebitda, 0) / deals.filter(d => d.ebitda).length : null;
+  const toBase = (amount, currency) => fxConvert(amount, currency || 'USD', _fxBaseCurrency);
+  const totalActivePipelineValue = activeDeals.filter(d => d.askingPrice).reduce((s, d) => s + toBase(d.askingPrice, d.currency), 0);
+  const avgRevenue = withRevenue.length ? withRevenue.reduce((s, d) => s + toBase(d.revenue, d.currency), 0) / withRevenue.length : null;
+  const avgEbitda = deals.filter(d => d.ebitda).length ? deals.filter(d => d.ebitda).reduce((s, d) => s + toBase(d.ebitda, d.currency), 0) / deals.filter(d => d.ebitda).length : null;
   const avgMultiple = withMultiple.length ? withMultiple.reduce((s, d) => s + getM(d), 0) / withMultiple.length : null;
   const avgMargin = withEbitda.length ? withEbitda.reduce((s, d) => s + (d.ebitda / d.revenue * 100), 0) / withEbitda.length : null;
 
@@ -609,7 +765,7 @@ async function showPipelineStatsModal(section = 'overview') {
   const srcsSorted = Object.entries(srcGroups).sort((a, b) => b[1].length - a[1].length);
   const maxSrc = srcsSorted.length ? srcsSorted[0][1].length : 1;
 
-  const formatM = v => v !== null && v !== undefined ? '$' + (v / 1e6).toFixed(1) + 'M' : '—';
+  const formatM = v => (v !== null && v !== undefined) ? fxFmtBase(v) : '—';
 
   openModal(`
     <div class="p-6 max-h-[85vh] overflow-y-auto space-y-7">
@@ -625,8 +781,8 @@ async function showPipelineStatsModal(section = 'overview') {
           <p class="text-xs text-brand-600 dark:text-brand-400 mt-0.5">Active Deals</p>
         </div>
         <div class="bg-green-50 dark:bg-green-900/20 rounded-xl p-4 text-center">
-          <p class="text-2xl font-bold text-green-700 dark:text-green-300">${totalActivePipelineValue > 0 ? '$' + (totalActivePipelineValue / 1e6).toFixed(1) + 'M' : '—'}</p>
-          <p class="text-xs text-green-600 dark:text-green-400 mt-0.5">Active Pipeline Value</p>
+          <p class="text-2xl font-bold text-green-700 dark:text-green-300">${totalActivePipelineValue > 0 ? fxFmtBase(totalActivePipelineValue) : '—'}</p>
+          <p class="text-xs text-green-600 dark:text-green-400 mt-0.5">Active Pipeline Value (${_fxBaseCurrency})</p>
         </div>
         <div class="bg-purple-50 dark:bg-purple-900/20 rounded-xl p-4 text-center">
           <p class="text-2xl font-bold text-purple-700 dark:text-purple-300">${avgMultiple ? avgMultiple.toFixed(1) + 'x' : '—'}</p>
@@ -711,7 +867,7 @@ async function showPipelineStatsModal(section = 'overview') {
                     <tr>
                       <td class="font-medium">${escapeHtml(sector)}</td>
                       <td>${sDeals.length}</td>
-                      <td>${sRev.length ? '$' + (sRev.reduce((s, d) => s + d.revenue, 0) / sRev.length / 1e6).toFixed(1) + 'M' : '—'}</td>
+                      <td>${sRev.length ? fxFmtBase(sRev.reduce((s, d) => s + toBase(d.revenue, d.currency), 0) / sRev.length) : '—'}</td>
                       <td>${sMult.length ? (sMult.reduce((s, d) => s + getM(d), 0) / sMult.length).toFixed(1) + 'x' : '—'}</td>
                     </tr>
                   `;
@@ -757,8 +913,8 @@ async function showPipelineStatsModal(section = 'overview') {
                       ${deal.sector ? `<div class="text-xs text-surface-400">${escapeHtml(deal.sector)}</div>` : ''}
                     </td>
                     <td><span class="badge bg-${stageColor}-100 text-${stageColor}-700 dark:bg-${stageColor}-900/30 dark:text-${stageColor}-400">${escapeHtml(deal.stage)}</span></td>
-                    <td>${deal.revenue ? '$' + (deal.revenue / 1e6).toFixed(1) + 'M' : '—'}</td>
-                    <td>${deal.ebitda ? '$' + (deal.ebitda / 1e6).toFixed(1) + 'M' : '—'}</td>
+                    <td>${fxFmtNative(deal.revenue, deal.currency)}</td>
+                    <td>${fxFmtNative(deal.ebitda, deal.currency)}</td>
                     <td>${margin}</td>
                     <td>${m ? m.toFixed(1) + 'x' : '—'}</td>
                     <td>${renderScoreBar(deal.score, 'sm')}</td>
@@ -820,35 +976,42 @@ function renderDealsPipelineBoard(deals) {
     if (stageGroups[d.stage]) stageGroups[d.stage].push(d);
   });
 
-  // Only show stages that have deals or are nearby the active stages
-  const usedStages = DEAL_ACTIVE_STAGES.filter(s => stageGroups[s].length > 0);
-  const displayStages = usedStages.length > 0 ? DEAL_ACTIVE_STAGES : DEAL_ACTIVE_STAGES.slice(0, 6);
+  const hasAnyDeals = DEAL_ACTIVE_STAGES.some(s => stageGroups[s].length > 0);
+  const displayStages = (dealsBoardHideEmpty && hasAnyDeals)
+    ? DEAL_ACTIVE_STAGES.filter(s => stageGroups[s].length > 0)
+    : DEAL_ACTIVE_STAGES;
 
   return `
-    <div class="overflow-x-auto pb-4">
-      <div class="flex gap-4" style="min-width: ${displayStages.length * 260}px">
-        ${displayStages.map(stage => {
-          const stageDeals = stageGroups[stage] || [];
-          const color = DEAL_STAGE_COLORS[stage] || 'gray';
-          return `
-            <div class="flex-shrink-0 w-[240px]" data-stage="${stage}"
-              ondragover="event.preventDefault(); this.classList.add('ring-2', 'ring-brand-400', 'rounded')"
-              ondragleave="this.classList.remove('ring-2', 'ring-brand-400', 'rounded')"
-              ondrop="onDealDrop(event, '${stage}'); this.classList.remove('ring-2', 'ring-brand-400', 'rounded')">
-              <div class="flex items-center justify-between mb-3 px-1">
-                <div class="flex items-center gap-2">
-                  <div class="w-2 h-2 rounded-full bg-${color}-500"></div>
-                  <span class="text-xs font-semibold text-surface-600 dark:text-surface-400">${escapeHtml(stage)}</span>
-                </div>
-                <span class="text-xs text-surface-400 bg-surface-100 dark:bg-surface-800 rounded-full px-2 py-0.5">${stageDeals.length}</span>
+    <div class="sp-kanban-board">
+      ${displayStages.map(stage => {
+        const stageDeals = stageGroups[stage] || [];
+        const color = DEAL_STAGE_COLORS[stage] || 'gray';
+        const dotHex = DEAL_STAGE_HEX[color] || '#9191a8';
+        const totalValue = stageDeals.reduce((s, d) => s + (d.askingPrice || 0), 0);
+        const valueFmt = totalValue > 0 ? fxFmtNative(totalValue, 'USD') : null;
+        return `
+          <div class="sp-kanban-col" data-stage="${stage}"
+            ondragover="event.preventDefault(); this.classList.add('sp-kanban-col--drag')"
+            ondragleave="this.classList.remove('sp-kanban-col--drag')"
+            ondrop="onDealDrop(event, '${stage}'); this.classList.remove('sp-kanban-col--drag')">
+            <div class="sp-kanban-header">
+              <div class="flex items-center gap-2 min-w-0 flex-1">
+                <div class="sp-kanban-dot" style="background:${dotHex}"></div>
+                <span class="sp-kanban-stage">${escapeHtml(stage)}</span>
               </div>
-              <div class="space-y-2 min-h-[100px]">
-                ${stageDeals.map(deal => renderDealCard(deal)).join('')}
-              </div>
+              <span class="sp-kanban-count">${stageDeals.length}</span>
             </div>
-          `;
-        }).join('')}
-      </div>
+            <div class="sp-kanban-meta flex items-center justify-between">
+              <span>${stageDeals.length} deal${stageDeals.length !== 1 ? 's' : ''}</span>
+              ${valueFmt ? `<span class="text-xs text-surface-400 font-medium">${valueFmt}</span>` : ''}
+            </div>
+            <div class="sp-kanban-body">
+              ${stageDeals.map(deal => renderDealCard(deal)).join('')}
+              ${stageDeals.length === 0 ? `<div class="sp-kanban-empty">Drop deals here</div>` : ''}
+            </div>
+          </div>
+        `;
+      }).join('')}
     </div>
   `;
 }
@@ -861,41 +1024,55 @@ function renderDealCard(deal) {
     : (deal.askingPrice && deal.ebitda ? (deal.askingPrice / deal.ebitda).toFixed(1) : null);
   const stageColor = DEAL_STAGE_COLORS[deal.stage] || 'gray';
 
+  // Aging: days since the deal entered this stage
+  const agingRefDate = deal.stageEnteredAt || deal.updatedAt || deal.createdAt;
+  const agingDays = agingRefDate ? Math.floor((Date.now() - new Date(agingRefDate).getTime()) / 86400000) : null;
+  const agingBadge = agingDays !== null && agingDays >= 14
+    ? `<span class="text-xs px-1.5 py-0.5 rounded font-medium flex-shrink-0 ${agingDays >= 30 ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'}" title="${agingDays} days in this stage">${agingDays}d</span>`
+    : '';
+
+  const scoreColor = hasScore ? (deal.score >= 7 ? '#16a34a' : deal.score >= 5 ? '#d97706' : '#9191a8') : null;
+  const scorePct = hasScore ? Math.min(deal.score * 10, 100) : 0;
+
   return `
-    <div class="card p-3 cursor-pointer hover:shadow-md hover:border-brand-300 dark:hover:border-brand-700 transition-all group"
+    <div class="sp-deal-card"
       draggable="true"
       ondragstart="event.dataTransfer.setData('text/plain', '${deal.id}'); event.dataTransfer.effectAllowed='move'"
       onclick="viewDeal('${deal.id}')">
 
-      <!-- Name + priority dot -->
-      <div class="flex items-start justify-between mb-1">
-        <h4 class="text-sm font-semibold truncate flex-1 group-hover:text-brand-600 dark:group-hover:text-brand-400 transition-colors">${escapeHtml(deal.name)}</h4>
-        ${deal.priority === 'high' ? '<span class="w-2 h-2 rounded-full bg-red-500 flex-shrink-0 mt-1.5 ml-1" title="High priority"></span>' : ''}
+      <div class="sp-deal-name">
+        <span class="truncate">${escapeHtml(deal.name)}</span>
+        <div class="flex items-center gap-1 flex-shrink-0">
+          ${agingBadge}
+          ${deal.priority === 'high' ? '<span class="sp-deal-priority" title="High priority"></span>' : ''}
+        </div>
       </div>
 
-      <!-- Sector + Location -->
-      ${deal.sector || deal.location ? `<p class="text-xs text-surface-400 truncate mb-2">${[deal.sector, deal.location].filter(Boolean).join(' · ')}</p>` : ''}
+      ${deal.sector || deal.location ? `<div class="sp-deal-meta">${escapeHtml([deal.sector, deal.location].filter(Boolean).join(' · '))}</div>` : ''}
 
-      <!-- Key financial metrics -->
       ${(deal.revenue || deal.ebitda || multiple) ? `
-        <div class="flex flex-wrap gap-x-3 gap-y-0.5 mb-2">
-          ${deal.revenue ? `<span class="text-xs font-medium text-surface-700 dark:text-surface-300">$${(deal.revenue / 1e6).toFixed(1)}M rev</span>` : ''}
-          ${margin ? `<span class="text-xs text-green-600 dark:text-green-400 font-medium">${margin}% margin</span>` : ''}
-          ${multiple ? `<span class="text-xs text-purple-600 dark:text-purple-400 font-medium">${multiple}x</span>` : ''}
+        <div class="sp-deal-metrics">
+          ${deal.revenue ? `<span>${fxFmtNative(deal.revenue, deal.currency)}</span>` : ''}
+          ${margin ? `<span class="sp-metric-green">${margin}% margin</span>` : ''}
+          ${multiple ? `<span class="sp-metric-purple">${multiple}x</span>` : ''}
         </div>
       ` : ''}
 
-      <!-- Score + Source -->
-      <div class="flex items-center justify-between">
-        ${hasScore ? renderScoreBadge(deal.score) : '<span></span>'}
-        ${deal.source ? `<span class="text-xs text-surface-400 truncate ml-2">${escapeHtml(deal.source)}</span>` : ''}
-      </div>
+      ${hasScore ? `
+        <div class="sp-score-row">
+          <div class="sp-score-bar-wrap">
+            <div class="sp-score-bar" style="width:${scorePct}%;background:${scoreColor}"></div>
+          </div>
+          <span class="sp-score-num" style="color:${scoreColor}">${deal.score.toFixed(1)}</span>
+        </div>
+      ` : ''}
 
-      <!-- Next action -->
+      ${deal.source ? `<div class="sp-deal-source">${escapeHtml(deal.source)}</div>` : ''}
+
       ${deal.nextActionDate ? `
-        <p class="text-xs mt-2 pt-2 border-t border-surface-100 dark:border-surface-800 ${new Date(deal.nextActionDate) < new Date() ? 'text-red-500 font-medium' : 'text-surface-400'}">
-          ${deal.nextAction ? escapeHtml(deal.nextAction) : '📅 Action'}: ${formatDate(deal.nextActionDate)}
-        </p>
+        <div class="sp-deal-action ${new Date(deal.nextActionDate) < new Date() ? 'sp-deal-action--overdue' : ''}">
+          ${deal.nextAction ? escapeHtml(deal.nextAction) : 'Next action'}: ${formatDate(deal.nextActionDate)}
+        </div>
       ` : ''}
     </div>
   `;
@@ -914,6 +1091,7 @@ async function moveDealToStage(dealId, newStage) {
 
   const oldStage = deal.stage;
   deal.stage = newStage;
+  deal.stageEnteredAt = new Date().toISOString(); // track when deal entered this stage (for aging)
   deal.updatedAt = new Date().toISOString();
 
   if (['Closed - Won', 'Closed - Lost', 'Rejected'].includes(newStage)) {
@@ -962,8 +1140,8 @@ function renderDealsTableView(deals) {
                   </td>
                   <td><span class="badge bg-${stageColor}-100 text-${stageColor}-700 dark:bg-${stageColor}-900/30 dark:text-${stageColor}-400">${escapeHtml(deal.stage)}</span></td>
                   <td class="text-surface-500">${escapeHtml(deal.source || '—')}</td>
-                  <td class="font-medium">${deal.revenue ? '$' + (deal.revenue / 1e6).toFixed(1) + 'M' : '—'}</td>
-                  <td class="font-medium">${deal.ebitda ? '$' + (deal.ebitda / 1e6).toFixed(1) + 'M' : '—'}</td>
+                  <td class="font-medium">${fxFmtNative(deal.revenue, deal.currency)}</td>
+                  <td class="font-medium">${fxFmtNative(deal.ebitda, deal.currency)}</td>
                   <td>${deal.askingMultiple ? deal.askingMultiple + 'x' : '—'}</td>
                   <td>${renderScoreBar(deal.score, 'sm')}</td>
                   <td class="${deal.nextActionDate && new Date(deal.nextActionDate) < new Date() ? 'text-red-500' : 'text-surface-500'} text-sm">
@@ -988,22 +1166,30 @@ async function openEditDealModal(dealId) {
 
   openModal(deal ? 'Edit Deal' : 'New Deal', `
     <div class="p-6 space-y-4 max-h-[80vh] overflow-y-auto">
-      <!-- PDF Import Banner -->
-      <div class="bg-brand-50 dark:bg-brand-900/20 border border-brand-200 dark:border-brand-800 rounded p-3">
-        <div class="flex items-center gap-3">
-          <svg class="w-5 h-5 text-brand-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" /></svg>
-          <div class="flex-1">
-            <p class="text-xs font-medium text-brand-800 dark:text-brand-200">Import from CIM / Teaser PDF</p>
-            <p class="text-xs text-brand-600 dark:text-brand-400">Auto-fill deal fields using AI (requires OpenAI key in Settings)</p>
+      <!-- AI Import Banner -->
+      <div class="rounded-xl border border-brand-200 dark:border-brand-800 overflow-hidden">
+        <div class="bg-brand-50 dark:bg-brand-900/20 px-4 py-3">
+          <div class="flex items-center gap-3">
+            <div class="w-8 h-8 rounded-lg bg-brand-100 dark:bg-brand-800/50 flex items-center justify-center flex-shrink-0">
+              <svg class="w-4 h-4 text-brand-600 dark:text-brand-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" /></svg>
+            </div>
+            <div class="flex-1 min-w-0">
+              <p class="text-xs font-semibold text-brand-800 dark:text-brand-200">AI Auto-fill from CIM / Teaser / Financials</p>
+              <p class="text-xs text-brand-600 dark:text-brand-400 mt-0.5">Upload a PDF — AI extracts company info, revenue, EBITDA, margins, and more. Document is saved to the deal.</p>
+            </div>
+            <label id="deal-pdf-label" class="btn-primary btn-sm cursor-pointer whitespace-nowrap flex-shrink-0 flex items-center gap-1.5">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" /></svg>
+              Upload & Extract
+              <input type="file" id="deal-pdf-import" accept=".pdf,.PDF,.xlsx,.xls,.txt,.csv" class="hidden" onchange="importDealFromPDF(this)" />
+            </label>
           </div>
-          <label id="deal-pdf-label" class="btn-secondary btn-sm cursor-pointer whitespace-nowrap">
-            <input type="file" id="deal-pdf-import" accept=".pdf,.PDF" class="hidden" onchange="importDealFromPDF(this)" />
-            📄 Upload PDF
-          </label>
-        </div>
-        <div id="deal-pdf-status" class="hidden mt-2 text-xs text-brand-700 dark:text-brand-300 flex items-center gap-2">
-          <svg class="w-3 h-3 animate-spin flex-shrink-0" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>
-          <span id="deal-pdf-status-text">Processing…</span>
+          <!-- Progress / result area -->
+          <div id="deal-pdf-status" class="hidden mt-3">
+            <div class="flex items-center gap-2 text-xs text-brand-700 dark:text-brand-300">
+              <svg class="w-3 h-3 animate-spin flex-shrink-0" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>
+              <span id="deal-pdf-status-text">Processing…</span>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -1064,18 +1250,26 @@ async function openEditDealModal(dealId) {
       </div>
 
       <div class="border-t border-surface-200 dark:border-surface-800 pt-4">
-        <h3 class="text-sm font-semibold mb-3">Financials</h3>
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="text-sm font-semibold">Financials</h3>
+          <div class="flex items-center gap-2">
+            <label class="text-xs text-surface-500 font-medium">Currency</label>
+            <select id="deal-currency" class="input-field py-1 text-sm w-28" onchange="updateDealMultiple()">
+              ${CURRENCIES.map(c => `<option value="${c.code}" ${(deal?.currency || _fxBaseCurrency || 'USD') === c.code ? 'selected' : ''}>${c.symbol.trim()} ${c.code} — ${c.name}</option>`).join('')}
+            </select>
+          </div>
+        </div>
         <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
           <div>
-            <label class="block text-sm font-medium mb-1">Revenue ($)</label>
+            <label class="block text-sm font-medium mb-1">Revenue</label>
             <input type="number" id="deal-revenue" class="input-field" value="${deal?.revenue || ''}" placeholder="5000000" />
           </div>
           <div>
-            <label class="block text-sm font-medium mb-1">EBITDA ($)</label>
+            <label class="block text-sm font-medium mb-1">EBITDA</label>
             <input type="number" id="deal-ebitda" class="input-field" value="${deal?.ebitda || ''}" placeholder="1000000" oninput="updateDealMultiple()" />
           </div>
           <div>
-            <label class="block text-sm font-medium mb-1">Asking Price ($)</label>
+            <label class="block text-sm font-medium mb-1">Asking Price</label>
             <input type="number" id="deal-asking-price" class="input-field" value="${deal?.askingPrice || ''}" placeholder="5000000" oninput="updateDealMultiple()" />
           </div>
           <div>
@@ -1157,6 +1351,7 @@ async function saveDeal(dealId) {
   deal.subsector = document.getElementById('deal-subsector').value.trim();
   deal.location = document.getElementById('deal-location').value.trim();
   deal.priority = document.getElementById('deal-priority').value;
+  deal.currency = document.getElementById('deal-currency')?.value || 'USD';
   deal.revenue = parseFloat(document.getElementById('deal-revenue').value) || null;
   deal.ebitda = parseFloat(document.getElementById('deal-ebitda').value) || null;
   deal.askingPrice = parseFloat(document.getElementById('deal-asking-price').value) || null;
@@ -1182,6 +1377,38 @@ async function saveDeal(dealId) {
 
   closeModal();
   showToast(dealId ? 'Deal updated' : 'Deal created', 'success');
+
+  // Auto-attach any pending CIM PDF that was used for import
+  if (!dealId && window._pendingDealPDF) {
+    const { file, base64, category } = window._pendingDealPDF;
+    window._pendingDealPDF = null;
+    try {
+      const ext = file.name.split('.').pop().toLowerCase();
+      const docRecord = {
+        id: generateId(),
+        dealId: deal.id,
+        userId: currentUser.id,
+        name: file.name,
+        type: ext === 'pdf' ? 'pdf' : 'other',
+        category,
+        mimeType: file.type,
+        size: file.size,
+        data: base64,
+        extractedText: null,
+        uploadedAt: new Date().toISOString(),
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      // Also extract text so Gap Finder / AI can use it later
+      if (ext === 'pdf' && typeof pdfjsLib !== 'undefined') {
+        try { docRecord.extractedText = await extractTextFromPDF(base64); } catch {}
+      }
+      await DB.put(STORES.dealDocuments, docRecord);
+      showToast('CIM attached to deal automatically', 'info');
+    } catch (e) {
+      console.warn('Auto-attach PDF failed:', e);
+    }
+  }
 
   if (currentDealId === dealId) {
     viewDeal(dealId);
@@ -1436,13 +1663,15 @@ async function importDealFromPDF(input) {
   if (!input.files || !input.files.length) return;
   const file = input.files[0];
 
-  const statusEl = document.getElementById('deal-pdf-status');
+  const statusEl   = document.getElementById('deal-pdf-status');
   const statusText = document.getElementById('deal-pdf-status-text');
-  const label = document.getElementById('deal-pdf-label');
+  const label      = document.getElementById('deal-pdf-label');
 
-  function setStatus(msg) {
+  function setStatus(msg, showSpinner = true) {
     if (statusEl) statusEl.classList.remove('hidden');
     if (statusText) statusText.textContent = msg;
+    const spinner = statusEl?.querySelector('svg');
+    if (spinner) spinner.style.display = showSpinner ? '' : 'none';
   }
   function clearStatus(msg, isError) {
     if (statusEl) statusEl.classList.add('hidden');
@@ -1450,7 +1679,7 @@ async function importDealFromPDF(input) {
     if (msg) showToast(msg, isError ? 'error' : 'success');
   }
 
-  if (file.size > 25 * 1024 * 1024) { clearStatus('File too large (max 25MB)', true); return; }
+  if (file.size > 30 * 1024 * 1024) { clearStatus('File too large (max 30MB)', true); return; }
   if (label) label.style.opacity = '0.5';
 
   const settings = await DB.get(STORES.settings, `settings_${currentUser.id}`);
@@ -1459,13 +1688,13 @@ async function importDealFromPDF(input) {
     return;
   }
 
-  // Step 1: Read file
-  setStatus('Reading PDF file…');
+  // ── Step 1: Read file ─────────────────────────────────────────────────
+  setStatus('Reading file…');
   let base64;
   try {
     base64 = await new Promise((resolve, reject) => {
       const reader = new FileReader();
-      reader.onload = () => resolve(reader.result);
+      reader.onload  = () => resolve(reader.result);
       reader.onerror = () => reject(new Error('File read failed'));
       reader.readAsDataURL(file);
     });
@@ -1474,110 +1703,287 @@ async function importDealFromPDF(input) {
     return;
   }
 
-  // Step 2: Extract text from PDF using pdf.js
+  // ── Step 2: Extract text from PDF (structure-aware) ───────────────────
   setStatus('Extracting text from PDF…');
-  let text = '';
+  let fullText = '';
+  let pageTexts = []; // per-page for smart section selection
+
   try {
-    if (typeof pdfjsLib === 'undefined') throw new Error('PDF library not loaded');
-    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    const ext = file.name.split('.').pop().toLowerCase();
 
-    const rawB64 = base64.includes(',') ? base64.split(',')[1] : base64;
-    const binaryStr = atob(rawB64);
-    const bytes = new Uint8Array(binaryStr.length);
-    for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
+    if (ext === 'pdf') {
+      if (typeof pdfjsLib === 'undefined') throw new Error('PDF library not loaded');
+      pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 
-    const pdf = await pdfjsLib.getDocument({ data: bytes }).promise;
-    const pagesToRead = Math.min(pdf.numPages, 30);
-    for (let i = 1; i <= pagesToRead; i++) {
-      const page = await pdf.getPage(i);
-      const content = await page.getTextContent();
-      text += content.items.map(item => item.str).join(' ') + '\n';
+      const rawB64 = base64.includes(',') ? base64.split(',')[1] : base64;
+      const binaryStr = atob(rawB64);
+      const bytes = new Uint8Array(binaryStr.length);
+      for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
+
+      const pdf = await pdfjsLib.getDocument({ data: bytes }).promise;
+      const pagesToRead = Math.min(pdf.numPages, 80); // read up to 80 pages
+
+      for (let i = 1; i <= pagesToRead; i++) {
+        const page = await pdf.getPage(i);
+        const content = await page.getTextContent();
+
+        // Group text by Y-position to preserve row structure (tables etc.)
+        const byY = {};
+        for (const item of content.items) {
+          if (!item.str?.trim()) continue;
+          const y = Math.round(item.transform[5] / 4) * 4; // bucket to 4pt grid
+          if (!byY[y]) byY[y] = [];
+          byY[y].push(item.str);
+        }
+        // Sort Y descending (PDF coordinates: top = high Y)
+        const lines = Object.keys(byY).sort((a, b) => b - a)
+          .map(y => byY[y].join('  '));
+        const pageText = lines.join('\n');
+        pageTexts.push(pageText);
+        fullText += `\n=== Page ${i} ===\n${pageText}`;
+      }
+
+    } else if (['xlsx','xls'].includes(ext) && typeof XLSX !== 'undefined') {
+      const rawB64 = base64.includes(',') ? base64.split(',')[1] : base64;
+      const binaryStr = atob(rawB64);
+      const bytes = new Uint8Array(binaryStr.length);
+      for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
+      const wb = XLSX.read(bytes, { type: 'array' });
+      for (const sheetName of wb.SheetNames) {
+        fullText += `\n=== Sheet: ${sheetName} ===\n` + XLSX.utils.sheet_to_csv(wb.Sheets[sheetName]);
+      }
+      pageTexts = [fullText];
+
+    } else if (['txt','csv'].includes(ext)) {
+      fullText = atob(base64.split(',')[1] || base64);
+      pageTexts = [fullText];
     }
-    text = text.trim();
+
+    fullText = fullText.trim();
   } catch (err) {
-    clearStatus('PDF text extraction failed: ' + err.message, true);
+    clearStatus('Text extraction failed: ' + err.message, true);
     return;
   }
 
-  if (!text || text.length < 30) {
-    clearStatus('No readable text found in PDF. The document may be image-based or scanned.', true);
+  if (!fullText || fullText.length < 50) {
+    clearStatus('No readable text found. The file may be image-based or scanned — try a text-based PDF.', true);
     return;
   }
 
-  // Step 3: Smart text trimming — take first 2500 + last 1500 chars to cover intro + financials
-  const trimmedText = text.length > 4000
-    ? text.substring(0, 2500) + '\n...\n' + text.substring(text.length - 1500)
-    : text;
+  setStatus(`Extracted ${Math.round(fullText.length / 1000)}K characters across ${pageTexts.length} pages — sending to AI…`);
 
-  // Step 3: Try AI parsing, fall back to regex if quota exceeded
-  setStatus(`Extracted ${text.length} chars — parsing…`);
+  // ── Step 3: Smart text selection for AI context ───────────────────────
+  // Strategy: first 5 pages (company overview) + any page containing
+  // financial keywords (revenue, EBITDA, etc.) + last 3 pages (summary)
+  const FINANCIAL_KEYWORDS = /revenue|ebitda|gross\s*margin|net\s*income|cash\s*flow|asking\s*price|enterprise\s*value|customers?|employees?|recurring/i;
 
+  let introText = pageTexts.slice(0, 5).join('\n\n').substring(0, 5000);
+  let financialPages = pageTexts
+    .map((p, i) => ({ p, i }))
+    .filter(({ p }) => FINANCIAL_KEYWORDS.test(p))
+    .slice(0, 8)
+    .map(({ p }) => p.substring(0, 800))
+    .join('\n\n---\n\n');
+  let tailText = pageTexts.slice(-3).join('\n\n').substring(0, 2000);
+
+  const contextForAI = [
+    '=== INTRO / OVERVIEW SECTION ===',
+    introText,
+    financialPages ? '\n\n=== FINANCIAL HIGHLIGHTS (pages with financial data) ===' : '',
+    financialPages,
+    tailText ? '\n\n=== DOCUMENT TAIL / SUMMARY ===' : '',
+    tailText,
+  ].join('\n').substring(0, 12000); // stay within ~3K tokens
+
+  // ── Step 4: AI extraction — comprehensive prompt ──────────────────────
   let parsed = null;
   let usedFallback = false;
 
-  if (settings.openaiApiKey || settings.claudeApiKey) {
-    try {
-      const raw = await callAI(
-        'Extract deal info from the document. Return ONLY a JSON object, no markdown.',
-        `Return JSON with these fields (null if not found): companyName, sector (one of: Business Services,Healthcare Services,Technology,Industrial,Consumer,Education,Construction / Trades,Distribution,Food & Beverage,Financial Services,Other), location, revenue (USD number), ebitda (USD number), askingPrice (USD number), employeeCount (integer), description (2-3 sentences).\n\n${trimmedText}`,
-        500, 0.1
-      );
-      let content = raw.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
-      try { parsed = JSON.parse(content); } catch { usedFallback = true; }
-    } catch (err) {
-      // Quota / rate-limit / billing errors → fall back to regex silently
-      if (err.message.match(/quota|limit|billing|insufficient|overload|429|402/i)) {
-        setStatus('API limit reached — using pattern extraction…');
-        usedFallback = true;
-      } else {
-        clearStatus('AI parsing failed: ' + err.message, true);
-        return;
-      }
-    }
-  } else {
-    usedFallback = true;
-  }
+  const systemPrompt = `You are an expert M&A analyst extracting structured data from a Confidential Information Memorandum (CIM), teaser, or financial document for a search fund acquisition. Extract every data point you can find. Return ONLY valid JSON — no markdown, no explanation.`;
 
-  // Regex fallback — extract numbers and common patterns without AI
-  if (usedFallback || !parsed) {
-    parsed = parseDealTextWithRegex(text);
-  }
+  const userPrompt = `Extract all deal information from this document and return a JSON object with EXACTLY these fields (use null for anything not found):
+
+{
+  "companyName": "Full legal or trade name of the company",
+  "sector": "ONE of: Business Services | Healthcare Services | Technology | Industrial | Consumer | Education | Construction / Trades | Distribution | Food & Beverage | Financial Services | Other",
+  "subsector": "More specific description e.g. 'Managed IT Services', 'Dental DSO', 'HVAC Contractor'",
+  "location": "City, State format e.g. 'Austin, TX'",
+  "revenue": <number in USD, e.g. 8500000 for $8.5M — null if not found>,
+  "ebitda": <number in USD — prefer Adjusted EBITDA if available>,
+  "askingPrice": <number in USD — enterprise value or asking price>,
+  "askingMultiple": <number — EV/EBITDA multiple e.g. 5.5>,
+  "employeeCount": <integer>,
+  "revenueGrowthRate": <number — annual % growth rate e.g. 12.5>,
+  "ebitdaMargin": <number — EBITDA as % of revenue e.g. 22.4>,
+  "recurringRevenuePct": <number — % of revenue that is recurring/contracted e.g. 75>,
+  "customerConcentration": "Brief string e.g. 'Top customer is 18% of revenue, top 5 are 42%'",
+  "description": "3-5 sentence plain English description of what the company does, its market position, and why it has been successful. Be specific.",
+  "thesis": "2-3 sentence investment thesis — why this is an attractive search fund acquisition (e.g. defensible market, recurring revenue, owner retiring, platform opportunity)",
+  "concerns": "Key risks or red flags noted in the document — be specific. Null if none mentioned.",
+  "tags": ["tag1", "tag2"] // e.g. ["recurring revenue", "owner retiring", "HVAC", "SBA eligible", "platform"]
+}
+
+IMPORTANT RULES:
+- All dollar amounts must be plain numbers (no $ signs, no commas)
+- Revenue and EBITDA: use the most recent TTM / LTM figures if available
+- If only a multiple is shown (e.g. "asking 5.5x EBITDA"), compute askingPrice = ebitda × multiple
+- For the description: mention the service/product, geography, customer type, and any notable differentiation
+- Extract sector from context — don't guess if unclear
+
+DOCUMENT:
+${contextForAI}`;
 
   try {
-    // Apply fields to form
+    const raw = await callAI(systemPrompt, userPrompt, 1000, 0.05);
+    const cleaned = raw.trim()
+      .replace(/^```(?:json)?\s*/i, '')
+      .replace(/\s*```\s*$/i, '')
+      .trim();
+    try {
+      parsed = JSON.parse(cleaned);
+    } catch (jsonErr) {
+      // Try extracting the JSON object with a regex if there's surrounding text
+      const match = cleaned.match(/\{[\s\S]+\}/);
+      if (match) {
+        try { parsed = JSON.parse(match[0]); } catch { usedFallback = true; }
+      } else {
+        usedFallback = true;
+      }
+    }
+  } catch (err) {
+    if (err.message.match(/quota|limit|billing|insufficient|overload|429|402/i)) {
+      setStatus('AI quota reached — using pattern extraction…');
+      usedFallback = true;
+    } else {
+      clearStatus('AI extraction failed: ' + err.message, true);
+      return;
+    }
+  }
+
+  // ── Step 5: Regex fallback ────────────────────────────────────────────
+  if (usedFallback || !parsed) {
+    parsed = parseDealTextWithRegex(fullText);
+  }
+
+  if (!parsed) {
+    clearStatus('Could not extract any data from this document.', true);
+    return;
+  }
+
+  // ── Step 6: Apply extracted fields to the form ────────────────────────
+  setStatus('Filling in deal fields…', false);
+
+  try {
     let filled = [];
     const setField = (id, val) => {
-      if (val == null || val === '') return;
+      if (val == null || val === '' || val === 0) return;
       const el = document.getElementById(id);
-      if (el) { el.value = val; filled.push(id); }
+      if (!el) return;
+      el.value = String(val);
+      // Highlight filled fields briefly
+      el.style.transition = 'background 0.4s';
+      el.style.background = 'rgba(37,99,235,0.07)';
+      setTimeout(() => { el.style.background = ''; }, 1800);
+      filled.push(id);
     };
 
+    // Basic info
     if (parsed.companyName) setField('deal-name', parsed.companyName);
+    setField('deal-location', parsed.location);
+    setField('deal-subsector', parsed.subsector);
+
+    // Sector matching
     if (parsed.sector) {
       const sel = document.getElementById('deal-sector');
       if (sel) {
-        const exact = DEAL_SECTORS.find(s => s.toLowerCase() === (parsed.sector || '').toLowerCase());
-        const partial = DEAL_SECTORS.find(s => s.toLowerCase().includes((parsed.sector || '').toLowerCase()) || (parsed.sector || '').toLowerCase().includes(s.toLowerCase().split(' ')[0]));
-        if (exact) { sel.value = exact; filled.push('sector'); }
-        else if (partial) { sel.value = partial; filled.push('sector'); }
+        const sectors = typeof DEAL_SECTORS !== 'undefined' ? DEAL_SECTORS : [];
+        const exact = sectors.find(s => s.toLowerCase() === (parsed.sector || '').toLowerCase());
+        const partial = sectors.find(s =>
+          s.toLowerCase().includes((parsed.sector || '').toLowerCase().split('/')[0].trim()) ||
+          (parsed.sector || '').toLowerCase().includes(s.toLowerCase().split(' ')[0])
+        );
+        const match = exact || partial;
+        if (match) { sel.value = match; filled.push('sector'); }
       }
     }
-    setField('deal-location', parsed.location);
-    setField('deal-revenue', parsed.revenue);
-    setField('deal-ebitda', parsed.ebitda);
-    setField('deal-asking-price', parsed.askingPrice);
+
+    // Financials
+    setField('deal-revenue', parsed.revenue ? Math.round(parsed.revenue) : null);
+    setField('deal-ebitda', parsed.ebitda ? Math.round(parsed.ebitda) : null);
+    setField('deal-asking-price', parsed.askingPrice ? Math.round(parsed.askingPrice) : null);
     setField('deal-employees', parsed.employeeCount);
-    setField('deal-description', parsed.description);
+
+    // Multiple — compute if missing
+    if (parsed.askingMultiple) {
+      setField('deal-multiple', parsed.askingMultiple);
+    } else if (parsed.ebitda && parsed.askingPrice) {
+      setField('deal-multiple', (parsed.askingPrice / parsed.ebitda).toFixed(2));
+    }
+
+    // Description — build rich version including financial context
+    if (parsed.description) {
+      let desc = parsed.description;
+      const extras = [];
+      if (parsed.revenueGrowthRate) extras.push(`Revenue growing at ~${parsed.revenueGrowthRate}% annually.`);
+      if (parsed.recurringRevenuePct) extras.push(`~${parsed.recurringRevenuePct}% recurring/contracted revenue.`);
+      if (parsed.customerConcentration) extras.push(`Customer concentration: ${parsed.customerConcentration}.`);
+      if (extras.length) desc += ' ' + extras.join(' ');
+      setField('deal-description', desc.trim());
+    }
+
+    // Thesis
     if (parsed.thesis) setField('deal-thesis', parsed.thesis);
+
+    // Tags
+    if (Array.isArray(parsed.tags) && parsed.tags.length) {
+      const tagsField = document.getElementById('deal-tags');
+      if (tagsField && !tagsField.value.trim()) {
+        tagsField.value = parsed.tags.join(', ');
+        filled.push('tags');
+      }
+    }
+
     updateDealMultiple();
+
+    // ── Step 7: Show extraction summary panel ─────────────────────────
+    const summaryItems = [];
+    if (parsed.revenue) summaryItems.push(`Revenue: $${(parsed.revenue/1e6).toFixed(1)}M`);
+    if (parsed.ebitda) summaryItems.push(`EBITDA: $${(parsed.ebitda/1e6).toFixed(1)}M`);
+    if (parsed.ebitdaMargin) summaryItems.push(`Margin: ${parsed.ebitdaMargin.toFixed(0)}%`);
+    if (parsed.revenueGrowthRate) summaryItems.push(`Growth: ${parsed.revenueGrowthRate}%`);
+    if (parsed.askingMultiple || (parsed.ebitda && parsed.askingPrice)) {
+      const mult = parsed.askingMultiple || (parsed.askingPrice / parsed.ebitda).toFixed(1);
+      summaryItems.push(`Multiple: ${mult}x`);
+    }
+    if (parsed.recurringRevenuePct) summaryItems.push(`Recurring: ${parsed.recurringRevenuePct}%`);
+    if (parsed.employeeCount) summaryItems.push(`Employees: ${parsed.employeeCount}`);
+
+    const summaryEl = document.getElementById('deal-pdf-status');
+    if (summaryEl && summaryItems.length) {
+      summaryEl.classList.remove('hidden');
+      summaryEl.innerHTML = `
+        <div class="mt-2 p-3 rounded-lg bg-green-50 dark:bg-green-900/15 border border-green-200 dark:border-green-800">
+          <p class="text-xs font-semibold text-green-700 dark:text-green-400 mb-1.5">
+            ✓ Auto-filled ${filled.length} fields from document${usedFallback ? ' (pattern extraction)' : ''}
+          </p>
+          <div class="flex flex-wrap gap-x-4 gap-y-0.5">
+            ${summaryItems.map(s => `<span class="text-xs text-green-600 dark:text-green-500">${escapeHtml(s)}</span>`).join('')}
+          </div>
+          ${parsed.concerns ? `<p class="text-xs text-yellow-700 dark:text-yellow-400 mt-1.5">⚠ Concerns noted: ${escapeHtml(String(parsed.concerns).substring(0, 120))}</p>` : ''}
+          <p class="text-xs text-green-600 dark:text-green-500 mt-1.5 opacity-70">Review and adjust before saving. Document will be attached to the deal.</p>
+        </div>
+      `;
+      // Store PDF for auto-attach after save
+      window._pendingDealPDF = { file, base64, category: 'cim' };
+    }
+
     if (filled.length === 0) {
-      clearStatus('Could not extract data from this document. Try a text-based (not scanned) PDF.', true);
+      clearStatus('Could not extract usable data. Try a text-based (not scanned) PDF.', true);
     } else {
-      const method = usedFallback ? ' (pattern extraction — no AI credits used)' : '';
-      clearStatus(`✓ Populated ${filled.length} field${filled.length !== 1 ? 's' : ''}${method}`, false);
+      if (label) label.style.opacity = '1';
     }
   } catch (err) {
-    clearStatus('Parsing failed: ' + err.message, true);
+    clearStatus('Error applying fields: ' + err.message, true);
   }
 }
 

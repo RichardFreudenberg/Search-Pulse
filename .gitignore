@@ -1,0 +1,15 @@
+# Claude AI session data — never publish
+.claude/
+.claudelaunch.json
+
+# Personal / internal docs — keep off the public repo
+DSAIL-Submission.html
+SearchPulse-Overview.html
+
+# Test files — not needed in production
+js/*.test.js
+
+# OS junk
+.DS_Store
+Thumbs.db
+desktop.ini

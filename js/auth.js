@@ -4,12 +4,94 @@
 
 let currentUser = null;
 let pendingVerification = null; // { user, code, email }
+let pendingPasswordReset = null; // { email, code, expiresAt }
 
 async function hashPassword(password) {
   const encoder = new TextEncoder();
   const data = encoder.encode(password);
   const hash = await crypto.subtle.digest('SHA-256', data);
   return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+// ─── Pilot Invite System ──────────────────────────────────────────────────────
+// Invite codes are self-validating: PULSE-{8 hex random}-{4 hex checksum}
+// The checksum = first 4 hex chars of SHA-256(SALT + random).
+// No server or DB lookup needed — any valid code can be verified offline.
+// The first account in an empty DB is always the owner (no invite needed).
+
+const _INVITE_SALT = 'PulsePilot2025#SearchFund';
+const _INVITE_STORE_KEY = 'pulse_pilot_invites'; // localStorage key for generated codes
+
+async function _inviteChecksum(random8) {
+  const data = new TextEncoder().encode(_INVITE_SALT + random8);
+  const hash = await crypto.subtle.digest('SHA-256', data);
+  return Array.from(new Uint8Array(hash))
+    .map(b => b.toString(16).padStart(2, '0'))
+    .join('').slice(0, 4).toUpperCase();
+}
+
+/** Generate a new cryptographically-signed invite code. */
+async function generateInviteCode() {
+  const bytes = crypto.getRandomValues(new Uint8Array(4));
+  const random = Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('').toUpperCase();
+  const cs = await _inviteChecksum(random);
+  return `PULSE-${random}-${cs}`;
+}
+
+/**
+ * Validate an invite code. Returns true if the checksum is correct.
+ * Does NOT check if the code has been used (stateless by design for pilot).
+ */
+async function validateInviteCode(code) {
+  if (!code || typeof code !== 'string') return false;
+  const clean = code.trim().toUpperCase().replace(/\s+/g, '');
+  const m = clean.match(/^PULSE-([A-F0-9]{8})-([A-F0-9]{4})$/);
+  if (!m) return false;
+  const expected = await _inviteChecksum(m[1]);
+  return expected === m[2];
+}
+
+/** Load all saved invites from localStorage. */
+function loadSavedInvites() {
+  try { return JSON.parse(localStorage.getItem(_INVITE_STORE_KEY) || '[]'); }
+  catch { return []; }
+}
+
+/** Persist invites to localStorage. */
+function saveInvites(list) {
+  localStorage.setItem(_INVITE_STORE_KEY, JSON.stringify(list));
+}
+
+/**
+ * Generate + store a new invite and return the record.
+ * @param {string} note  Optional label (e.g. "for John Smith")
+ */
+async function createNewInvite(note = '') {
+  const code = await generateInviteCode();
+  const record = { code, note, createdAt: new Date().toISOString(), usedByEmail: null, usedAt: null };
+  const list = loadSavedInvites();
+  list.unshift(record); // newest first
+  saveInvites(list);
+  return record;
+}
+
+/** Mark an invite as used (called after successful registration). */
+function markInviteUsed(code, email) {
+  const list = loadSavedInvites();
+  const rec = list.find(i => i.code.toUpperCase() === code.toUpperCase());
+  if (rec && !rec.usedAt) {
+    rec.usedAt = new Date().toISOString();
+    rec.usedByEmail = email;
+    saveInvites(list);
+  }
+}
+
+/** Returns true if invite is required (i.e. at least one account already exists). */
+async function isInviteRequired() {
+  try {
+    const users = await DB.getAll(STORES.users);
+    return users.length > 0;
+  } catch { return false; }
 }
 
 function generateVerificationCode() {
@@ -33,47 +115,7 @@ async function register(name, email, password) {
   };
 
   await DB.add(STORES.users, user);
-
-  // Create default tags
-  const defaultTags = [
-    { name: 'Search Fund', color: 'blue' },
-    { name: 'PE/VC', color: 'purple' },
-    { name: 'Operator', color: 'green' },
-    { name: 'Advisor', color: 'yellow' },
-    { name: 'Banker', color: 'teal' },
-    { name: 'Broker', color: 'gray' },
-    { name: 'LP', color: 'red' },
-    { name: 'CEO', color: 'blue' },
-    { name: 'Board Member', color: 'purple' },
-    { name: 'Industry Expert', color: 'green' },
-  ];
-  for (const tag of defaultTags) {
-    await DB.add(STORES.tags, { ...tag, userId: user.id });
-  }
-
-  // Create default settings
-  await DB.add(STORES.settings, {
-    id: `settings_${user.id}`,
-    userId: user.id,
-    theme: 'light',
-    emailReminders: false,
-    reminderEmail: '',
-    defaultFollowUpDays: 14,
-    stageCadence: {
-      'New intro': 7,
-      'Met once': 14,
-      'Active relationship': 30,
-      'Warm relationship': 60,
-      'Needs follow-up': 3,
-    },
-    openaiApiKey: '',
-    claudeApiKey: '',
-    rapidApiKey: '',
-    linkedInConnected: false,
-    linkedInProfileUrl: '',
-    newsRegions: ['USA', 'Europe'],
-  });
-
+  await _createDefaultUserData(user.id);
   return user;
 }
 
@@ -120,14 +162,28 @@ function logout() {
 }
 
 function _showAuthPanel(name) {
-  ['login', 'register', 'verify', 'reset', 'recover'].forEach(s =>
+  ['login', 'register', 'verify', 'reset', 'new-password', 'recover'].forEach(s =>
     document.getElementById(`auth-${s}`).classList.toggle('hidden', s !== name)
   );
 }
-function showAuthLogin()    { _showAuthPanel('login'); }
-function showAuthRegister() { _showAuthPanel('register'); }
-function showAuthVerify()   { _showAuthPanel('verify'); }
-function showAuthReset()    { _showAuthPanel('reset'); }
+function showAuthLogin()       { _showAuthPanel('login'); }
+function showAuthVerify()      { _showAuthPanel('verify'); }
+function showAuthReset()       { _showAuthPanel('reset'); }
+function showAuthNewPassword() { _showAuthPanel('new-password'); }
+
+async function showAuthRegister() {
+  _showAuthPanel('register');
+  // Show or hide the invite field depending on whether accounts already exist
+  const required = await isInviteRequired();
+  const wrap = document.getElementById('invite-code-wrap');
+  if (wrap) wrap.classList.toggle('hidden', !required);
+  // Pre-fill from URL param if present
+  const urlInvite = new URLSearchParams(window.location.search).get('invite');
+  if (urlInvite) {
+    const field = document.getElementById('register-invite');
+    if (field && !field.value) field.value = urlInvite.toUpperCase();
+  }
+}
 
 async function startAccountRecovery() {
   _showAuthPanel('recover');
@@ -241,6 +297,46 @@ function getOtpValue() {
   return Array.from(inputs).map(i => i.value).join('');
 }
 
+async function sendPasswordResetEmail(email, code) {
+  console.log(`[Pulse] Password reset code for ${email}: ${code}`);
+
+  const hintEl = document.getElementById('reset-code-hint');
+  if (hintEl) hintEl.classList.remove('hidden');
+
+  try {
+    const ejsRaw = localStorage.getItem('pulse_emailjs_config');
+    const ejsCfg = ejsRaw ? JSON.parse(ejsRaw) : null;
+
+    if (ejsCfg && ejsCfg.publicKey && ejsCfg.serviceId && ejsCfg.templateId && window.emailjs) {
+      emailjs.init({ publicKey: ejsCfg.publicKey });
+      await emailjs.send(ejsCfg.serviceId, ejsCfg.templateId, {
+        to_email: email,
+        to_name: '',
+        code: code,
+        app_name: 'Pulse CRM',
+        subject: 'Your Pulse CRM password reset code',
+      });
+      if (hintEl) {
+        hintEl.innerHTML = `<span class="inline-flex items-center gap-1.5 text-green-600 dark:text-green-400 text-sm font-medium"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> Reset code sent to ${email}</span>`;
+      }
+      return;
+    }
+  } catch (err) {
+    console.warn('[Pulse] EmailJS reset email failed:', err);
+  }
+
+  if (hintEl) {
+    hintEl.innerHTML = `
+      <div style="background:#fffbeb;border:1px solid #fcd34d;border-radius:8px;padding:12px;">
+        <p style="font-size:12px;color:#92400e;margin-bottom:6px;font-weight:600;">No email service configured — your reset code is:</p>
+        <span style="font-family:monospace;font-size:20px;letter-spacing:0.3em;background:#f3f4f6;padding:6px 12px;border-radius:6px;">${code}</span>
+        <p style="font-size:11px;color:#9191a8;margin-top:8px;">
+          <button onclick="navigate('settings')" style="color:#6366f1;text-decoration:underline;background:none;border:none;cursor:pointer;">Configure EmailJS in Settings →</button>
+        </p>
+      </div>`;
+  }
+}
+
 async function sendVerificationEmail(email, code) {
   console.log(`[Pulse] Verification code for ${email}: ${code}`);
 
@@ -319,17 +415,15 @@ function setupAuthForms() {
       btn.disabled = false;
       showToast(err.message, 'error');
 
-      // If the account wasn't found, automatically run the recovery scan
-      // so the user doesn't have to hunt for the button.
+      // If the account wasn't found, show the recovery button and auto-run the scan.
       if (err.message && err.message.toLowerCase().includes('no account')) {
         const recoverBtn = document.getElementById('recover-btn');
         if (recoverBtn) {
-          recoverBtn.style.animation = 'pulse 1s 2';
-          recoverBtn.querySelector('#recover-btn-label').textContent =
-            'Account not found — click here to scan & recover your data';
-          recoverBtn.classList.add('text-amber-600', 'dark:text-amber-400', 'font-medium');
+          recoverBtn.style.display = 'block'; // was display:none — make it visible
+          const labelEl = document.getElementById('recover-btn-label');
+          if (labelEl) labelEl.textContent = 'Account not found — click to scan & recover your data';
         }
-        // Auto-run the scan
+        // Auto-run the scan after a brief delay
         setTimeout(() => startAccountRecovery(), 800);
       }
     }
@@ -338,19 +432,25 @@ function setupAuthForms() {
   // Register form — leads to verification
   document.getElementById('register-form').addEventListener('submit', async (e) => {
     e.preventDefault();
+    const btn = e.target.querySelector('button[type="submit"]');
+    btn.disabled = true;
+    btn.textContent = 'Checking…';
     try {
-      const name = document.getElementById('register-name').value;
-      const email = document.getElementById('register-email').value;
+      const name = document.getElementById('register-name').value.trim();
+      const email = document.getElementById('register-email').value.trim();
       const password = document.getElementById('register-password').value;
       const passwordConfirm = document.getElementById('register-password-confirm').value;
+      const inviteCode = (document.getElementById('register-invite')?.value || '').trim();
 
       if (password !== passwordConfirm) {
         showToast('Passwords do not match', 'error');
         document.getElementById('register-password-confirm').focus();
+        btn.disabled = false; btn.textContent = 'Create account';
         return;
       }
       if (password.length < 8) {
         showToast('Password must be at least 8 characters', 'error');
+        btn.disabled = false; btn.textContent = 'Create account';
         return;
       }
 
@@ -358,12 +458,30 @@ function setupAuthForms() {
       const existing = await DB.getAll(STORES.users);
       if (existing.find(u => u.email === email)) {
         showToast('An account with this email already exists', 'error');
+        btn.disabled = false; btn.textContent = 'Create account';
         return;
+      }
+
+      // ── Invite gate (skipped for the very first account = owner) ──
+      if (existing.length > 0) {
+        if (!inviteCode) {
+          showToast('An invite code is required during the pilot phase', 'error');
+          document.getElementById('register-invite')?.focus();
+          btn.disabled = false; btn.textContent = 'Create account';
+          return;
+        }
+        const valid = await validateInviteCode(inviteCode);
+        if (!valid) {
+          showToast('Invalid invite code — please check and try again', 'error');
+          document.getElementById('register-invite')?.select();
+          btn.disabled = false; btn.textContent = 'Create account';
+          return;
+        }
       }
 
       // Generate code and show verification screen
       const code = generateVerificationCode();
-      pendingVerification = { name, email, password, code };
+      pendingVerification = { name, email, password, code, inviteCode };
 
       document.getElementById('verify-email-display').textContent = email;
       showAuthVerify();
@@ -384,29 +502,67 @@ function setupAuthForms() {
     }
   });
 
-  // Reset password form
+  // Reset password — Step 1: send code to email
   document.getElementById('reset-form').addEventListener('submit', async (e) => {
     e.preventDefault();
+    const btn = e.target.querySelector('button[type="submit"]');
+    const origLabel = btn.textContent;
+    btn.textContent = 'Sending…';
+    btn.disabled = true;
     try {
-      const email = document.getElementById('reset-email').value;
-      const password = document.getElementById('reset-password').value;
-      const passwordConfirm = document.getElementById('reset-password-confirm').value;
+      const email = document.getElementById('reset-email').value.trim();
+      const users = await DB.getAll(STORES.users);
+      if (!users.find(u => u.email === email)) throw new Error('No account found with this email');
 
-      if (password !== passwordConfirm) {
-        showToast('Passwords do not match', 'error');
-        return;
-      }
-      if (password.length < 8) {
-        showToast('Password must be at least 8 characters', 'error');
-        return;
+      const code = generateVerificationCode();
+      pendingPasswordReset = { email, code, expiresAt: Date.now() + 15 * 60 * 1000 };
+
+      await sendPasswordResetEmail(email, code);
+
+      showAuthNewPassword();
+      const targetEl = document.getElementById('reset-target-email');
+      if (targetEl) targetEl.textContent = `Code sent to ${email}`;
+      document.getElementById('new-password-code')?.focus();
+    } catch (err) {
+      showToast(err.message, 'error');
+      btn.textContent = origLabel;
+      btn.disabled = false;
+    }
+  });
+
+  // Reset password — Step 2: verify code + set new password
+  document.getElementById('new-password-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const btn = e.target.querySelector('button[type="submit"]');
+    const origLabel = btn.textContent;
+    btn.textContent = 'Saving…';
+    btn.disabled = true;
+    try {
+      if (!pendingPasswordReset) throw new Error('No reset in progress — please request a new code');
+      if (Date.now() > pendingPasswordReset.expiresAt) {
+        pendingPasswordReset = null;
+        throw new Error('Reset code expired — please request a new one');
       }
 
-      await resetPassword(email, password);
-      showToast('Password reset — please sign in', 'success');
+      const enteredCode = document.getElementById('new-password-code').value.trim();
+      if (enteredCode !== pendingPasswordReset.code) throw new Error('Incorrect reset code');
+
+      const password = document.getElementById('new-password-password').value;
+      const passwordConfirm = document.getElementById('new-password-confirm').value;
+      if (password !== passwordConfirm) throw new Error('Passwords do not match');
+      if (password.length < 8) throw new Error('Password must be at least 8 characters');
+
+      await resetPassword(pendingPasswordReset.email, password);
+      const email = pendingPasswordReset.email;
+      pendingPasswordReset = null;
+
+      showToast('Password updated — please sign in', 'success');
       document.getElementById('login-email').value = email;
       showAuthLogin();
     } catch (err) {
       showToast(err.message, 'error');
+      btn.textContent = origLabel;
+      btn.disabled = false;
     }
   });
 
@@ -444,6 +600,11 @@ function setupAuthForms() {
       user.emailVerified = true;
       await DB.put(STORES.users, user);
 
+      // Record invite code as used (tracked in owner's localStorage for pilot management)
+      if (pendingVerification.inviteCode) {
+        markInviteUsed(pendingVerification.inviteCode, pendingVerification.email);
+      }
+
       setCurrentUser(user);
       await seedDemoData(user.id);
       pendingVerification = null;
@@ -457,6 +618,117 @@ function setupAuthForms() {
       showToast(err.message, 'error');
     }
   });
+}
+
+/**
+ * Create default tags + settings for a brand-new user.
+ */
+async function _createDefaultUserData(userId) {
+  const defaultTags = [
+    { name: 'Search Fund', color: 'blue' },
+    { name: 'PE/VC', color: 'purple' },
+    { name: 'Operator', color: 'green' },
+    { name: 'Advisor', color: 'yellow' },
+    { name: 'Banker', color: 'teal' },
+    { name: 'Broker', color: 'gray' },
+    { name: 'LP', color: 'red' },
+    { name: 'CEO', color: 'blue' },
+    { name: 'Board Member', color: 'purple' },
+    { name: 'Industry Expert', color: 'green' },
+  ];
+  for (const tag of defaultTags) await DB.add(STORES.tags, { ...tag, userId });
+
+  await DB.add(STORES.settings, {
+    id: `settings_${userId}`,
+    userId,
+    theme: 'light',
+    emailReminders: false,
+    reminderEmail: '',
+    defaultFollowUpDays: 14,
+    stageCadence: {
+      'New intro': 7, 'Met once': 14, 'Active relationship': 30,
+      'Warm relationship': 60, 'Needs follow-up': 3,
+    },
+    openaiApiKey: '', claudeApiKey: '', rapidApiKey: '',
+    linkedInConnected: false, linkedInProfileUrl: '',
+    newsRegions: ['USA', 'Europe'],
+  });
+}
+
+function deleteAccount() {
+  openModal(`
+    <div class="p-6">
+      <div class="flex items-center gap-3 mb-4">
+        <div class="w-10 h-10 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center flex-shrink-0">
+          <svg class="w-5 h-5 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/>
+          </svg>
+        </div>
+        <div>
+          <h3 class="text-lg font-semibold text-red-600">Delete Account</h3>
+          <p class="text-xs text-surface-500">This permanently removes your account and all data</p>
+        </div>
+      </div>
+      <div class="bg-red-50 dark:bg-red-900/15 border border-red-200 dark:border-red-800 rounded p-3 mb-5 text-sm text-red-700 dark:text-red-400">
+        <strong>Warning:</strong> All contacts, companies, deals, calls, notes, and your account will be <strong>permanently deleted</strong>. This cannot be undone.
+      </div>
+      <div class="mb-4">
+        <label class="block text-sm font-medium mb-1.5">Enter your password to confirm</label>
+        <input type="password" id="delete-account-password" class="input-field" placeholder="Your account password"
+          onkeydown="if(event.key==='Enter') confirmDeleteAccount()" autofocus />
+        <p id="delete-account-error" class="text-xs text-red-600 mt-1.5 hidden">Incorrect password. Please try again.</p>
+      </div>
+      <div class="flex justify-end gap-3">
+        <button onclick="closeModal()" class="btn-secondary">Cancel</button>
+        <button onclick="confirmDeleteAccount()" class="btn-danger flex items-center gap-2">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+          </svg>
+          Delete My Account
+        </button>
+      </div>
+    </div>
+  `, { small: true });
+  setTimeout(() => document.getElementById('delete-account-password')?.focus(), 50);
+}
+
+async function confirmDeleteAccount() {
+  const input = document.getElementById('delete-account-password');
+  const errorEl = document.getElementById('delete-account-error');
+  if (!input) return;
+
+  const password = input.value;
+  if (!password) { input.focus(); return; }
+
+  const user = await DB.get(STORES.users, currentUser.id);
+  const enteredHash = await hashPassword(password);
+  if (enteredHash !== user.passwordHash) {
+    errorEl.classList.remove('hidden');
+    input.value = '';
+    input.focus();
+    return;
+  }
+
+  closeModal();
+
+  for (const store of Object.values(STORES)) {
+    if (store === 'users' || store === 'settings') continue;
+    const items = await DB.getAll(store);
+    for (const item of items) {
+      if (item.userId === currentUser.id) await DB.delete(store, item.id);
+    }
+  }
+  await DB.delete(STORES.settings, `settings_${user.id}`);
+  await DB.delete(STORES.users, user.id);
+
+  localStorage.removeItem('pulse_user_id');
+  localStorage.removeItem('pulse_show_tutorial_' + user.id);
+  currentUser = null;
+
+  document.getElementById('auth-screen').classList.remove('hidden');
+  document.getElementById('app-shell').classList.add('hidden');
+  showAuthLogin();
+  showToast('Account deleted', 'info');
 }
 
 function showApp() {

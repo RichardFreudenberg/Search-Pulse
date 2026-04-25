@@ -9,10 +9,11 @@ const VALID_PAGES = new Set([
   'dashboard','contacts','companies','calls','reminders',
   'suggestions','news','resources','deals','deal-search',
   'company-scout','sourcing','settings','shared-dashboard',
+  'email-templates','brokers',
 ]);
 
 // Nav tab switcher
-const DEALS_PAGES = new Set(['deals','deal-search','company-scout','sourcing','shared-dashboard']);
+const DEALS_PAGES = new Set(['deals','deal-search','company-scout','sourcing','shared-dashboard','email-templates','brokers']);
 
 function switchNavTab(tab) {
   const relPanel  = document.getElementById('nav-panel-relationships');
@@ -25,6 +26,13 @@ function switchNavTab(tab) {
   dealPanel.classList.toggle('hidden', !isDeals);
   relTab?.classList.toggle('active', !isDeals);
   dealTab?.classList.toggle('active', isDeals);
+
+  // When already on the dashboard, sync the dashboard tab automatically.
+  // This makes clicking "Deals" switch to the Deals dashboard tab, and
+  // clicking "Relationships" switch to the Overview tab — no extra click needed.
+  if (currentPage === 'dashboard' && typeof switchDashboardTab === 'function') {
+    switchDashboardTab(isDeals ? 'deals' : 'overview');
+  }
 }
 
 // Navigation
@@ -67,6 +75,8 @@ function navigate(page, { pushState = true } = {}) {
     case 'sourcing': renderSourcing(); break;
     case 'settings': renderSettings(); break;
     case 'shared-dashboard': renderSharedDashboardPage(); break;
+    case 'email-templates': renderEmailTemplates(); break;
+    case 'brokers': renderBrokers(); break;
     default: renderDashboard();
   }
 }
@@ -754,25 +764,67 @@ async function seedDemoDeal(userId) {
 // App Initialization
 // ============================================
 async function initApp() {
-  // Migrate any data from the legacy "nexus_crm" database before opening the current one.
-  await migrateLegacyDB();
-  await openDB();
+  // 1 — Migrate legacy databases (fire-and-forget errors are safe here)
+  try {
+    await migrateLegacyDB();
+  } catch (err) {
+    console.warn('[Pulse] Legacy DB migration failed (non-fatal):', err);
+  }
 
-  // Check for shared dashboard link before anything else
+  // 2 — Open / upgrade the main database
+  let dbOk = false;
+  try {
+    await openDB();
+    dbOk = true;
+  } catch (err) {
+    console.error('[Pulse] DB open failed:', err);
+    if (err && (err.message === 'DB_BLOCKED' || err.message === 'DB_OPEN_TIMEOUT')) {
+      // Surface a human-readable banner — don't block the rest of init.
+      setTimeout(() => {
+        if (typeof showToast === 'function') {
+          showToast(
+            'Database upgrade blocked — please close other Pulse tabs and refresh.',
+            'warning'
+          );
+        }
+      }, 200);
+    }
+  }
+
+  // 3 — Check for shared dashboard link before anything else
   if (typeof checkSharedDashboardRoute === 'function' && checkSharedDashboardRoute()) {
     return; // Render shared view, skip auth
   }
 
-  setupAuthForms();
-  setupGlobalSearch();
-
-  const user = await restoreSession();
-  if (user) {
-    showApp();
-  } else {
-    document.getElementById('auth-screen').classList.remove('hidden');
-    document.getElementById('app-shell').classList.add('hidden');
+  // 4 — Always wire up the auth forms regardless of DB status.
+  //     Without this call the login submit handler is never attached,
+  //     which makes the Sign-In button appear broken.
+  try {
+    setupAuthForms();
+  } catch (err) {
+    console.error('[Pulse] setupAuthForms failed:', err);
   }
+
+  try {
+    setupGlobalSearch();
+  } catch (_) {}
+
+  // 5 — Restore session (skip if DB failed to open)
+  if (dbOk) {
+    try {
+      const user = await restoreSession();
+      if (user) {
+        showApp();
+        return;
+      }
+    } catch (err) {
+      console.warn('[Pulse] Session restore failed:', err);
+    }
+  }
+
+  // 6 — Show login screen
+  document.getElementById('auth-screen').classList.remove('hidden');
+  document.getElementById('app-shell').classList.add('hidden');
 }
 
 // Boot

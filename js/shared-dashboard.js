@@ -10,6 +10,7 @@ const SHARE_SECTIONS = [
   { id: 'deal_sourcing',       label: 'Deal Sourcing Breakdown',    description: 'Where deals are coming from' },
   { id: 'deal_details',        label: 'Deal Cards',                 description: 'Full details for each selected deal (financials, timeline, notes)' },
   { id: 'deal_documents',      label: 'Deal Documents',             description: 'Document list for each selected deal' },
+  { id: 'lp_report',           label: 'LP Investor Report',         description: 'AI-generated quarterly update with pipeline metrics and deal highlights' },
 ];
 
 const _SHARE_LS_PREFIX = 'nexus_share_';
@@ -162,6 +163,22 @@ async function renderSharedDashboardPage() {
             </div>
           `}
 
+          <!-- LP Report Generator -->
+          <div class="card">
+            <div class="flex items-start justify-between mb-3">
+              <div>
+                <h3 class="font-semibold text-sm">LP Investor Report</h3>
+                <p class="text-xs text-surface-500 mt-0.5">AI-generated quarterly update for your limited partners</p>
+              </div>
+              <button onclick="generateLPReport()" class="btn-primary btn-sm flex items-center gap-1.5">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z"/></svg>
+                Generate
+              </button>
+            </div>
+            <div id="lp-report-preview" class="hidden"></div>
+            <p class="text-xs text-surface-400">Covers: pipeline status, key deals, sourcing activity, upcoming milestones, and investor-facing narrative. Include the <strong>LP Investor Report</strong> section above to embed this in your shared link.</p>
+          </div>
+
           <!-- Invite tracker -->
           <div class="card">
             <div class="flex items-center justify-between mb-4">
@@ -254,6 +271,139 @@ async function renderSharedDashboardPage() {
       </div>
     </div>
   `;
+}
+
+// ── LP Report Generator ───────────────────────────────────────────
+
+async function generateLPReport() {
+  const previewEl = document.getElementById('lp-report-preview');
+  if (previewEl) {
+    previewEl.classList.remove('hidden');
+    previewEl.innerHTML = `<div class="flex items-center gap-2 text-sm text-surface-500 py-3 mb-3 border-b border-surface-200 dark:border-surface-700"><div class="w-4 h-4 rounded-full border-2 border-brand-500 border-t-transparent animate-spin"></div> Generating LP report…</div>`;
+  }
+
+  try {
+    // Gather data
+    const [allDeals, allContacts, allCalls, settings] = await Promise.all([
+      DB.getAll(STORES.deals).then(d => d.filter(x => x.userId === currentUser.id)),
+      DB.getAll(STORES.contacts).then(c => c.filter(x => x.userId === currentUser.id)),
+      DB.getAll(STORES.calls).then(c => c.filter(x => x.userId === currentUser.id)),
+      DB.get(STORES.settings, `settings_${currentUser.id}`),
+    ]);
+
+    const now = new Date();
+    const quarterStart = new Date(now.getFullYear(), Math.floor(now.getMonth() / 3) * 3, 1);
+    const quarterLabel = `Q${Math.floor(now.getMonth() / 3) + 1} ${now.getFullYear()}`;
+
+    const activeDeals = allDeals.filter(d => !['Closed - Won', 'Closed - Lost', 'Rejected'].includes(d.stage));
+    const closedWon   = allDeals.filter(d => d.stage === 'Closed - Won');
+    const totalValue  = activeDeals.reduce((s, d) => s + (d.askingPrice || 0), 0);
+    const callsThisQ  = allCalls.filter(c => c.date && new Date(c.date) >= quarterStart).length;
+    const newContacts = allContacts.filter(c => c.createdAt && new Date(c.createdAt) >= quarterStart).length;
+
+    // Stage breakdown
+    const stageBreakdown = {};
+    activeDeals.forEach(d => { stageBreakdown[d.stage] = (stageBreakdown[d.stage] || 0) + 1; });
+    const stageLines = Object.entries(stageBreakdown)
+      .sort((a, b) => b[1] - a[1])
+      .map(([stage, count]) => `  - ${stage}: ${count} deal${count !== 1 ? 's' : ''}`)
+      .join('\n');
+
+    // Top deals to highlight
+    const topDeals = activeDeals
+      .filter(d => d.score >= 6 || ['Due Diligence', 'Exclusivity', 'Legal / Closing', 'LOI Submitted'].includes(d.stage))
+      .slice(0, 5)
+      .map(d => `  - ${d.name} (${d.stage})${d.ebitda ? ` — EBITDA: $${(d.ebitda/1000).toFixed(0)}k` : ''}${d.askingPrice ? `, Ask: $${(d.askingPrice/1000000).toFixed(1)}M` : ''}`)
+      .join('\n');
+
+    // Source breakdown
+    const sourceCounts = {};
+    allDeals.forEach(d => { if (d.source) sourceCounts[d.source] = (sourceCounts[d.source] || 0) + 1; });
+    const sourceLines = Object.entries(sourceCounts).sort((a, b) => b[1] - a[1])
+      .map(([s, c]) => `  - ${s}: ${c}`).join('\n');
+
+    const dataContext = `
+Period: ${quarterLabel}
+Active deals: ${activeDeals.length} (total pipeline value: $${(totalValue/1000000).toFixed(1)}M asking)
+Closed-won: ${closedWon.length}
+Contacts in network: ${allContacts.length} (${newContacts} added this quarter)
+Calls logged this quarter: ${callsThisQ}
+
+Stage breakdown:
+${stageLines || '  No active deals'}
+
+Advanced-stage / high-priority deals:
+${topDeals || '  None yet'}
+
+Sourcing channels:
+${sourceLines || '  No sourcing data'}
+`;
+
+    const hasAI = settings?.openaiApiKey || settings?.claudeApiKey;
+
+    let reportText;
+    if (hasAI) {
+      reportText = await callAI(
+        'You are a search fund investor writing a concise, professional quarterly LP update. Write in first person ("I" or "We"). Be specific, use the data provided, and maintain a confident but honest tone. Keep it to ~400 words.',
+        `Write a quarterly LP update for ${quarterLabel} using this data:\n\n${dataContext}\n\nStructure: (1) Executive Summary, (2) Deal Pipeline Update, (3) Sourcing Activity, (4) Key Deals to Watch, (5) Looking Ahead. Include actual numbers. Do not fabricate any data not provided.`,
+        700, 0.4
+      );
+    } else {
+      // Fallback: structured template without AI
+      reportText = `${quarterLabel} Investor Update
+
+Dear Investors,
+
+I am writing to share a brief update on my search fund progress for ${quarterLabel}.
+
+PIPELINE OVERVIEW
+I am currently tracking ${activeDeals.length} active deal${activeDeals.length !== 1 ? 's' : ''} with a combined asking price of approximately $${(totalValue/1000000).toFixed(1)}M. The pipeline breaks down as follows:
+${stageLines || '  No active deals at this time.'}
+
+SOURCING ACTIVITY
+This quarter I held ${callsThisQ} calls and added ${newContacts} new contacts to my network.
+${sourceLines ? `Deal sourcing by channel:\n${sourceLines}` : ''}
+
+KEY DEALS
+${topDeals || 'No advanced-stage deals to highlight this quarter.'}
+
+LOOKING AHEAD
+I will continue to deepen relationships across my network and advance the most promising opportunities to the next stage.
+
+Best regards,
+${currentUser.name}`;
+    }
+
+    // Store the report in localStorage for the shared dashboard view
+    localStorage.setItem(`pulse_lp_report_${currentUser.id}`, JSON.stringify({
+      text: reportText, quarter: quarterLabel, generatedAt: new Date().toISOString()
+    }));
+
+    if (previewEl) {
+      previewEl.innerHTML = `
+        <div class="border border-surface-200 dark:border-surface-700 rounded-lg overflow-hidden mb-3">
+          <div class="bg-surface-50 dark:bg-surface-800 px-4 py-2 flex items-center justify-between border-b border-surface-200 dark:border-surface-700">
+            <span class="text-xs font-semibold text-surface-500 uppercase tracking-wide">${quarterLabel} LP Update</span>
+            <div class="flex gap-2">
+              <button onclick="_copyLPReport()" class="text-xs text-brand-600 hover:underline">Copy text</button>
+              <button onclick="this.closest('#lp-report-preview').innerHTML='';document.getElementById('lp-report-preview').classList.add('hidden')" class="text-xs text-surface-400 hover:text-surface-600">×</button>
+            </div>
+          </div>
+          <div class="p-4 text-sm leading-relaxed whitespace-pre-wrap text-surface-700 dark:text-surface-300 max-h-72 overflow-y-auto" id="lp-report-text">${escapeHtml(reportText)}</div>
+        </div>`;
+    }
+
+    showToast('LP report generated — include the "LP Investor Report" section in your shared link', 'success');
+  } catch (err) {
+    if (previewEl) previewEl.innerHTML = `<p class="text-sm text-red-500 mb-3">Generation failed: ${escapeHtml(err.message)}</p>`;
+    showToast('LP report generation failed: ' + err.message, 'error');
+  }
+}
+
+function _copyLPReport() {
+  const el = document.getElementById('lp-report-text');
+  if (!el) return;
+  navigator.clipboard.writeText(el.textContent).then(() => showToast('Copied to clipboard', 'success'));
 }
 
 // ── Save Settings ─────────────────────────────────────────────────

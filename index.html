@@ -1,10 +1,10 @@
 <!DOCTYPE html>
-<html lang="en" class="dark">
+<html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Pulse — Search Fund CRM</title>
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%230c1118'/><polyline points='8,50 28,50 36,22 46,78 56,32 64,68 72,50 92,50' stroke='%23c8a96e' stroke-width='8' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='%23EEF4FF'/><polyline points='8,50 22,50 32,25 42,75 52,32 62,62 72,50 92,50' stroke='%232563eb' stroke-width='7' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
@@ -14,17 +14,17 @@
         extend: {
           colors: {
             brand: {
-              50:  '#fdf8f0',
-              100: '#faefd9',
-              200: '#f3d8a0',
-              300: '#e8c068',
-              400: '#d4a44c',
-              500: '#c8a96e',
-              600: '#b8963a',
-              700: '#9a7e2c',
-              800: '#7a6220',
-              900: 'rgba(200,169,110,0.12)',
-              950: 'rgba(200,169,110,0.06)',
+              50:  '#eff6ff',
+              100: '#dbeafe',
+              200: '#bfdbfe',
+              300: '#93c5fd',
+              400: '#60a5fa',
+              500: '#3b82f6',
+              600: '#2563eb',
+              700: '#1d4ed8',
+              800: '#1e40af',
+              900: 'rgba(37,99,235,0.12)',
+              950: 'rgba(37,99,235,0.06)',
             },
             surface: {
               0:   '#ffffff',
@@ -42,7 +42,7 @@
             }
           },
           fontFamily: {
-            sans: ['DM Sans', 'Inter', 'system-ui', '-apple-system', 'sans-serif'],
+            sans: ['DM Sans', 'system-ui', '-apple-system', 'sans-serif'],
             mono: ['JetBrains Mono', 'monospace'],
             serif: ['DM Serif Display', 'Georgia', 'serif'],
           },
@@ -64,165 +64,277 @@
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=DM+Sans:wght@300;400;500;600&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/app.css?v=4" />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600&family=DM+Serif+Display&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/app.css?v=20260424" />
 </head>
 <body class="bg-surface-50 dark:bg-surface-950 text-surface-900 dark:text-surface-100 font-sans antialiased">
   <!-- Auth Screen -->
-  <div id="auth-screen" class="min-h-screen flex items-center justify-center p-4">
-    <div class="w-full max-w-md animate-fade-in">
-      <div class="text-center mb-8">
-        <div class="inline-flex flex-col items-center gap-3 mb-2">
-          <svg width="52" height="52" viewBox="0 0 52 52" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <circle cx="26" cy="26" r="25" stroke="#c8a96e" stroke-width="0.7" stroke-opacity="0.3"/>
-            <circle cx="26" cy="26" r="19.5" stroke="#c8a96e" stroke-width="0.4" stroke-opacity="0.15"/>
-            <path d="M7 28L13.5 28L16.5 22L19.5 33L22.5 17L26 30L29 23.5L32.5 28L45 28" stroke="#c8a96e" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-            <circle cx="26" cy="30" r="2.5" fill="#c8a96e"/>
-            <line x1="26" y1="7" x2="26" y2="14" stroke="#c8a96e" stroke-width="0.6" stroke-opacity="0.35" stroke-linecap="round"/>
-            <line x1="26" y1="38" x2="26" y2="45" stroke="#c8a96e" stroke-width="0.6" stroke-opacity="0.35" stroke-linecap="round"/>
-            <line x1="7" y1="26" x2="14" y2="26" stroke="#c8a96e" stroke-width="0.6" stroke-opacity="0.35" stroke-linecap="round"/>
-            <line x1="38" y1="26" x2="45" y2="26" stroke="#c8a96e" stroke-width="0.6" stroke-opacity="0.35" stroke-linecap="round"/>
-          </svg>
-          <h1 style="font-family:'DM Serif Display',serif;font-size:1.75rem;color:var(--text-primary,#18181b);letter-spacing:0.01em;line-height:1;">Search<span style="color:#c8a96e;">Pulse</span></h1>
+  <div id="auth-screen">
+    <!-- Animated backdrop with ghost windows -->
+    <div class="sp-auth-bg">
+      <div class="sp-glow"></div>
+
+      <!-- Ghost window: Dashboard -->
+      <div class="sp-gw sp-gw-dash" style="top:4%;left:2%;width:340px">
+        <div class="sp-gw-bar"><div class="sp-gw-dots"><span></span><span></span><span></span></div><span class="sp-gw-title">Dashboard</span></div>
+        <div class="sp-gw-body">
+          <div class="sp-kpi-row">
+            <div class="sp-kpi"><div class="sp-kpi-l">Active Deals</div><div class="sp-kpi-v" id="sp-kpi-deals">6</div><div class="sp-kpi-d up">↑ 2 this week</div></div>
+            <div class="sp-kpi"><div class="sp-kpi-l">Companies</div><div class="sp-kpi-v" id="sp-kpi-cos">142</div><div class="sp-kpi-d up">↑ 14 this mo</div></div>
+            <div class="sp-kpi"><div class="sp-kpi-l">Calls</div><div class="sp-kpi-v" id="sp-kpi-calls">4</div><div class="sp-kpi-d dn">↓ 1 vs last</div></div>
+          </div>
+          <div class="sp-pipe-row"><span class="sp-pipe-l">Research</span><div class="sp-pipe-t"><div class="sp-pipe-f" style="--pw:72%;background:rgba(145,145,168,.5)"></div></div><span class="sp-pipe-c">9</span></div>
+          <div class="sp-pipe-row"><span class="sp-pipe-l">IOI Sent</span><div class="sp-pipe-t"><div class="sp-pipe-f" style="--pw:38%;background:rgba(37,99,235,.55)"></div></div><span class="sp-pipe-c">4</span></div>
+          <div class="sp-pipe-row"><span class="sp-pipe-l">Due Diligence</span><div class="sp-pipe-t"><div class="sp-pipe-f" style="--pw:18%;background:rgba(22,163,74,.6)"></div></div><span class="sp-pipe-c">2</span></div>
         </div>
-        <p class="mt-1" style="font-size:11px;letter-spacing:0.14em;text-transform:uppercase;color:var(--text-muted,#a1a1aa);">Search fund intelligence platform</p>
       </div>
-      <div class="bg-white dark:bg-surface-900 rounded shadow border border-surface-200 dark:border-surface-800 p-8">
-        <div id="auth-login" class="">
-          <h2 class="text-lg font-medium mb-6">Sign in</h2>
-          <form id="login-form" class="space-y-4">
-            <div>
-              <label class="block text-sm font-medium text-surface-600 dark:text-surface-400 mb-1.5">Email</label>
-              <input type="email" id="login-email" required class="input-field" placeholder="you@example.com" />
+
+      <!-- Ghost window: Kanban -->
+      <div class="sp-gw sp-gw-kanban" style="top:5%;right:2%;width:460px">
+        <div class="sp-gw-bar"><div class="sp-gw-dots"><span></span><span></span><span></span></div><span class="sp-gw-title">Deal Pipeline</span></div>
+        <div class="sp-gw-body">
+          <div class="sp-kanban">
+            <div class="sp-kcol">
+              <div class="sp-kstage"><span class="sp-kdot" style="background:#2563eb"></span>IOI Sent</div>
+              <div class="sp-deal"><div class="sp-deal-n">DataFlow Systems</div><div class="sp-deal-m">$3.2M ARR · SaaS</div><div class="sp-score-w"><div class="sp-score-f" style="--sw:87%;background:#16a34a"></div></div></div>
+              <div class="sp-deal sp-deal-pulse"><div class="sp-deal-n">MedSupply Direct</div><div class="sp-deal-m">$12.3M · Healthcare</div><div class="sp-score-w"><div class="sp-score-f" style="--sw:94%;background:#16a34a"></div></div></div>
             </div>
-            <div>
-              <label class="block text-sm font-medium text-surface-600 dark:text-surface-400 mb-1.5">Password</label>
-              <div class="relative">
-                <input type="password" id="login-password" required class="input-field pr-10" placeholder="••••••••" />
-                <button type="button" class="password-eye absolute right-3 top-1/2 -translate-y-1/2 text-surface-400 hover:text-surface-600 dark:hover:text-surface-300" onmousedown="showPassword('login-password')" onmouseup="hidePassword('login-password')" onmouseleave="hidePassword('login-password')" ontouchstart="showPassword('login-password')" ontouchend="hidePassword('login-password')">
-                  <svg id="login-eye-off" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" /></svg>
-                  <svg id="login-eye-on" class="w-5 h-5 hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
-                </button>
-              </div>
+            <div class="sp-kcol">
+              <div class="sp-kstage"><span class="sp-kdot" style="background:#7c3aed"></span>LOI Stage</div>
+              <div class="sp-deal"><div class="sp-deal-n">ClearView HVAC</div><div class="sp-deal-m">$4.7M · Field Svcs</div><div class="sp-score-w"><div class="sp-score-f" style="--sw:91%;background:#16a34a"></div></div></div>
             </div>
-            <button type="submit" class="btn-primary w-full">Sign in</button>
-          </form>
-          <div class="flex justify-between items-center mt-4">
-            <p class="text-sm text-surface-500">
-              Don't have an account? <button onclick="showAuthRegister()" class="text-brand-600 hover:text-brand-700 font-medium">Create one</button>
-            </p>
-            <button onclick="showAuthReset()" class="text-sm text-surface-400 hover:text-brand-600 dark:hover:text-brand-400">Forgot password?</button>
+            <div class="sp-kcol">
+              <div class="sp-kstage"><span class="sp-kdot" style="background:#16a34a"></span>Due Diligence</div>
+              <div class="sp-deal"><div class="sp-deal-n">AutoRoute Logistics</div><div class="sp-deal-m">$5.4M · Logistics</div><div class="sp-score-w"><div class="sp-score-f" style="--sw:65%;background:#d97706"></div></div></div>
+            </div>
           </div>
         </div>
-        <!-- Account Recovery (hidden — preserved for recovery URL deep-links) -->
-        <div id="auth-recover" class="hidden">
-          <h2 class="text-lg font-medium mb-2">Account recovery</h2>
-          <p class="text-sm text-surface-500 mb-4" id="recover-status">Scanning all local databases for your account…</p>
-          <div id="recover-results" class="space-y-2 mb-4"></div>
-          <button onclick="showAuthLogin()" class="text-sm text-brand-600 hover:text-brand-700 font-medium">Back to sign in</button>
-        </div>
-        <!-- Password Reset -->
-        <div id="auth-reset" class="hidden">
-          <h2 class="text-lg font-medium mb-2">Reset password</h2>
-          <p class="text-sm text-surface-500 mb-6">Enter your email and choose a new password.</p>
-          <form id="reset-form" class="space-y-4">
-            <div>
-              <label class="block text-sm font-medium text-surface-600 dark:text-surface-400 mb-1.5">Email</label>
-              <input type="email" id="reset-email" required class="input-field" placeholder="you@example.com" />
-            </div>
-            <div>
-              <label class="block text-sm font-medium text-surface-600 dark:text-surface-400 mb-1.5">New password</label>
-              <input type="password" id="reset-password" required minlength="8" class="input-field" placeholder="At least 8 characters" />
-            </div>
-            <div>
-              <label class="block text-sm font-medium text-surface-600 dark:text-surface-400 mb-1.5">Confirm new password</label>
-              <input type="password" id="reset-password-confirm" required minlength="8" class="input-field" placeholder="Repeat your password" />
-            </div>
-            <button type="submit" class="btn-primary w-full">Reset password</button>
-          </form>
-          <p class="text-center text-sm text-surface-500 mt-4">
-            <button onclick="showAuthLogin()" class="text-brand-600 hover:text-brand-700 font-medium">Back to sign in</button>
-          </p>
-        </div>
-        <div id="auth-register" class="hidden">
-          <h2 class="text-lg font-medium mb-6">Create account</h2>
-          <form id="register-form" class="space-y-4">
-            <div>
-              <label class="block text-sm font-medium text-surface-600 dark:text-surface-400 mb-1.5">Full name</label>
-              <input type="text" id="register-name" required class="input-field" placeholder="Jane Smith" />
-            </div>
-            <div>
-              <label class="block text-sm font-medium text-surface-600 dark:text-surface-400 mb-1.5">Email</label>
-              <input type="email" id="register-email" required class="input-field" placeholder="you@example.com" />
-            </div>
-            <div>
-              <label class="block text-sm font-medium text-surface-600 dark:text-surface-400 mb-1.5">Password</label>
-              <div class="relative">
-                <input type="password" id="register-password" required minlength="8" class="input-field pr-10" placeholder="At least 8 characters" />
-                <button type="button" class="password-eye absolute right-3 top-1/2 -translate-y-1/2 text-surface-400 hover:text-surface-600 dark:hover:text-surface-300" onmousedown="showPassword('register-password')" onmouseup="hidePassword('register-password')" onmouseleave="hidePassword('register-password')" ontouchstart="showPassword('register-password')" ontouchend="hidePassword('register-password')">
-                  <svg id="register-eye-off" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" /></svg>
-                  <svg id="register-eye-on" class="w-5 h-5 hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
-                </button>
-              </div>
-            </div>
-            <div>
-              <label class="block text-sm font-medium text-surface-600 dark:text-surface-400 mb-1.5">Confirm Password</label>
-              <div class="relative">
-                <input type="password" id="register-password-confirm" required minlength="8" class="input-field pr-10" placeholder="Repeat your password" />
-                <button type="button" class="password-eye absolute right-3 top-1/2 -translate-y-1/2 text-surface-400 hover:text-surface-600 dark:hover:text-surface-300" onmousedown="showPassword('register-password-confirm')" onmouseup="hidePassword('register-password-confirm')" onmouseleave="hidePassword('register-password-confirm')" ontouchstart="showPassword('register-password-confirm')" ontouchend="hidePassword('register-password-confirm')">
-                  <svg id="register-password-confirm-eye-off" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" /></svg>
-                  <svg id="register-password-confirm-eye-on" class="w-5 h-5 hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
-                </button>
-              </div>
-            </div>
-            <button type="submit" class="btn-primary w-full">Create account</button>
-          </form>
-          <p class="text-center text-sm text-surface-500 mt-4">
-            Already have an account? <button onclick="showAuthLogin()" class="text-brand-600 hover:text-brand-700 font-medium">Sign in</button>
-          </p>
-        </div>
-        <!-- Email Verification -->
-        <div id="auth-verify" class="hidden">
-          <h2 class="text-lg font-medium mb-2">Verify your email</h2>
-          <p class="text-sm text-surface-500 mb-6">We sent a 6-digit code to <strong id="verify-email-display"></strong></p>
-          <form id="verify-form" class="space-y-4">
-            <div class="flex justify-center gap-2" id="otp-container">
-              <input type="text" maxlength="1" class="otp-input" data-index="0" inputmode="numeric" autocomplete="one-time-code" />
-              <input type="text" maxlength="1" class="otp-input" data-index="1" inputmode="numeric" />
-              <input type="text" maxlength="1" class="otp-input" data-index="2" inputmode="numeric" />
-              <span class="flex items-center text-surface-300 text-xl">–</span>
-              <input type="text" maxlength="1" class="otp-input" data-index="3" inputmode="numeric" />
-              <input type="text" maxlength="1" class="otp-input" data-index="4" inputmode="numeric" />
-              <input type="text" maxlength="1" class="otp-input" data-index="5" inputmode="numeric" />
-            </div>
-            <button type="submit" class="btn-primary w-full" id="verify-submit-btn">Verify Email</button>
-          </form>
-          <p class="text-center text-sm text-surface-500 mt-4">
-            Didn't receive it? <button onclick="resendVerificationCode()" class="text-brand-600 hover:text-brand-700 font-medium">Resend code</button>
-          </p>
-          <p id="verify-code-hint" class="text-center text-xs text-surface-400 mt-3"></p>
+      </div>
+
+      <!-- Ghost window: Contacts table -->
+      <div class="sp-gw sp-gw-contacts" style="bottom:4%;left:2%;width:380px">
+        <div class="sp-gw-bar"><div class="sp-gw-dots"><span></span><span></span><span></span></div><span class="sp-gw-title">Contacts</span></div>
+        <div class="sp-gw-body">
+          <div class="sp-tbl-h"><span class="sp-th" style="flex:2">Name</span><span class="sp-th" style="flex:1.5">Company</span><span class="sp-th" style="flex:1">Type</span><span class="sp-th" style="flex:1">Status</span></div>
+          <div class="sp-tr" id="sp-tr0"><span class="sp-td sp-td-n" style="flex:2">Sandra Chen</span><span class="sp-td" style="flex:1.5">DataFlow Systems</span><span class="sp-td" style="flex:1"><span class="sp-gbadge sp-blue">Target</span></span><span class="sp-td" style="flex:1"><span class="sp-gstatus sp-green">● Active</span></span></div>
+          <div class="sp-tr" id="sp-tr1"><span class="sp-td sp-td-n" style="flex:2">Richard Holloway</span><span class="sp-td" style="flex:1.5">Pacific M&amp;A</span><span class="sp-td" style="flex:1"><span class="sp-gbadge sp-grn">Broker</span></span><span class="sp-td" style="flex:1"><span class="sp-gstatus sp-green">● Active</span></span></div>
+          <div class="sp-tr" id="sp-tr2"><span class="sp-td sp-td-n" style="flex:2">Patricia Kim</span><span class="sp-td" style="flex:1.5">Precision Mfg</span><span class="sp-td" style="flex:1"><span class="sp-gbadge sp-blue">Target</span></span><span class="sp-td" style="flex:1"><span class="sp-gstatus sp-amb">● Follow-up</span></span></div>
+          <div class="sp-tr" id="sp-tr3"><span class="sp-td sp-td-n" style="flex:2">James Thornton</span><span class="sp-td" style="flex:1.5">Thornton Advisory</span><span class="sp-td" style="flex:1"><span class="sp-gbadge sp-gray">Advisor</span></span><span class="sp-td" style="flex:1"><span class="sp-gstatus sp-green">● Active</span></span></div>
         </div>
       </div>
+
+      <!-- Ghost window: Activity feed -->
+      <div class="sp-gw sp-gw-activity" style="bottom:5%;right:2%;width:280px">
+        <div class="sp-gw-bar"><div class="sp-gw-dots"><span></span><span></span><span></span></div><span class="sp-gw-title">Activity</span></div>
+        <div class="sp-gw-body">
+          <div class="sp-act-row" style="animation-delay:.1s"><div class="sp-act-dot"></div><div><div class="sp-act-t"><strong>Sandra Chen</strong> replied to your intro</div><div class="sp-act-s">10 min ago</div></div></div>
+          <div class="sp-act-row" style="animation-delay:.45s"><div class="sp-act-dot"></div><div><div class="sp-act-t">Call notes added for <strong>R. Holloway</strong></div><div class="sp-act-s">2 hours ago</div></div></div>
+          <div class="sp-act-row" style="animation-delay:.8s"><div class="sp-act-dot"></div><div><div class="sp-act-t"><strong>MedSupply Direct</strong> → Due Diligence</div><div class="sp-act-s">Yesterday</div></div></div>
+          <div class="sp-act-row" style="animation-delay:1.15s"><div class="sp-act-dot"></div><div><div class="sp-act-t">Reminder: Follow up with <strong>P. Kim</strong></div><div class="sp-act-s">Yesterday</div></div></div>
+          <div class="sp-act-row" style="animation-delay:1.5s"><div class="sp-act-dot"></div><div><div class="sp-act-t"><strong>ClearView HVAC</strong> LOI uploaded</div><div class="sp-act-s">2 days ago</div></div></div>
+        </div>
+      </div>
+
+      <!-- Toast notification -->
+      <div class="sp-toast" id="sp-toast">
+        <div class="sp-toast-icon"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,.8)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75v-.7V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0"/></svg></div>
+        <div><div class="sp-toast-title" id="sp-toast-title">Reminder due today</div><div class="sp-toast-sub" id="sp-toast-sub">Follow up with Patricia Kim</div></div>
+      </div>
+
+      <!-- Vignette -->
+      <div class="sp-vignette"></div>
     </div>
-  </div>
+
+    <!-- Auth card -->
+    <div class="sp-card-outer">
+      <!-- Logo -->
+      <div class="sp-logo-row">
+        <svg width="36" height="36" viewBox="0 0 36 36" fill="none">
+          <rect width="36" height="36" rx="8" fill="#eff3ff"/>
+          <polyline points="3.5,18 8,18 11,10.5 14.5,25.5 17.5,13 21,21.5 24,18 32.5,18"
+            stroke="#2563eb" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"
+            class="sp-logo-line"/>
+        </svg>
+        <span class="sp-wordmark">Search<span>Pulse</span></span>
+      </div>
+      <div class="sp-divider-h"></div>
+
+      <!-- Eyebrow + headline — shown only on login panel via JS -->
+      <div id="sp-hero" style="display:none">
+        <div class="sp-eyebrow"><span class="sp-eyebrow-dot"></span>Now in pilot</div>
+        <h2 class="sp-headline">Find the business.<br><em>Close the deal.</em></h2>
+        <p class="sp-sub">Your search fund intelligence platform. Sign in to your workspace.</p>
+      </div>
+
+      <!-- ── LOGIN ── -->
+      <div id="auth-login">
+        <form id="login-form" class="auth-form" style="display:flex;flex-direction:column;gap:12px;">
+          <div>
+            <label for="login-email" class="field-label">Email</label>
+            <input type="email" id="login-email" required class="input-field" placeholder="you@example.com" autocomplete="email" />
+          </div>
+          <div>
+            <label for="login-password" class="field-label">Password</label>
+            <div class="auth-pw-wrap">
+              <input type="password" id="login-password" required class="input-field" placeholder="••••••••" autocomplete="current-password" />
+              <button type="button" class="password-eye" onmousedown="showPassword('login-password')" onmouseup="hidePassword('login-password')" onmouseleave="hidePassword('login-password')" ontouchstart="showPassword('login-password')" ontouchend="hidePassword('login-password')">
+                <svg id="login-eye-off" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" /></svg>
+                <svg id="login-eye-on" class="hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+              </button>
+            </div>
+          </div>
+          <button type="submit" class="btn-primary w-full" style="height:42px;">Sign in <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0"><path d="M5 12h14m-7-7 7 7-7 7"/></svg></button>
+        </form>
+        <div class="auth-footer-row">
+          <span>No account? <button onclick="showAuthRegister()" class="auth-link">Request access</button></span>
+          <button onclick="showAuthReset()" class="auth-link-muted">Forgot password?</button>
+        </div>
+        <div id="recover-btn" class="mt-3 text-center">
+          <button onclick="startAccountRecovery()" class="auth-link-muted text-xs">
+            <span id="recover-btn-label">Having trouble signing in? Recover your account →</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- ── REGISTER ── -->
+      <div id="auth-register" class="hidden">
+        <h2 class="auth-panel-title" style="font-family:'DM Serif Display',serif;font-size:22px;color:#0d0d14;margin-bottom:4px;">Create account</h2>
+        <p class="auth-panel-sub" style="font-size:13px;color:#9191a8;margin-bottom:20px;">Join during the pilot phase</p>
+        <form id="register-form" class="auth-form" style="display:flex;flex-direction:column;gap:12px;">
+          <div>
+            <label class="field-label">Full name</label>
+            <input type="text" id="register-name" required class="input-field" placeholder="Alex Johnson" autocomplete="name" />
+          </div>
+          <div>
+            <label class="field-label">Email</label>
+            <input type="email" id="register-email" required class="input-field" placeholder="you@example.com" autocomplete="email" />
+          </div>
+          <div>
+            <label class="field-label">Password</label>
+            <div class="auth-pw-wrap">
+              <input type="password" id="register-password" required minlength="8" class="input-field" placeholder="8+ characters" autocomplete="new-password" />
+              <button type="button" class="password-eye" onmousedown="showPassword('register-password')" onmouseup="hidePassword('register-password')" onmouseleave="hidePassword('register-password')" ontouchstart="showPassword('register-password')" ontouchend="hidePassword('register-password')">
+                <svg id="register-eye-off" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" /></svg>
+                <svg id="register-eye-on" class="hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+              </button>
+            </div>
+          </div>
+          <div>
+            <label class="field-label">Confirm password</label>
+            <div class="auth-pw-wrap">
+              <input type="password" id="register-password-confirm" required minlength="8" class="input-field" placeholder="Repeat password" autocomplete="new-password" />
+              <button type="button" class="password-eye" onmousedown="showPassword('register-password-confirm')" onmouseup="hidePassword('register-password-confirm')" onmouseleave="hidePassword('register-password-confirm')" ontouchstart="showPassword('register-password-confirm')" ontouchend="hidePassword('register-password-confirm')">
+                <svg id="register-password-confirm-eye-off" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" /></svg>
+                <svg id="register-password-confirm-eye-on" class="hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+              </button>
+            </div>
+          </div>
+          <!-- Invite code — shown only when accounts already exist (pilot gate) -->
+          <div id="invite-code-wrap" class="hidden">
+            <label class="field-label">Invite code</label>
+            <div class="relative">
+              <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-surface-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z" /></svg>
+              <input type="text" id="register-invite" class="input-field pl-10" style="text-transform:uppercase;letter-spacing:.08em;font-family:'JetBrains Mono',monospace;" placeholder="PULSE-XXXXXXXX-XXXX" autocomplete="off" oninput="this.value=this.value.toUpperCase()" />
+            </div>
+            <p class="text-xs text-surface-400 mt-1.5" style="color:#9191a8;font-size:12px;margin-top:6px;">Required during pilot — contact the owner to request access</p>
+          </div>
+          <button type="submit" class="btn-primary w-full" style="height:42px;">Create account</button>
+        </form>
+        <div class="auth-footer-row" style="justify-content:center;">
+          <span>Already have an account? <button onclick="showAuthLogin()" class="auth-link">Sign in</button></span>
+        </div>
+      </div>
+
+      <!-- ── RESET PASSWORD — Step 1: request code ── -->
+      <div id="auth-reset" class="hidden">
+        <h2 class="auth-panel-title" style="font-family:'DM Serif Display',serif;font-size:22px;color:#0d0d14;margin-bottom:4px;">Reset password</h2>
+        <p class="auth-panel-sub" style="font-size:13px;color:#9191a8;margin-bottom:20px;">Enter your email and we'll send you a reset code.</p>
+        <form id="reset-form" class="auth-form" style="display:flex;flex-direction:column;gap:12px;">
+          <div>
+            <label class="field-label">Email</label>
+            <input type="email" id="reset-email" required class="input-field" placeholder="you@example.com" autocomplete="email" />
+          </div>
+          <div id="reset-code-hint" class="hidden"></div>
+          <button type="submit" class="btn-primary w-full" style="height:42px;">Send reset code</button>
+        </form>
+        <div class="auth-footer-row" style="justify-content:center;margin-top:1rem;">
+          <button onclick="showAuthLogin()" class="auth-link">← Back to sign in</button>
+        </div>
+      </div>
+
+      <!-- ── RESET PASSWORD — Step 2: enter code + new password ── -->
+      <div id="auth-new-password" class="hidden">
+        <h2 class="auth-panel-title" style="font-family:'DM Serif Display',serif;font-size:22px;color:#0d0d14;margin-bottom:4px;">Create new password</h2>
+        <p class="auth-panel-sub" style="font-size:13px;color:#9191a8;margin-bottom:4px;">Enter the 6-digit code from your email and choose a new password.</p>
+        <p id="reset-target-email" style="font-size:12px;color:#9191a8;margin-bottom:16px;"></p>
+        <form id="new-password-form" class="auth-form" style="display:flex;flex-direction:column;gap:12px;">
+          <div>
+            <label class="field-label">Reset code</label>
+            <input type="text" id="new-password-code" required maxlength="6" inputmode="numeric" autocomplete="one-time-code"
+              class="input-field font-mono tracking-[0.35em] text-center text-xl" placeholder="000000" />
+          </div>
+          <div>
+            <label class="field-label">New password</label>
+            <input type="password" id="new-password-password" required minlength="8" class="input-field" placeholder="8+ characters" autocomplete="new-password" />
+          </div>
+          <div>
+            <label class="field-label">Confirm new password</label>
+            <input type="password" id="new-password-confirm" required minlength="8" class="input-field" placeholder="Repeat password" autocomplete="new-password" />
+          </div>
+          <button type="submit" class="btn-primary w-full" style="height:42px;">Set new password</button>
+        </form>
+        <div class="auth-footer-row" style="justify-content:center;margin-top:1rem;gap:1rem;">
+          <button onclick="showAuthReset()" class="auth-link">Resend code</button>
+          <span style="color:#ccc;">·</span>
+          <button onclick="showAuthLogin()" class="auth-link">← Back to sign in</button>
+        </div>
+      </div>
+
+      <!-- ── EMAIL VERIFY ── -->
+      <div id="auth-verify" class="hidden">
+        <h2 class="auth-panel-title" style="font-family:'DM Serif Display',serif;font-size:22px;color:#0d0d14;margin-bottom:4px;">Check your email</h2>
+        <p class="auth-panel-sub" style="font-size:13px;color:#9191a8;margin-bottom:20px;">We sent a 6-digit code to <strong id="verify-email-display" style="color:#0d0d14"></strong></p>
+        <form id="verify-form" class="auth-form">
+          <div class="flex justify-center gap-2" id="otp-container">
+            <input type="text" maxlength="1" class="otp-input" data-index="0" inputmode="numeric" autocomplete="one-time-code" />
+            <input type="text" maxlength="1" class="otp-input" data-index="1" inputmode="numeric" />
+            <input type="text" maxlength="1" class="otp-input" data-index="2" inputmode="numeric" />
+            <span class="flex items-center text-surface-300 text-xl font-light" style="color:#d4d4de">–</span>
+            <input type="text" maxlength="1" class="otp-input" data-index="3" inputmode="numeric" />
+            <input type="text" maxlength="1" class="otp-input" data-index="4" inputmode="numeric" />
+            <input type="text" maxlength="1" class="otp-input" data-index="5" inputmode="numeric" />
+          </div>
+          <button type="submit" class="btn-primary w-full" id="verify-submit-btn" style="height:42px;margin-top:16px;">Verify &amp; continue</button>
+        </form>
+        <div class="auth-footer-row" style="justify-content:center;margin-top:1rem;">
+          <span style="font-size:12.5px;color:#9191a8">Didn't get it? <button onclick="resendVerificationCode()" class="auth-link">Resend code</button></span>
+        </div>
+        <p id="verify-code-hint" class="text-center text-xs mt-3" style="color:#9191a8;font-size:12px;margin-top:12px;"></p>
+      </div>
+
+      <!-- ── ACCOUNT RECOVERY ── -->
+      <div id="auth-recover" class="hidden">
+        <h2 class="auth-panel-title" style="font-family:'DM Serif Display',serif;font-size:22px;color:#0d0d14;margin-bottom:4px;">Account recovery</h2>
+        <p class="auth-panel-sub" id="recover-status" style="font-size:13px;color:#9191a8;margin-bottom:16px;">Scanning all local databases for your account…</p>
+        <div id="recover-results" class="space-y-2 mb-4"></div>
+        <div class="auth-footer-row" style="justify-content:center;">
+          <button onclick="showAuthLogin()" class="auth-link">← Back to sign in</button>
+        </div>
+      </div>
+    </div><!-- /sp-card-outer -->
+  </div><!-- /auth-screen -->
 
   <!-- Main App -->
   <div id="app-shell" class="hidden min-h-screen flex">
     <!-- Sidebar -->
     <aside id="sidebar" class="sidebar">
       <button onclick="navigate('dashboard')" class="flex items-center gap-3 px-4 py-4 border-b border-surface-200 dark:border-surface-800 w-full text-left transition-colors" title="Go to Dashboard">
-        <svg width="34" height="34" viewBox="0 0 52 52" fill="none" xmlns="http://www.w3.org/2000/svg" style="flex-shrink:0;">
-          <circle cx="26" cy="26" r="25" stroke="#c8a96e" stroke-width="0.7" stroke-opacity="0.28"/>
-          <circle cx="26" cy="26" r="19.5" stroke="#c8a96e" stroke-width="0.4" stroke-opacity="0.13"/>
-          <path d="M7 28L13.5 28L16.5 22L19.5 33L22.5 17L26 30L29 23.5L32.5 28L45 28" stroke="#c8a96e" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-          <circle cx="26" cy="30" r="2.5" fill="#c8a96e"/>
-          <line x1="26" y1="7" x2="26" y2="14" stroke="#c8a96e" stroke-width="0.6" stroke-opacity="0.3" stroke-linecap="round"/>
-          <line x1="26" y1="38" x2="26" y2="45" stroke="#c8a96e" stroke-width="0.6" stroke-opacity="0.3" stroke-linecap="round"/>
-          <line x1="7" y1="26" x2="14" y2="26" stroke="#c8a96e" stroke-width="0.6" stroke-opacity="0.3" stroke-linecap="round"/>
-          <line x1="38" y1="26" x2="42" y2="26" stroke="#c8a96e" stroke-width="0.6" stroke-opacity="0.3" stroke-linecap="round"/>
+        <svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" style="flex-shrink:0;">
+          <rect width="32" height="32" rx="7" fill="#EEF4FF"/>
+          <polyline points="3,16 8,16 11,9 14.5,23 17.5,11 21,19.5 24,16 29,16" stroke="#2563eb" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
         </svg>
         <div class="min-w-0">
-          <h1 style="font-family:'DM Serif Display',serif;font-size:0.9375rem;color:var(--text-primary,#18181b);letter-spacing:0.01em;line-height:1.2;">Search<span style="color:#c8a96e;">Pulse</span></h1>
+          <h1 style="font-family:'DM Serif Display',serif;font-size:0.9375rem;color:var(--text-primary,#18181b);letter-spacing:0.01em;line-height:1.2;">Search<span style="color:#2563eb;">Pulse</span></h1>
           <p class="text-xs truncate" id="sidebar-user-name"></p>
         </div>
       </button>
@@ -239,6 +351,7 @@
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" /></svg>
             <span>Dashboard</span>
           </button>
+          <span class="nav-section-label">Network</span>
           <button onclick="navigate('contacts')" class="nav-item" data-page="contacts">
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z" /></svg>
             <span>Contacts</span>
@@ -256,6 +369,7 @@
             <span>Reminders</span>
             <span id="reminder-badge" class="ml-auto text-xs bg-red-500 text-white rounded-full px-1.5 py-0.5 hidden">0</span>
           </button>
+          <span class="nav-section-label">Intelligence</span>
           <button onclick="navigate('suggestions')" class="nav-item" data-page="suggestions">
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 18v-5.25m0 0a6.01 6.01 0 001.5-.189m-1.5.189a6.01 6.01 0 01-1.5-.189m3.75 7.478a12.06 12.06 0 01-4.5 0m3.75 2.383a14.406 14.406 0 01-3 0M14.25 18v-.192c0-.983.658-1.823 1.508-2.316a7.5 7.5 0 10-7.517 0c.85.493 1.509 1.333 1.509 2.316V18" /></svg>
             <span>Suggestions</span>
@@ -272,10 +386,12 @@
 
         <!-- Deals panel -->
         <div class="nav-panel hidden" id="nav-panel-deals">
+          <span class="nav-section-label">Pipeline</span>
           <button onclick="navigate('deals')" class="nav-item" data-page="deals">
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M2.25 18.75a60.07 60.07 0 0115.797 2.101c.727.198 1.453-.342 1.453-1.096V18.75M3.75 4.5v.75A.75.75 0 013 6h-.75m0 0v-.375c0-.621.504-1.125 1.125-1.125H20.25M2.25 6v9m18-10.5v.75c0 .414.336.75.75.75h.75m-1.5-1.5h.375c.621 0 1.125.504 1.125 1.125v9.75c0 .621-.504 1.125-1.125 1.125h-.375m1.5-1.5H21a.75.75 0 00-.75.75v.75m0 0H3.75m0 0h-.375a1.125 1.125 0 01-1.125-1.125V15m1.5 1.5v-.75A.75.75 0 003 15h-.75M15 10.5a3 3 0 11-6 0 3 3 0 016 0zm3 0h.008v.008H18V10.5zm-12 0h.008v.008H6V10.5z" /></svg>
             <span>Deal Pipeline</span>
           </button>
+          <span class="nav-section-label">Sourcing</span>
           <button onclick="navigate('deal-search')" class="nav-item" data-page="deal-search">
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607zM10.5 7.5v6m3-3h-6" /></svg>
             <span>Deal Search</span>
@@ -287,6 +403,14 @@
           <button onclick="navigate('sourcing')" class="nav-item" data-page="sourcing">
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M21.75 9v.906a2.25 2.25 0 01-1.183 1.981l-6.478 3.488M2.25 9v.906a2.25 2.25 0 001.183 1.981l6.478 3.488m8.839 2.51l-4.66-2.51m0 0l-1.023-.55a2.25 2.25 0 00-2.134 0l-1.022.55m0 0l-4.661 2.51m16.5 1.615a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V8.844a2.25 2.25 0 011.183-1.981l7.5-4.039a2.25 2.25 0 012.134 0l7.5 4.039a2.25 2.25 0 011.183 1.98V19.5z" /></svg>
             <span>Sourcing</span>
+          </button>
+          <button onclick="navigate('brokers')" class="nav-item" data-page="brokers">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z" /></svg>
+            <span>Brokers</span>
+          </button>
+          <button onclick="navigate('email-templates')" class="nav-item" data-page="email-templates">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75" /></svg>
+            <span>Email Templates</span>
           </button>
           <button onclick="navigate('shared-dashboard')" class="nav-item" data-page="shared-dashboard">
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7.217 10.907a2.25 2.25 0 100 2.186m0-2.186c.18.324.283.696.283 1.093s-.103.77-.283 1.093m0-2.186l9.566-5.314m-9.566 7.5l9.566 5.314m0 0a2.25 2.25 0 103.935 2.186 2.25 2.25 0 00-3.935-2.186zm0-12.814a2.25 2.25 0 103.933-2.185 2.25 2.25 0 00-3.933 2.185z" /></svg>
@@ -391,16 +515,72 @@
       </div>
     </div>
 
-    <!-- Notifications Panel -->
-    <div id="notifications-panel" class="fixed right-0 top-0 h-full w-96 bg-white dark:bg-surface-900 shadow-2xl border-l border-surface-200 dark:border-surface-800 z-40 hidden transform translate-x-full transition-transform">
-      <div class="flex items-center justify-between px-6 py-4 border-b border-surface-200 dark:border-surface-800">
-        <h2 class="text-lg font-semibold">Notifications</h2>
-        <button onclick="toggleNotifications()" class="p-1 rounded hover:bg-surface-100 dark:hover:bg-surface-800">
-          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M6 18L18 6M6 6l12 12" /></svg>
+    <!-- Notifications / Reminders Panel -->
+    <div id="notifications-panel" class="notif-panel">
+      <div class="notif-panel-header">
+        <div>
+          <h2 class="notif-panel-title">Reminders</h2>
+          <p class="notif-panel-sub" id="notif-panel-sub">—</p>
+        </div>
+        <div style="display:flex;align-items:center;gap:0.5rem;">
+          <button onclick="navigate('reminders');toggleNotifications();" class="notif-view-all">View all</button>
+          <button onclick="toggleNotifications()" class="notif-close-btn" title="Close">
+            <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+          </button>
+        </div>
+      </div>
+      <div id="notifications-list" class="notif-panel-body"></div>
+    </div>
+  </div>
+
+  <!-- Log Call Floating Panel (draggable, stays open while using the rest of the app) -->
+  <div id="cl-floating-panel" style="display:none;" class="bg-white dark:bg-surface-900">
+    <!-- Drag handle / title bar -->
+    <div id="cl-drag-handle" class="flex items-center justify-between px-4 py-2.5 bg-surface-50 dark:bg-surface-800 border-b border-surface-200 dark:border-surface-700">
+      <div class="flex items-center gap-2 min-w-0 overflow-hidden">
+        <svg class="w-4 h-4 text-brand-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 002.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 01-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 00-1.091-.852H4.5A2.25 2.25 0 002.25 4.5v2.25z"/>
+        </svg>
+        <span class="text-sm font-semibold" id="cl-panel-title">Log Call</span>
+        <span class="text-xs text-surface-400 ml-1">— drag to move, minimize to keep open</span>
+      </div>
+      <div class="flex items-center gap-1 flex-shrink-0 ml-3">
+        <button id="cl-minimize-btn" onclick="_clToggleMinimize()" title="Minimize / Restore"
+          class="p-1 rounded hover:bg-surface-200 dark:hover:bg-surface-700 text-surface-400 hover:text-surface-600 dark:hover:text-surface-300 transition-colors" style="line-height:0;">
+          <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 12H4"/></svg>
+        </button>
+        <button onclick="_clRequestClose()" title="Close"
+          class="p-1 rounded hover:bg-red-100 dark:hover:bg-red-900/30 text-surface-400 hover:text-red-600 dark:hover:text-red-400 transition-colors" style="line-height:0;">
+          <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
         </button>
       </div>
-      <div id="notifications-list" class="overflow-y-auto h-full pb-20 px-4 py-2"></div>
     </div>
+    <!-- Body — call form injected here by JS -->
+    <div id="cl-panel-body" style="overflow-y:auto;max-height:calc(88vh - 48px);position:relative;"></div>
+  </div>
+
+  <!-- Meeting Recorder Floating Panel (persists across navigation, draggable) -->
+  <div id="mr-floating-panel" style="display:none;" class="bg-white dark:bg-surface-900">
+    <!-- Drag handle / status bar -->
+    <div id="mr-drag-handle" class="flex items-center justify-between px-4 py-2.5 bg-surface-50 dark:bg-surface-800 border-b border-surface-200 dark:border-surface-700">
+      <div class="flex items-center gap-2 min-w-0 overflow-hidden">
+        <div id="mr-rec-dot" class="w-2.5 h-2.5 rounded-full bg-surface-400 flex-shrink-0" style="transition:background 0.3s;"></div>
+        <span class="text-sm font-semibold flex-shrink-0">Meeting Recorder</span>
+        <span id="mr-state-badge" class="text-xs px-2 py-0.5 rounded-full bg-surface-100 dark:bg-surface-700 text-surface-500 flex-shrink-0">Ready</span>
+        <span id="mr-speech-badge" class="text-xs px-2 py-0.5 rounded-full hidden bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 flex-shrink-0">● Live</span>
+      </div>
+      <div class="flex items-center gap-1 flex-shrink-0 ml-3">
+        <span id="mr-timer" class="text-xs font-mono text-surface-500 mr-1">00:00</span>
+        <button id="mr-minimize-btn" onclick="_mrToggleMinimize()" title="Minimize / Restore" class="p-1 rounded hover:bg-surface-200 dark:hover:bg-surface-700 text-surface-400 hover:text-surface-600 dark:hover:text-surface-300 transition-colors" style="line-height:0;">
+          <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 12H4"/></svg>
+        </button>
+        <button onclick="_mrRequestClose()" title="Close recorder" class="p-1 rounded hover:bg-red-100 dark:hover:bg-red-900/30 text-surface-400 hover:text-red-600 dark:hover:text-red-400 transition-colors" style="line-height:0;">
+          <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+      </div>
+    </div>
+    <!-- Body — recorder UI injected here by JS -->
+    <div id="mr-panel-body" style="overflow-y:auto;max-height:calc(88vh - 48px);position:relative;"></div>
   </div>
 
   <!-- Toast container -->
@@ -411,30 +591,28 @@
     <div id="modal-content" class="bg-white dark:bg-surface-900 rounded shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto animate-slide-up"></div>
   </div>
 
-  <!-- Google Identity Services (Gmail OAuth) — loaded async, checked before use -->
-  <script src="https://accounts.google.com/gsi/client" async defer></script>
-
   <!-- Third-party libraries -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
   <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 
   <!-- Scripts (v=8 busts any browser cache of previously loaded versions) -->
-  <script src="js/db.js?v=8"></script>
-  <script src="js/auth.js?v=8"></script>
+  <script src="js/db.js?v=20260425"></script>
+  <script src="js/auth.js?v=20260425"></script>
   <script src="js/utils.js?v=8"></script>
   <script src="js/toast.js?v=8"></script>
-  <script src="js/modal.js?v=8"></script>
+  <script src="js/modal.js?v=20260424"></script>
   <script src="js/components.js?v=8"></script>
-  <script src="js/dashboard.js?v=8"></script>
+  <script src="js/dashboard.js?v=9"></script>
   <script src="js/contacts.js?v=8"></script>
   <script src="js/companies.js?v=8"></script>
-  <script src="js/calls.js?v=8"></script>
-  <script src="js/reminders.js?v=8"></script>
+  <script src="js/meeting-recorder.js?v=20260424"></script>
+  <script src="js/calls.js?v=20260425"></script>
+  <script src="js/reminders.js?v=10"></script>
   <script src="js/notes-cleanup.js?v=8"></script>
   <script src="js/enrichment.js?v=8"></script>
   <script src="js/search.js?v=8"></script>
-  <script src="js/settings.js?v=8"></script>
+  <script src="js/settings.js?v=20260425b"></script>
   <script src="js/web-research.js?v=1"></script>
   <script src="js/news.js?v=9"></script>
   <script src="js/resources.js?v=8"></script>
@@ -443,23 +621,120 @@
   <script src="js/call-prep.js?v=2"></script>
   <script src="js/contact-research.js?v=2"></script>
   <script src="js/investment-memo.js?v=2"></script>
-  <script src="js/charts.js?v=8"></script>
+  <script src="js/charts.js?v=9"></script>
   <script src="js/deal-scoring.js?v=8"></script>
-  <script src="js/deal-docs.js?v=8"></script>
-  <script src="js/deal-ai.js?v=9"></script>
+  <script src="js/deal-docs.js?v=20260425"></script>
+  <script src="js/deal-ai.js?v=10"></script>
+  <script src="js/deal-fit-score.js?v=6"></script>
+  <script src="js/deal-gap-finder.js?v=1"></script>
   <script src="js/deal-nda.js?v=8"></script>
   <script src="js/due-diligence.js?v=8"></script>
-  <script src="js/deal-detail.js?v=8"></script>
-  <script src="js/deals.js?v=9"></script>
-  <script src="js/deal-search.js?v=8"></script>
+  <script src="js/folder-access.js?v=1"></script>
+  <script src="js/granola.js?v=3"></script>
+  <script src="js/deal-detail.js?v=20260425b"></script>
+  <script src="js/deals.js?v=20260425b"></script>
+  <script src="js/deal-search.js?v=9"></script>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="js/company-scout.js?v=8"></script>
   <script src="js/ai-assistant.js?v=8"></script>
   <script src="js/shared-dashboard.js?v=9"></script>
-  <script src="js/sourcing.js?v=2"></script>
-  <script src="js/tutorial.js?v=8"></script>
-  <script src="js/app.js?v=8"></script>
+  <script src="js/sourcing.js?v=5"></script>
+  <script src="js/email-templates.js?v=4"></script>
+  <script src="js/brokers.js?v=3"></script>
+  <script src="js/tutorial.js?v=9"></script>
+  <script src="js/app.js?v=20260425"></script>
   <!-- EmailJS — for real email verification on signup -->
   <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
+
+  <script>
+// ── Auth backdrop animations ──────────────────────────────────
+(function() {
+  // Show hero on login panel
+  function _spUpdateHero() {
+    var hero = document.getElementById('sp-hero');
+    var login = document.getElementById('auth-login');
+    if (!hero || !login) return;
+    hero.style.display = login.classList.contains('hidden') ? 'none' : 'block';
+  }
+
+  // Animate KPI counters
+  function _spCounter(el, target, duration, delay) {
+    if (!el) return;
+    el.textContent = '0';
+    setTimeout(function() {
+      var start;
+      function tick(ts) {
+        if (!start) start = ts;
+        var p = Math.min((ts - start) / duration, 1);
+        var ease = 1 - Math.pow(1 - p, 3);
+        el.textContent = Math.round(ease * target);
+        if (p < 1) requestAnimationFrame(tick);
+      }
+      requestAnimationFrame(tick);
+    }, delay);
+  }
+
+  // Cycle active row in contacts ghost table
+  function _spCycleRows() {
+    var rows = ['sp-tr0','sp-tr1','sp-tr2','sp-tr3'];
+    var cur = 0;
+    setInterval(function() {
+      rows.forEach(function(id) {
+        var el = document.getElementById(id);
+        if (el) el.classList.remove('sp-row-active');
+      });
+      cur = (cur + 1) % rows.length;
+      var active = document.getElementById(rows[cur]);
+      if (active) active.classList.add('sp-row-active');
+    }, 2200);
+  }
+
+  // Rotate toast notifications
+  function _spToast() {
+    var msgs = [
+      { title: 'Reminder due today', sub: 'Follow up with Patricia Kim' },
+      { title: 'New deal match', sub: 'AutoRoute — 82 fit score' },
+      { title: 'Email synced', sub: 'Sandra Chen replied' },
+    ];
+    var i = 0;
+    var toast = document.getElementById('sp-toast');
+    var titleEl = document.getElementById('sp-toast-title');
+    var subEl = document.getElementById('sp-toast-sub');
+    if (!toast || !titleEl || !subEl) return;
+
+    function show() {
+      var m = msgs[i % msgs.length];
+      titleEl.textContent = m.title;
+      subEl.textContent = m.sub;
+      toast.classList.add('sp-toast-show');
+      setTimeout(function() { toast.classList.remove('sp-toast-show'); }, 4000);
+      i++;
+    }
+    setTimeout(function() {
+      show();
+      setInterval(show, 6000);
+    }, 2500);
+  }
+
+  // Init when page loads
+  document.addEventListener('DOMContentLoaded', function() {
+    _spUpdateHero();
+    _spCounter(document.getElementById('sp-kpi-deals'), 6, 1200, 300);
+    _spCounter(document.getElementById('sp-kpi-cos'),   142, 2200, 500);
+    _spCounter(document.getElementById('sp-kpi-calls'), 4, 900, 600);
+    _spCycleRows();
+    _spToast();
+
+    // Hook into _showAuthPanel to show/hide hero text
+    var origFn = window._showAuthPanel;
+    if (origFn) {
+      window._showAuthPanel = function(name) {
+        origFn(name);
+        _spUpdateHero();
+      };
+    }
+  });
+})();
+  </script>
 </body>
 </html>

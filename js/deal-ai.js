@@ -412,3 +412,134 @@ function renderMarkdown(text) {
 
   return html;
 }
+
+// ── CIM / Data Room Field Extractor ───────────────────────────────────────
+/**
+ * Given raw document text (from a CIM, QoE, teaser, or financial statements),
+ * uses AI to extract structured deal fields. Returns a parsed object with
+ * citations, inconsistencies detected, and missing information flags.
+ *
+ * @param {string} documentText  - Full extracted text of the uploaded document
+ * @param {string} docName       - File name / document title for citation context
+ * @returns {Promise<Object>}    - Structured extraction result
+ */
+async function extractCIMFields(documentText, docName) {
+  const prompt = `You are a search fund analyst extracting structured data from a deal document.
+
+Document: "${docName}"
+---
+${documentText.substring(0, 6000)}
+---
+
+Extract every data point you can find. For each field, include a direct quote or page reference as citation.
+If a field is not found, set its value to null and note it as missing.
+
+Return ONLY valid JSON matching this exact schema:
+{
+  "revenue": { "value": number|null, "unit": "USD", "period": "TTM|FY2023|etc", "citation": "quote or page ref" },
+  "ebitda": { "value": number|null, "unit": "USD", "period": "TTM|FY2023|etc", "citation": "quote or page ref" },
+  "ebitdaMargin": { "value": number|null, "unit": "%", "citation": "quote or page ref" },
+  "revenueGrowthRate": { "value": number|null, "unit": "%", "period": "YoY or CAGR", "citation": "quote or page ref" },
+  "grossMargin": { "value": number|null, "unit": "%", "citation": "quote or page ref" },
+  "customerConcentration": { "top1Pct": number|null, "top3Pct": number|null, "top5Pct": number|null, "citation": "quote or page ref" },
+  "recurringRevenuePct": { "value": number|null, "unit": "%", "type": "SaaS|contract|subscription|project|etc", "citation": "quote or page ref" },
+  "churnRate": { "value": number|null, "unit": "%", "citation": "quote or page ref" },
+  "totalDebt": { "value": number|null, "unit": "USD", "citation": "quote or page ref" },
+  "workingCapital": { "value": number|null, "unit": "USD", "citation": "quote or page ref" },
+  "employeeCount": { "value": number|null, "citation": "quote or page ref" },
+  "askingPrice": { "value": number|null, "unit": "USD", "impliedMultiple": number|null, "citation": "quote or page ref" },
+  "keyAssumptions": ["assumption 1", "assumption 2"],
+  "risksAndRedFlags": ["risk 1", "risk 2"],
+  "inconsistencies": ["description of any internal inconsistency found"],
+  "missingCriticalItems": ["list of important items not found in the document"],
+  "summary": "2-3 sentence plain-English summary of the business based on this document"
+}`;
+
+  try {
+    const raw = await callAI(
+      'You are a precise financial analyst. Extract structured data from deal documents. Return ONLY valid JSON.',
+      prompt, 1500, 0.1
+    );
+    const cleaned = raw.replace(/```json?/g, '').replace(/```/g, '').trim();
+    const parsed = JSON.parse(cleaned);
+    parsed._source = docName;
+    parsed._extractedAt = new Date().toISOString();
+    return parsed;
+  } catch (e) {
+    console.error('[extractCIMFields] Parse error:', e);
+    return {
+      _source: docName,
+      _extractedAt: new Date().toISOString(),
+      _error: 'Could not parse AI extraction. Ensure an API key is set in Settings.',
+      revenue: null, ebitda: null, ebitdaMargin: null, revenueGrowthRate: null,
+      grossMargin: null, customerConcentration: null, recurringRevenuePct: null,
+      churnRate: null, totalDebt: null, workingCapital: null, employeeCount: null,
+      askingPrice: null, keyAssumptions: [], risksAndRedFlags: [],
+      inconsistencies: [], missingCriticalItems: [], summary: '',
+    };
+  }
+}
+
+/**
+ * Renders the CIM extraction result as a structured HTML card for display
+ * within the Documents or AI Diligence tab.
+ */
+function renderCIMExtraction(extracted) {
+  if (!extracted || extracted._error) {
+    return `<div class="text-sm text-surface-400 italic">${extracted?._error || 'No extraction available.'}</div>`;
+  }
+
+  const fmtUSD = (v) => v != null ? `$${(v / 1e6).toFixed(2)}M` : '<span class="text-surface-400">—</span>';
+  const fmtPct = (v) => v != null ? `${v.toFixed(1)}%` : '<span class="text-surface-400">—</span>';
+  const fmtNum = (v) => v != null ? v.toLocaleString() : '<span class="text-surface-400">—</span>';
+  const cite  = (c) => c ? `<span class="text-xs text-surface-400 ml-1 italic">"${escapeHtml(c).substring(0, 80)}"</span>` : '';
+
+  const rows = [
+    ['Revenue',            fmtUSD(extracted.revenue?.value),            cite(extracted.revenue?.citation)],
+    ['EBITDA',             fmtUSD(extracted.ebitda?.value),             cite(extracted.ebitda?.citation)],
+    ['EBITDA Margin',      fmtPct(extracted.ebitdaMargin?.value),       cite(extracted.ebitdaMargin?.citation)],
+    ['Gross Margin',       fmtPct(extracted.grossMargin?.value),        cite(extracted.grossMargin?.citation)],
+    ['Revenue Growth',     fmtPct(extracted.revenueGrowthRate?.value),  cite(extracted.revenueGrowthRate?.citation)],
+    ['Recurring Revenue',  fmtPct(extracted.recurringRevenuePct?.value),cite(extracted.recurringRevenuePct?.citation)],
+    ['Churn Rate',         fmtPct(extracted.churnRate?.value),          cite(extracted.churnRate?.citation)],
+    ['Top Customer Conc.', extracted.customerConcentration?.top1Pct != null ? `Top 1: ${fmtPct(extracted.customerConcentration.top1Pct)}` : '<span class="text-surface-400">—</span>', cite(extracted.customerConcentration?.citation)],
+    ['Total Debt',         fmtUSD(extracted.totalDebt?.value),          cite(extracted.totalDebt?.citation)],
+    ['Working Capital',    fmtUSD(extracted.workingCapital?.value),      cite(extracted.workingCapital?.citation)],
+    ['Employees',          fmtNum(extracted.employeeCount?.value),       cite(extracted.employeeCount?.citation)],
+    ['Asking Price',       fmtUSD(extracted.askingPrice?.value),         cite(extracted.askingPrice?.citation)],
+  ];
+
+  const listSection = (title, items, colorClass) => items?.length
+    ? `<div class="mt-4">
+        <h4 class="text-xs font-semibold uppercase tracking-wide text-surface-500 mb-2">${title}</h4>
+        <ul class="space-y-1">
+          ${items.map(i => `<li class="flex items-start gap-2 text-sm"><span class="mt-1 w-1.5 h-1.5 rounded-full flex-shrink-0 ${colorClass}"></span><span>${escapeHtml(i)}</span></li>`).join('')}
+        </ul>
+      </div>` : '';
+
+  return `
+    <div class="space-y-4">
+      ${extracted.summary ? `<p class="text-sm text-surface-600 dark:text-surface-300 leading-relaxed">${escapeHtml(extracted.summary)}</p>` : ''}
+
+      <table class="w-full text-sm">
+        <tbody>
+          ${rows.map(([label, val, citation]) => `
+            <tr class="border-b border-surface-100 dark:border-surface-800">
+              <td class="py-2 text-xs text-surface-500 font-medium w-40">${label}</td>
+              <td class="py-2 font-semibold">${val}${citation}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+
+      ${listSection('Key Assumptions', extracted.keyAssumptions, 'bg-blue-400')}
+      ${listSection('Risks & Red Flags', extracted.risksAndRedFlags, 'bg-red-400')}
+      ${extracted.inconsistencies?.length ? listSection('⚠ Inconsistencies Detected', extracted.inconsistencies, 'bg-yellow-400') : ''}
+      ${extracted.missingCriticalItems?.length ? listSection('Missing Critical Items', extracted.missingCriticalItems, 'bg-surface-400') : ''}
+
+      <p class="text-xs text-surface-400 pt-2 border-t border-surface-100 dark:border-surface-800">
+        Extracted from <em>${escapeHtml(extracted._source)}</em> · ${new Date(extracted._extractedAt).toLocaleString()} · AI-generated, verify manually.
+      </p>
+    </div>
+  `;
+}

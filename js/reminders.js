@@ -290,89 +290,173 @@ async function dismissReminder(reminderId) {
   renderReminders();
 }
 
-// Check for due reminders and show notifications
+// ─────────────────────────────────────────────────────────────
+// Bell / Notifications panel
+// Reads directly from STORES.reminders — no derived table.
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Update the badge count on the bell icon.
+ * Badge = active reminders due within the next 7 days.
+ */
 async function checkReminders() {
   if (!currentUser) return;
 
   const reminders = await DB.getForUser(STORES.reminders, currentUser.id);
   const active = reminders.filter(r => r.status === 'pending' || r.status === 'snoozed');
-  const overdue = active.filter(r => isOverdue(r.dueDate));
-  const dueToday = active.filter(r => isDueToday(r.dueDate));
 
-  // Badge = reminders due within the next 7 days (overdue or due soon)
   const sevenDaysFromNow = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
   const badgeCount = active.filter(r => r.dueDate && new Date(r.dueDate) <= sevenDaysFromNow).length;
-  const badge = document.getElementById('reminder-badge');
+
+  const badge   = document.getElementById('reminder-badge');
   const notifDot = document.getElementById('notif-dot');
-
-  if (badgeCount > 0) {
-    badge.textContent = badgeCount;
-    badge.classList.remove('hidden');
-    notifDot.classList.remove('hidden');
-
-    // Create in-app notifications for overdue
-    for (const r of overdue) {
-      const existing = await DB.getForUser(STORES.notifications, currentUser.id);
-      if (!existing.find(n => n.reminderId === r.id && !n.read)) {
-        const contact = r.contactId ? await DB.get(STORES.contacts, r.contactId) : null;
-        await DB.add(STORES.notifications, {
-          userId: currentUser.id,
-          reminderId: r.id,
-          title: r.title,
-          description: contact ? `Contact: ${contact.fullName}` : 'General reminder',
-          type: 'reminder',
-          read: false,
-          timestamp: new Date().toISOString(),
-        });
-      }
+  if (badge && notifDot) {
+    if (badgeCount > 0) {
+      badge.textContent = badgeCount;
+      badge.classList.remove('hidden');
+      notifDot.classList.remove('hidden');
+    } else {
+      badge.classList.add('hidden');
+      notifDot.classList.add('hidden');
     }
-  } else {
-    badge.classList.add('hidden');
-    notifDot.classList.add('hidden');
   }
 
-  // Update notifications list
-  await renderNotificationsList();
+  // If the panel is open, refresh its content too
+  const panel = document.getElementById('notifications-panel');
+  if (panel && panel.classList.contains('open')) {
+    await renderNotificationsList();
+  }
 }
 
+/**
+ * Render the reminders panel body directly from STORES.reminders.
+ * Groups: Overdue → Due Today → This Week → Later.
+ */
 async function renderNotificationsList() {
-  const notifications = await DB.getForUser(STORES.notifications, currentUser.id);
-  const sorted = sortByDate(notifications, 'timestamp');
+  if (!currentUser) return;
   const container = document.getElementById('notifications-list');
+  if (!container) return;
 
-  if (sorted.length === 0) {
-    container.innerHTML = '<div class="text-center py-8"><p class="text-sm text-surface-500">No notifications</p></div>';
+  const [reminders, contacts] = await Promise.all([
+    DB.getForUser(STORES.reminders, currentUser.id),
+    DB.getForUser(STORES.contacts, currentUser.id),
+  ]);
+  const contactMap = {};
+  contacts.forEach(c => { contactMap[c.id] = c; });
+
+  const active = reminders
+    .filter(r => r.status === 'pending' || r.status === 'snoozed')
+    .sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate));
+
+  const now = new Date();
+  const todayEnd = new Date(); todayEnd.setHours(23, 59, 59, 999);
+  const weekEnd  = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+
+  const overdue   = active.filter(r => r.dueDate && new Date(r.dueDate) < now);
+  const dueToday  = active.filter(r => r.dueDate && new Date(r.dueDate) >= now && new Date(r.dueDate) <= todayEnd);
+  const thisWeek  = active.filter(r => r.dueDate && new Date(r.dueDate) > todayEnd && new Date(r.dueDate) <= weekEnd);
+  const later     = active.filter(r => !r.dueDate || new Date(r.dueDate) > weekEnd);
+
+  // Update subtitle
+  const sub = document.getElementById('notif-panel-sub');
+  if (sub) {
+    const urgent = overdue.length + dueToday.length;
+    sub.textContent = urgent > 0
+      ? `${urgent} need${urgent === 1 ? 's' : ''} attention`
+      : active.length > 0
+        ? `${active.length} upcoming`
+        : 'All clear';
+  }
+
+  if (active.length === 0) {
+    container.innerHTML = `
+      <div class="notif-empty">
+        <svg width="40" height="40" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+            d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75v-.7V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0"/>
+        </svg>
+        <p>No upcoming reminders</p>
+      </div>`;
     return;
   }
 
-  container.innerHTML = sorted.slice(0, 20).map(n => `
-    <div class="p-3 rounded-lg ${n.read ? 'opacity-60' : 'bg-brand-50/50 dark:bg-brand-900/10'} mb-2">
-      <div class="flex items-start justify-between gap-2">
-        <div class="min-w-0">
-          <p class="text-sm font-medium">${escapeHtml(n.title)}</p>
-          ${n.description ? `<p class="text-xs text-surface-500">${escapeHtml(n.description)}</p>` : ''}
-          <p class="text-xs text-surface-400 mt-1">${formatRelative(n.timestamp)}</p>
-        </div>
-        ${!n.read ? `<button onclick="markNotificationRead('${n.id}')" class="text-xs text-brand-600 hover:text-brand-700 whitespace-nowrap">Mark read</button>` : ''}
-      </div>
-    </div>
-  `).join('');
+  const renderGroup = (label, items, dotClass) => {
+    if (!items.length) return '';
+    return `
+      <div class="notif-section-label">${label}</div>
+      ${items.map(r => {
+        const contact = r.contactId ? contactMap[r.contactId] : null;
+        const dueStr  = r.dueDate ? _formatDueDate(r.dueDate) : 'No date';
+        return `
+          <div class="notif-item">
+            <div class="notif-item-dot ${dotClass}"></div>
+            <div class="notif-item-body">
+              <p class="notif-item-title">${escapeHtml(r.title)}</p>
+              ${contact ? `<p class="notif-item-contact">${escapeHtml(contact.fullName)}</p>` : ''}
+              <p class="notif-item-meta">${dueStr}</p>
+            </div>
+            <button class="notif-item-action" onclick="completeReminderFromPanel('${r.id}')">Done</button>
+          </div>`;
+      }).join('')}`;
+  };
+
+  container.innerHTML =
+    renderGroup('Overdue',   overdue,  'overdue')  +
+    renderGroup('Due today', dueToday, 'today')    +
+    renderGroup('This week', thisWeek, 'upcoming') +
+    renderGroup('Later',     later,    'upcoming');
 }
 
-async function markNotificationRead(notifId) {
-  const notif = await DB.get(STORES.notifications, notifId);
-  if (notif) {
-    notif.read = true;
-    await DB.put(STORES.notifications, notif);
-    await renderNotificationsList();
-    checkReminders();
-  }
+/** Format a due date relative to today for the panel. */
+function _formatDueDate(dateStr) {
+  const d = new Date(dateStr);
+  const now = new Date();
+  const diffMs = d - now;
+  const diffDays = Math.round(diffMs / (1000 * 60 * 60 * 24));
+  if (diffDays < -1)  return `${Math.abs(diffDays)} days overdue`;
+  if (diffDays === -1) return 'Overdue since yesterday';
+  if (diffDays < 0)   return 'Overdue today';
+  if (diffDays === 0) return 'Due today';
+  if (diffDays === 1) return 'Due tomorrow';
+  if (diffDays < 7)   return `Due in ${diffDays} days`;
+  return `Due ${d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;
 }
 
+/** Mark a reminder done directly from the panel. */
+async function completeReminderFromPanel(reminderId) {
+  const reminder = await DB.get(STORES.reminders, reminderId);
+  if (!reminder) return;
+  reminder.status = 'completed';
+  await DB.put(STORES.reminders, reminder);
+  showToast('Reminder marked done', 'success');
+  await checkReminders();
+}
+
+/** Open / close the notifications panel. */
 function toggleNotifications() {
   const panel = document.getElementById('notifications-panel');
-  panel.classList.toggle('show');
-  panel.classList.toggle('hidden');
+  if (!panel) return;
+
+  const isOpen = panel.classList.contains('open');
+  let backdrop = document.getElementById('notif-backdrop');
+
+  if (!isOpen) {
+    // ── Open ──
+    // Ensure backdrop exists
+    if (!backdrop) {
+      backdrop = document.createElement('div');
+      backdrop.id = 'notif-backdrop';
+      backdrop.addEventListener('click', toggleNotifications);
+      document.body.appendChild(backdrop);
+    }
+    backdrop.classList.add('visible');
+    panel.classList.add('open');
+    if (currentUser) renderNotificationsList();
+  } else {
+    // ── Close ──
+    panel.classList.remove('open');
+    if (backdrop) backdrop.classList.remove('visible');
+  }
 }
 
 // Periodically check reminders

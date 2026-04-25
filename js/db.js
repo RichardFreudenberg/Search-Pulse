@@ -7,8 +7,13 @@ const DB_NAME = 'pulse_crm';
 //   4 — original Pulse release (pre-git Nexus CRM era used 'nexus_crm' database name)
 //   5 — added shareInvites, shareDashboards, sourcingCampaigns stores
 //   8 — robustness pass: onblocked/versionchange handlers, legacy DB migration
+//   9 — dealFolders store for local folder-per-deal access (File System Access API)
+//  10 — dealCalls store for Granola meeting intelligence (transcripts, AI notes, action items)
+//  11 — auditLog for Granola events; granolaImports for duplicate-import tracking
+//  12 — meetingSessions store for native browser meeting recorder
+//  13 — brokers store for broker/intermediary tracker
 // RULE: only bump this when adding new object stores. Never delete or rename stores.
-const DB_VERSION = 8;
+const DB_VERSION = 13;
 
 // Legacy database names used before the app was renamed from Nexus CRM → Pulse.
 // Add new names here if the app is ever renamed again.
@@ -38,6 +43,12 @@ const STORES = {
   shareInvites: 'shareInvites',
   shareDashboards: 'shareDashboards',
   sourcingCampaigns: 'sourcingCampaigns',
+  dealFolders:    'dealFolders',
+  dealCalls:      'dealCalls',
+  auditLog:        'auditLog',
+  granolaImports:  'granolaImports',
+  meetingSessions: 'meetingSessions',
+  brokers:         'brokers',
 };
 
 let db = null;
@@ -235,6 +246,12 @@ function _runUpgrade(e) {
   ensureStore(STORES.shareInvites,       ['userId', 'createdAt']);
   ensureStore(STORES.shareDashboards,    ['userId']);
   ensureStore(STORES.sourcingCampaigns,  ['userId', 'status', 'sector', 'createdAt']);
+  ensureStore(STORES.dealFolders,        ['dealId', 'userId']);
+  ensureStore(STORES.dealCalls,          ['dealId', 'userId', 'source', 'date', 'createdAt']);
+  ensureStore(STORES.auditLog,           ['userId', 'action', 'timestamp']);
+  ensureStore(STORES.granolaImports,     ['userId', 'granolaId', 'callId', 'dealId', 'importedAt']);
+  ensureStore(STORES.meetingSessions,    ['userId', 'date', 'status', 'dealId']);
+  ensureStore(STORES.brokers,            ['userId', 'createdAt', 'lastContactDate']);
 }
 
 function openDB() {
@@ -246,12 +263,36 @@ function openDB() {
     }
     const request = indexedDB.open(DB_NAME, DB_VERSION);
 
-    request.onupgradeneeded = _runUpgrade;
+    let settled = false;
+    const settle = (fn, val) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      fn(val);
+    };
+
+    // Safety-net: if the DB never opens within 12 s (e.g. blocked by another tab),
+    // reject so initApp() can still call setupAuthForms() and show the login screen.
+    const timer = setTimeout(() => {
+      settle(reject, new Error('DB_OPEN_TIMEOUT'));
+    }, 12000);
+
+    request.onupgradeneeded = (e) => {
+      try {
+        _runUpgrade(e);
+      } catch (err) {
+        console.error('[Pulse] DB upgrade error:', err);
+        // Don't abort — let the transaction finish what it can.
+      }
+    };
 
     request.onblocked = () => {
       // Another tab has the DB open at an older version.
       // We can't force-close it, so surface a message to the user.
       console.warn('[Pulse] DB upgrade blocked — please close other tabs and reload.');
+      // Resolve with null after a short delay so initApp() can still proceed.
+      // The null is checked in openDB callers gracefully.
+      setTimeout(() => settle(reject, new Error('DB_BLOCKED')), 3000);
     };
 
     request.onsuccess = (e) => {
@@ -264,11 +305,11 @@ function openDB() {
         db = null;
       };
 
-      resolve(db);
+      settle(resolve, db);
     };
 
     request.onerror = (e) => {
-      reject(e.target.error);
+      settle(reject, e.target.error);
     };
   });
 }

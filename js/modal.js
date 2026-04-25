@@ -2,6 +2,14 @@
    Nexus CRM — Modal System
    ============================================ */
 
+// Optional guard: set to a function that returns a warning string to block modal close,
+// or falsy to allow. Cleared automatically on a successful closeModal().
+let _modalCloseGuard = null;
+
+function setModalCloseGuard(guardFn) {
+  _modalCloseGuard = guardFn;
+}
+
 function openModal(contentHtmlOrTitle, optionsOrContent = {}) {
   // Support two calling conventions:
   // openModal(html, options?)  — original
@@ -33,7 +41,25 @@ function openModal(contentHtmlOrTitle, optionsOrContent = {}) {
   document.addEventListener('keydown', handleModalEscape);
 }
 
-function closeModal() {
+function closeModal(force = false) {
+  // Check close guard (e.g. active recording) — guard can be bypassed with force=true
+  if (!force && _modalCloseGuard) {
+    const msg = _modalCloseGuard();
+    if (msg) {
+      if (typeof showToast === 'function') showToast(msg, 'error');
+      // Briefly shake the modal to signal it cannot be dismissed
+      const content = document.getElementById('modal-content');
+      if (content) {
+        content.style.animation = 'none';
+        content.offsetHeight; // reflow
+        content.style.animation = 'modalShake 0.35s ease';
+        setTimeout(() => { content.style.animation = ''; }, 400);
+      }
+      return; // blocked
+    }
+  }
+  // Clear guard on intentional close
+  _modalCloseGuard = null;
   const overlay = document.getElementById('modal-overlay');
   overlay.classList.add('hidden');
   overlay.classList.remove('show');
@@ -43,7 +69,7 @@ function closeModal() {
 }
 
 function handleModalEscape(e) {
-  if (e.key === 'Escape') closeModal();
+  if (e.key === 'Escape') closeModal(); // guard will block if recording
 }
 
 function confirmDialog(title, message, onConfirm) {

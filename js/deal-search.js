@@ -66,6 +66,18 @@ const DEAL_SEARCH_SOURCES = [
     hasRss: false,
     requiresLogin: true,
   },
+  {
+    id: 'dubde',
+    name: 'dub.de',
+    icon: '🇩🇪',
+    color: 'red',
+    description: "Germany's leading M&A marketplace — Unternehmenskäufe & -verkäufe",
+    rssUrl: null,
+    searchUrl: 'https://www.dub.de/unternehmen-kaufen/',
+    hasRss: false,
+    hasScraper: true,
+    currency: 'EUR',
+  },
 ];
 
 // ─── Page State ───────────────────────────────────────────────────────────────
@@ -74,7 +86,7 @@ let _dsListings = [];           // All fetched listings (raw)
 let _dsFiltered = [];           // After filters applied
 let _dsActiveTab = 'listings';  // 'listings' | 'import'
 let _dsSourceStatus = {};       // { sourceId: 'loading'|'ok'|'error'|'skipped' }
-let _dsEnabledSources = new Set(DEAL_SEARCH_SOURCES.filter(s => s.hasRss).map(s => s.id));
+let _dsEnabledSources = new Set(DEAL_SEARCH_SOURCES.filter(s => (s.hasRss || s.hasScraper) && !s.requiresLogin).map(s => s.id));
 let _dsFilters = { industry: '', location: '', minRevenue: '', maxRevenue: '', minEbitda: '', maxEbitda: '', sortBy: 'date' };
 let _dsExcelPreview = null;     // { headers, mappings, rows }
 
@@ -151,6 +163,7 @@ async function renderDealSearch() {
               <label class="block text-xs font-medium text-surface-500 mb-1">Sort By</label>
               <select id="ds-filter-sort" onchange="dsApplyFilters()" class="input-field text-sm py-1.5">
                 <option value="date">Most Recent</option>
+                <option value="fit-desc">AI Fit Score (High→Low)</option>
                 <option value="revenue-desc">Revenue (High→Low)</option>
                 <option value="revenue-asc">Revenue (Low→High)</option>
                 <option value="ebitda-desc">EBITDA (High→Low)</option>
@@ -217,17 +230,30 @@ async function dsFetchAll() {
   const resultsEl = document.getElementById('ds-results');
   if (resultsEl) resultsEl.innerHTML = dsLoadingGrid();
 
-  const rssableSources = DEAL_SEARCH_SOURCES.filter(s => s.hasRss && !s.requiresLogin && _dsEnabledSources.has(s.id));
-  const linkOnlySources = DEAL_SEARCH_SOURCES.filter(s => (!s.hasRss || s.requiresLogin) && _dsEnabledSources.has(s.id));
+  const rssableSources  = DEAL_SEARCH_SOURCES.filter(s => s.hasRss    && !s.requiresLogin && _dsEnabledSources.has(s.id));
+  const scraperSources  = DEAL_SEARCH_SOURCES.filter(s => s.hasScraper && !s.requiresLogin && _dsEnabledSources.has(s.id));
+  const linkOnlySources = DEAL_SEARCH_SOURCES.filter(s => !s.hasRss && !s.hasScraper && !s.requiresLogin && _dsEnabledSources.has(s.id));
+  const loginSources    = DEAL_SEARCH_SOURCES.filter(s => s.requiresLogin && _dsEnabledSources.has(s.id));
 
-  // Set all to loading
+  // Set loading status
   rssableSources.forEach(s => dsSetSourceStatus(s.id, 'loading'));
+  scraperSources.forEach(s => dsSetSourceStatus(s.id, 'loading'));
 
-  // Fetch all in parallel
-  const fetches = rssableSources.map(s => dsFetchSource(s));
-  const results = await Promise.allSettled(fetches);
+  // RSS fetches (parallel)
+  const rssFetches = rssableSources.map(s => dsFetchSource(s));
 
-  results.forEach((r, i) => {
+  // Scraper fetches (parallel) — dispatched to source-specific scrapers
+  const scraperFetches = scraperSources.map(s => {
+    if (s.id === 'dubde') return dsFetchDubDe(s);
+    return Promise.resolve([]);
+  });
+
+  const [rssResults, scraperResults] = await Promise.all([
+    Promise.allSettled(rssFetches),
+    Promise.allSettled(scraperFetches),
+  ]);
+
+  rssResults.forEach((r, i) => {
     const src = rssableSources[i];
     if (r.status === 'fulfilled' && r.value.length > 0) {
       _dsListings.push(...r.value);
@@ -237,8 +263,19 @@ async function dsFetchAll() {
     }
   });
 
-  // Show link-only sources as skipped
+  scraperResults.forEach((r, i) => {
+    const src = scraperSources[i];
+    if (r.status === 'fulfilled' && r.value.length > 0) {
+      _dsListings.push(...r.value);
+      dsSetSourceStatus(src.id, 'ok', r.value.length);
+    } else {
+      dsSetSourceStatus(src.id, 'error');
+    }
+  });
+
+  // Show skipped / login-only sources
   linkOnlySources.forEach(s => dsSetSourceStatus(s.id, 'skipped'));
+  loginSources.forEach(s => dsSetSourceStatus(s.id, 'skipped'));
 
   dsApplyFilters();
 
@@ -372,12 +409,34 @@ function dsExtractCurrency(text, labels) {
 }
 
 function dsParseAmount(text) {
-  // Match: $1.2M, $1,200,000, $1.2 million, 1.2mm, 1200000
+  if (!text) return null;
+
+  // German number format: dots as thousands separators, comma as decimal
+  // e.g. "1.500.000" → 1500000, "1,2 Mio." → 1200000
+  // Try German Mio./Mrd. patterns first (€ optional)
+  const dePatterns = [
+    { re: /(?:€\s*)?([0-9]+(?:[,.][0-9]+)?)\s*Mrd\.?/i,  mult: 1e9  },
+    { re: /(?:€\s*)?([0-9]+(?:[,.][0-9]+)?)\s*Mio\.?/i,   mult: 1e6  },
+    { re: /(?:€\s*)?([0-9]+(?:[,.][0-9]+)?)\s*Tsd\.?/i,   mult: 1e3  },
+    // German plain number with dots as thousands sep: 1.500.000 € or € 1.500.000
+    { re: /(?:€\s*)([0-9]{1,3}(?:\.[0-9]{3})+)(?:[,][0-9]+)?(?:\s*€)?/, mult: 1 },
+    { re: /([0-9]{1,3}(?:\.[0-9]{3})+)(?:[,][0-9]+)?\s*€/, mult: 1 },
+  ];
+  for (const { re, mult } of dePatterns) {
+    const m = text.match(re);
+    if (!m) continue;
+    // Remove German thousands dots, swap comma→dot for decimal
+    const numStr = m[1].replace(/\./g, '').replace(',', '.');
+    const val = parseFloat(numStr) * mult;
+    if (!isNaN(val) && val >= 10000) return Math.round(val);
+  }
+
+  // Standard USD/EUR patterns
   const patterns = [
-    /\$\s*([0-9,]+(?:\.[0-9]+)?)\s*(B|billion)/i,
-    /\$\s*([0-9,]+(?:\.[0-9]+)?)\s*(M|MM|million)/i,
-    /\$\s*([0-9,]+(?:\.[0-9]+)?)\s*(K|thousand)/i,
-    /\$\s*([0-9,]+(?:\.[0-9]+)?)/,
+    /[$€]\s*([0-9,]+(?:\.[0-9]+)?)\s*(B|billion)/i,
+    /[$€]\s*([0-9,]+(?:\.[0-9]+)?)\s*(M|MM|million)/i,
+    /[$€]\s*([0-9,]+(?:\.[0-9]+)?)\s*(K|thousand)/i,
+    /[$€]\s*([0-9,]+(?:\.[0-9]+)?)/,
     /([0-9]+(?:\.[0-9]+)?)\s*(B|billion)/i,
     /([0-9]+(?:\.[0-9]+)?)\s*(M|MM|million|mm)/i,
     /([0-9]+(?:\.[0-9]+)?)\s*(K|thousand)/i,
@@ -459,6 +518,13 @@ function dsApplyFilters() {
       return 0;
     };
     switch (sortBy) {
+      case 'fit-desc': {
+        const fa = a.fitScore, fb = b.fitScore;
+        if (fa == null && fb == null) return 0;
+        if (fa == null) return 1;
+        if (fb == null) return -1;
+        return fb - fa;
+      }
       case 'revenue-desc': return (b.revenue || 0) - (a.revenue || 0) || nullLast(b.revenue, a.revenue);
       case 'revenue-asc': return (a.revenue || 0) - (b.revenue || 0) || nullLast(a.revenue, b.revenue);
       case 'ebitda-desc': return (b.ebitda || 0) - (a.ebitda || 0) || nullLast(b.ebitda, a.ebitda);
@@ -505,9 +571,27 @@ function dsRenderResults() {
 }
 
 function dsRenderListingCard(l) {
-  const fmtM = v => v ? (v >= 1e6 ? '$' + (v / 1e6).toFixed(1) + 'M' : '$' + Math.round(v / 1000) + 'K') : '—';
-  const colorMap = { blue: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300', green: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300', purple: 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300', orange: 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300', yellow: 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300', indigo: 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300' };
+  const sym = l.currency === 'EUR' ? '€' : '$';
+  const fmtM = v => v ? (v >= 1e6 ? sym + (v / 1e6).toFixed(1) + 'M' : sym + Math.round(v / 1000) + 'K') : '—';
+  const colorMap = {
+    blue:   'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300',
+    green:  'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300',
+    purple: 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300',
+    orange: 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300',
+    yellow: 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300',
+    indigo: 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300',
+    red:    'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300',
+  };
   const sourceBadge = colorMap[l.sourceColor] || 'bg-surface-100 text-surface-600';
+
+  // Fit score badge (AI-generated for dub.de listings)
+  const fitBadge = l.fitScore ? (() => {
+    const score = l.fitScore;
+    const color = score >= 8 ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'
+                : score >= 6 ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300'
+                : 'bg-surface-100 text-surface-500';
+    return `<span class="${color} text-xs px-2 py-0.5 rounded-full font-semibold" title="${escapeHtml(l.fitReason || '')}">⚡ ${score}/10 fit</span>`;
+  })() : '';
 
   return `
     <div class="card p-4 flex flex-col gap-3 hover:shadow-md transition-shadow">
@@ -517,7 +601,9 @@ function dsRenderListingCard(l) {
           <h3 class="text-sm font-semibold leading-snug line-clamp-2">${escapeHtml(l.title)}</h3>
           <div class="flex items-center gap-2 mt-1 flex-wrap">
             <span class="text-xs px-2 py-0.5 rounded-full font-medium ${sourceBadge}">${l.sourceIcon} ${l.sourceName}</span>
+            ${l.aiAnalyzed ? '<span class="text-xs px-2 py-0.5 rounded-full font-medium bg-purple-50 text-purple-600 dark:bg-purple-900/20 dark:text-purple-300">✨ AI analyzed</span>' : ''}
             ${l.industry ? `<span class="text-xs text-surface-500">${escapeHtml(l.industry)}</span>` : ''}
+            ${fitBadge}
           </div>
         </div>
       </div>
@@ -528,6 +614,7 @@ function dsRenderListingCard(l) {
           ${l.location ? `<span>📍 ${escapeHtml(l.location)}</span>` : ''}
           ${l.listedDate ? `<span>🗓 ${l.listedDate}</span>` : ''}
           ${l.employees ? `<span>👥 ${l.employees} employees</span>` : ''}
+          ${l.currency === 'EUR' ? '<span class="font-medium text-surface-500">EUR</span>' : ''}
         </div>` : ''}
 
       <!-- Key Financials -->
@@ -590,6 +677,222 @@ async function dsAddToPipeline(listing) {
   } catch (err) {
     showToast('Failed to add deal: ' + err.message, 'error');
   }
+}
+
+// ─── dub.de Scraper ───────────────────────────────────────────────────────────
+
+// Proxy helpers — try allorigins first, then corsproxy as fallback
+async function _dsProxyFetch(url, timeoutMs = 18000) {
+  const proxies = [
+    `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
+    `https://corsproxy.io/?${encodeURIComponent(url)}`,
+  ];
+  for (const proxy of proxies) {
+    try {
+      const r = await fetch(proxy, { signal: AbortSignal.timeout(timeoutMs) });
+      if (r.ok) {
+        const text = await r.text();
+        if (text && text.length > 500) return text;
+      }
+    } catch { /* try next */ }
+  }
+  return null;
+}
+
+// Fetch multiple pages from dub.de and run AI extraction
+async function dsFetchDubDe(source) {
+  const baseUrl = 'https://www.dub.de/unternehmen-kaufen/';
+  const pageUrls = [baseUrl, `${baseUrl}?seite=2`, `${baseUrl}?seite=3`];
+
+  const allBlocks = [];
+
+  for (const url of pageUrls) {
+    try {
+      const html = await _dsProxyFetch(url);
+      if (!html) continue;
+      const blocks = dsDubDeExtractBlocks(html);
+      allBlocks.push(...blocks);
+    } catch { /* skip failed page */ }
+  }
+
+  if (allBlocks.length === 0) return [];
+  return await dsDubDeAiParse(allBlocks, source);
+}
+
+// Extract candidate listing text blocks from raw dub.de HTML
+function dsDubDeExtractBlocks(html) {
+  try {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, 'text/html');
+
+    // Strip noise
+    ['nav', 'header', 'footer', 'script', 'style', 'noscript', 'aside', '.cookie', '.consent', '.banner'].forEach(sel => {
+      try { doc.querySelectorAll(sel).forEach(el => el.remove()); } catch {}
+    });
+
+    // Try known dub.de / common marketplace class patterns first
+    const selectors = [
+      '.search-result__item', '.result-item', '.listing-item', '.expose-item',
+      '.inserat', '.angebot-item', '.company-card', '[class*="expose"]',
+      '[class*="listing-"]', '[class*="result-item"]', '[class*="angebot"]',
+      'article', '.item',
+    ];
+
+    let candidates = [];
+    for (const sel of selectors) {
+      try {
+        const els = Array.from(doc.querySelectorAll(sel));
+        // Only use this selector if it looks like actual listings
+        const withFinancials = els.filter(el => {
+          const t = el.textContent || '';
+          return t.includes('€') || t.includes('Kaufpreis') || t.includes('Umsatz') || t.includes('EBITDA');
+        });
+        if (withFinancials.length >= 3) { candidates = els; break; }
+        if (els.length >= 5) { candidates = els; break; }
+      } catch {}
+    }
+
+    // Fallback: scan all block-level elements for financial content
+    if (candidates.length < 3) {
+      const all = Array.from(doc.querySelectorAll('div, article, li, section'));
+      candidates = all.filter(el => {
+        const t = el.textContent || '';
+        const len = t.trim().length;
+        return len >= 60 && len <= 3000
+          && (t.includes('€') || t.includes('Kaufpreis') || t.includes('Umsatz') || t.includes('EBITDA') || t.includes('Mitarbeiter'))
+          && !el.querySelector('article, [class*="listing"], [class*="result"]'); // avoid nested dupes
+      });
+    }
+
+    // De-duplicate and build blocks
+    const seen = new Set();
+    const blocks = [];
+
+    for (const el of candidates) {
+      // Grab the first useful link pointing to a listing detail page
+      const link = (
+        el.querySelector('a[href*="/expose/"], a[href*="/inserat/"], a[href*="/unternehmen/"], a[href*="/kaufen/"]')?.href ||
+        el.querySelector('a[href]')?.href ||
+        ''
+      );
+
+      const rawText = (el.textContent || '').replace(/\s+/g, ' ').trim();
+      if (rawText.length < 50) continue;
+
+      // Deduplicate by first 80 chars
+      const key = rawText.substring(0, 80);
+      if (seen.has(key)) continue;
+      seen.add(key);
+
+      blocks.push({ text: rawText.substring(0, 700), link });
+      if (blocks.length >= 40) break; // cap per page
+    }
+
+    return blocks;
+  } catch {
+    return [];
+  }
+}
+
+// AI batch extraction: German listing text → structured English deal objects
+async function dsDubDeAiParse(blocks, source) {
+  const BATCH_SIZE = 6; // smaller batches for higher quality extraction
+  const listings = [];
+
+  for (let i = 0; i < blocks.length; i += BATCH_SIZE) {
+    const batch = blocks.slice(i, i + BATCH_SIZE);
+    const numbered = batch.map((b, j) => `[${j + 1}]\n${b.text}`).join('\n\n---\n\n');
+
+    try {
+      const raw = await callAI(
+        `You are an expert M&A analyst who specializes in German-language business acquisitions and search fund investing. Extract structured data from German business listing snippets from dub.de, Germany's leading M&A marketplace. Return ONLY valid JSON, no markdown, no explanation.`,
+
+        `Extract structured data from these ${batch.length} German business listings from dub.de. Return a JSON array with exactly ${batch.length} objects (same order, even if a listing is unclear — just use best-effort values).
+
+German financial terminology:
+- Kaufpreis / Verkaufspreis = Asking Price
+- Umsatz / Jahresumsatz = Annual Revenue
+- EBITDA / Gewinn / Ertrag = EBITDA/Profit
+- Mitarbeiter / Beschäftigte = Employees
+- Mio. = million (×1,000,000) | Tsd. = thousand (×1,000) | Mrd. = billion (×1,000,000,000)
+- German number format: 1.500.000 = 1,500,000 (dots are thousands separators)
+
+For each listing return:
+{
+  "title": "Business name or concise English description (translate from German)",
+  "industry": "English industry name (e.g. Manufacturing, Software, Healthcare, Retail, Services, Construction, Food & Beverage, Logistics, Other)",
+  "location": "City or region in Germany (keep German names, e.g. 'Munich', 'Bayern', 'NRW')",
+  "askingPrice": <integer EUR or null>,
+  "revenue": <integer EUR or null>,
+  "ebitda": <integer EUR or null>,
+  "employees": <integer or null>,
+  "description": "1-2 sentence English summary of what the business does and why it might be interesting",
+  "fitScore": <integer 1-10 rating for search fund acquisition attractiveness based on: recurring revenue, established business, defensible niche, reasonable size>,
+  "fitReason": "One short English sentence explaining the fit score"
+}
+
+Listings:
+${numbered}
+
+Return JSON array only:`,
+        900, 0.1
+      );
+
+      // Clean and parse
+      const cleaned = raw.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '').trim();
+      const parsed = JSON.parse(cleaned);
+
+      if (!Array.isArray(parsed)) continue;
+
+      parsed.forEach((item, j) => {
+        if (!item || typeof item !== 'object') return;
+        const title = (item.title || '').trim();
+        if (!title || title.length < 3) return;
+
+        const askingPrice = typeof item.askingPrice === 'number' && item.askingPrice > 0 ? Math.round(item.askingPrice) : null;
+        const revenue     = typeof item.revenue     === 'number' && item.revenue     > 0 ? Math.round(item.revenue)     : null;
+        const ebitda      = typeof item.ebitda      === 'number' && item.ebitda      > 0 ? Math.round(item.ebitda)      : null;
+        const employees   = typeof item.employees   === 'number' && item.employees   > 0 ? Math.round(item.employees)   : null;
+        const multiple    = ebitda && askingPrice   ? Math.round((askingPrice / ebitda) * 10) / 10 : null;
+        const fitScore    = (typeof item.fitScore === 'number' && item.fitScore >= 1 && item.fitScore <= 10) ? Math.round(item.fitScore) : null;
+        const block       = batch[j] || {};
+
+        // Map AI industry → our taxonomy
+        const industryText = `${item.industry || ''} ${title}`;
+        const industry = dsGuessIndustry(industryText) !== 'Other'
+          ? dsGuessIndustry(industryText)
+          : (item.industry || 'Other');
+
+        listings.push({
+          id: `ds_dubde_${generateId()}`,
+          source: source.id,
+          sourceName: source.name,
+          sourceIcon: source.icon,
+          sourceColor: source.color,
+          sourceUrl: block.link || source.searchUrl,
+          title,
+          description: (item.description || '').trim().substring(0, 400),
+          industry,
+          location: (item.location || 'Germany').trim(),
+          revenue,
+          ebitda,
+          askingPrice,
+          multiple,
+          employees,
+          listedDate: new Date().toISOString().split('T')[0],
+          currency: 'EUR',
+          aiAnalyzed: true,
+          fitScore,
+          fitReason: (item.fitReason || '').trim().substring(0, 120),
+        });
+      });
+    } catch {
+      // AI parse failed for this batch — continue with next
+      continue;
+    }
+  }
+
+  return listings;
 }
 
 // ─── Excel Import Panel ───────────────────────────────────────────────────────

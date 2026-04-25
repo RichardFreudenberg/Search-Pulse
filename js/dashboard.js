@@ -386,60 +386,67 @@ async function renderDashboard() {
   const callMonthData = typeof countByMonth === 'function' ? countByMonth(calls, 'date', 6) : [];
   const contactMonthData = typeof countByMonth === 'function' ? countByMonth(activeContacts, 'createdAt', 6) : [];
 
+  // Greeting computation
+  const _hour = new Date().getHours();
+  const _greetingWord = _hour < 12 ? 'Good morning' : _hour < 17 ? 'Good afternoon' : 'Good evening';
+  const _firstName = escapeHtml(currentUser.name.split(' ')[0]);
+  const _dueTodayCount = dueToday.length + overdueFollowUps.length;
+  const _lateStageDeals = allDeals.filter(d => ['LOI Drafted','LOI Submitted','Due Diligence','Exclusivity','Legal / Closing'].includes(d.stage)).length;
+  const _now = new Date();
+  const _weekAgo = new Date(_now - 7 * 24 * 60 * 60 * 1000);
+  const _callsThisWeek = calls.filter(c => new Date(c.date) >= _weekAgo).length;
+  const _subParts = [];
+  if (_dueTodayCount > 0) _subParts.push(`${_dueTodayCount} follow-up${_dueTodayCount !== 1 ? 's' : ''} due`);
+  if (_lateStageDeals > 0) _subParts.push(`${_lateStageDeals} late-stage deal${_lateStageDeals !== 1 ? 's' : ''} active`);
+  const _greetingSub = _subParts.length > 0 ? `You have ${_subParts.join(' and ')}.` : 'Your pipeline is looking good.';
+
   // Overview tab HTML
   const overviewHtml = `
-    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
+    <div class="kpi-grid">
       ${[
-        ['Contacts', activeContacts.length, 'brand', "showDrilldown('contacts-all')"],
-        ['Companies', companies.length, 'purple', "showDrilldown('companies-all')"],
-        ['Calls', calls.length, 'indigo', "showDrilldown('calls-all')"],
-        ['Active Deals', activeDeals.length, 'green', "showDrilldown('deals-active')"],
-        ['Hot Deals', hotDeals.length, 'yellow', "showDrilldown('deals-hot')"],
-        ['Pipeline Value', fmtVal(pipelineValue), 'pink', "showDrilldown('deals-active')"],
-      ].map(([label, val, color, click]) => `
-        <div class="card text-center py-4 cursor-pointer hover:border-${color}-300 dark:hover:border-${color}-700 transition-colors"
-          onclick="${click}" title="Click to see details">
-          <p class="text-xl font-bold text-${color}-600 dark:text-${color}-400">${val}</p>
-          <p class="text-xs text-surface-500 mt-1">${label}</p>
+        { label: 'Active Deals',     val: activeDeals.length,     delta: hotDeals.length > 0 ? `${hotDeals.length} hot` : (allDeals.length > 0 ? `${allDeals.length} total` : null), up: hotDeals.length > 0 || activeDeals.length > 0, click: "showDrilldown('deals-active')" },
+        { label: 'Calls This Week',  val: _callsThisWeek,         delta: calls.length > 0 ? `${calls.length} total` : null,                                                            up: _callsThisWeek > 0,                               click: "showDrilldown('calls-all')" },
+        { label: 'Companies',        val: companies.length,        delta: activeContacts.length > 0 ? `${activeContacts.length} contacts` : null,                                      up: companies.length > 0,                              click: "showDrilldown('companies-all')" },
+        { label: 'Pipeline Value',   val: fmtVal(pipelineValue),  delta: activeDeals.length > 0 ? `${activeDeals.length} active deal${activeDeals.length !== 1 ? 's' : ''}` : null,  up: pipelineValue > 0,                                 click: "showDrilldown('deals-active')" },
+      ].map(k => `
+        <div class="kpi-card cursor-pointer" onclick="${k.click}" title="Click to see details">
+          <div class="kpi-label">${k.label}</div>
+          <div class="kpi-value">${k.val}</div>
+          ${k.delta ? `<div class="kpi-delta ${k.up ? 'up' : 'down'}">${k.up ? '↑' : '↓'} ${k.delta}</div>` : ''}
         </div>
       `).join('')}
     </div>
 
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
       <div class="card">
-        <h3 class="text-sm font-semibold mb-4">Activity Over Time (6 months)</h3>
-        <div class="chart-container" style="height:200px">
+        <div class="card-title">Activity Over Time</div>
+        <div class="card-sub">Calls &amp; new contacts — last 6 months</div>
+        <div class="chart-container" style="height:196px">
           <canvas id="dash-activity-chart"></canvas>
         </div>
       </div>
       <div class="card">
-        <h3 class="text-sm font-semibold mb-4">Relationship Health</h3>
-        <div class="flex items-center gap-4">
-          <div class="chart-container flex-1" style="height:180px">
-            <canvas id="dash-health-chart"></canvas>
-          </div>
-          <div class="space-y-2 text-xs">
-            <div class="flex items-center gap-2"><span class="w-3 h-3 rounded-full bg-green-500 flex-shrink-0"></span><span>Active: ${healthy}</span></div>
-            <div class="flex items-center gap-2"><span class="w-3 h-3 rounded-full bg-yellow-500 flex-shrink-0"></span><span>At Risk: ${atRisk}</span></div>
-            <div class="flex items-center gap-2"><span class="w-3 h-3 rounded-full bg-red-500 flex-shrink-0"></span><span>Stale: ${stale}</span></div>
-          </div>
+        <div class="card-title">Relationship Health</div>
+        <div class="card-sub">${healthy + atRisk + stale} contacts tracked</div>
+        <div class="chart-container" style="height:196px">
+          <canvas id="dash-health-chart"></canvas>
         </div>
       </div>
     </div>
 
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
       <div class="card">
-        <h3 class="text-sm font-semibold mb-1">Contact Pipeline</h3>
-        <p class="text-xs text-surface-400 mb-4">Contacts by relationship stage</p>
-        <div class="chart-container" style="height:220px">
+        <div class="card-title">Contact Pipeline</div>
+        <div class="card-sub">Contacts by relationship stage</div>
+        <div class="chart-container" style="height:200px">
           <canvas id="dash-stage-chart"></canvas>
         </div>
       </div>
       <div class="card">
-        <h3 class="text-sm font-semibold mb-1">Deal Pipeline</h3>
-        <p class="text-xs text-surface-400 mb-4">${allDeals.length > 0 ? 'Active deals by stage' : 'No deals yet — go to Deal Pipeline to add'}</p>
+        <div class="card-title">Deal Pipeline</div>
+        <div class="card-sub">${allDeals.length > 0 ? 'Active deals by stage' : 'No deals yet — go to Deal Pipeline to add'}</div>
         ${allDeals.length > 0 ? `
-          <div class="chart-container" style="height:220px">
+          <div class="chart-container" style="height:200px">
             <canvas id="dash-deal-stage-chart"></canvas>
           </div>
         ` : `
@@ -461,27 +468,29 @@ async function renderDashboard() {
         ['Hot / High Priority', hotDeals.length, "showDrilldown('deals-hot')"],
         ['Pipeline Value', fmtVal(pipelineValue), "showDrilldown('deals-active')"],
       ].map(([label, val, click]) => `
-        <div class="card text-center py-4 cursor-pointer hover:border-brand-300 dark:hover:border-brand-700 transition-colors"
-          onclick="${click}" title="Click to see details">
-          <p class="text-2xl font-bold text-brand-600">${val}</p>
-          <p class="text-xs text-surface-500 mt-1">${label}</p>
+        <div class="card card-interactive text-center py-5"
+          onclick="${click}" role="button" tabindex="0" title="Click to see details">
+          <p class="stat-value">${val}</p>
+          <p class="stat-label mt-1">${label}</p>
         </div>
       `).join('')}
     </div>
 
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
       <div class="card">
-        <h3 class="text-sm font-semibold mb-4">Deals by Stage</h3>
+        <h3 class="text-sm font-semibold mb-1">Deals by Stage</h3>
+        <p class="text-xs text-surface-400 mb-4">Count of deals per pipeline stage</p>
         ${allDeals.length > 0 ? `
-          <div class="chart-container" style="height:260px">
+          <div class="chart-container" style="height:240px">
             <canvas id="deal-stage-bar-chart"></canvas>
           </div>
         ` : '<p class="text-sm text-surface-400 text-center py-8">No deals yet</p>'}
       </div>
       <div class="card">
-        <h3 class="text-sm font-semibold mb-4">Deal Sourcing</h3>
+        <h3 class="text-sm font-semibold mb-1">Deal Sourcing</h3>
+        <p class="text-xs text-surface-400 mb-4">Where your deals are coming from</p>
         ${Object.keys(dealsBySource).length > 0 ? `
-          <div class="chart-container" style="height:260px">
+          <div class="chart-container" style="height:240px">
             <canvas id="deal-source-donut-chart"></canvas>
           </div>
         ` : '<p class="text-sm text-surface-400 text-center py-8">No sourcing data yet</p>'}
@@ -539,10 +548,10 @@ async function renderDashboard() {
 
   pageContent.innerHTML = `
     <div class="p-4 lg:p-8 max-w-7xl mx-auto animate-fade-in">
-      <div class="flex items-center justify-between mb-4 flex-wrap gap-3">
+      <div class="flex items-center justify-between mb-2 flex-wrap gap-3">
         <div>
-          <h1 class="text-2xl font-bold">Dashboard</h1>
-          <p class="text-surface-500 text-sm">Welcome back, ${escapeHtml(currentUser.name.split(' ')[0])}</p>
+          <div class="greeting">${_greetingWord}, ${_firstName}.</div>
+          <div class="greeting-sub">${_greetingSub}</div>
         </div>
         ${currentDashboardTab === 'crm' ? `
           <button onclick="toggleDashboardEditMode()" class="btn-secondary btn-sm flex items-center gap-2" id="dashboard-edit-btn">
@@ -563,21 +572,25 @@ async function renderDashboard() {
     </div>
   `;
 
-  // Initialize charts after DOM is ready
-  if (currentDashboardTab === 'overview' && typeof createLineChart === 'function') {
-    setTimeout(() => {
+  // Initialize charts — double rAF ensures canvas is in a fully painted layout
+  if (currentDashboardTab === 'overview' && typeof initChart === 'function') {
+    initChart(() => {
+      // Activity line chart
       if (callMonthLabels.length > 0) {
         createLineChart('dash-activity-chart', callMonthLabels, [
           { label: 'Calls', data: callMonthData },
           { label: 'New Contacts', data: contactMonthData },
         ]);
       }
+
+      // Relationship health doughnut
       if (healthy + atRisk + stale > 0) {
         createDoughnutChart('dash-health-chart',
           ['Active', 'At Risk', 'Stale'],
           [healthy, atRisk, stale],
           {
-            colors: ['#22c55e','#eab308','#ef4444'],
+            colors: ['#22c55e', '#f59e0b', '#ef4444'],
+            legendPosition: 'bottom',
             onClickLabel: (label) => {
               const map = { 'Active': 'healthy', 'At Risk': 'atrisk', 'Stale': 'stale' };
               showDrilldown('contacts-health', map[label] || label);
@@ -585,29 +598,37 @@ async function renderDashboard() {
           }
         );
       }
+
+      // Contact pipeline — horizontal bar (stage names are long)
       const stageLabels = STAGES.filter(s => (stageCount[s] || 0) > 0);
-      const stageData = stageLabels.map(s => stageCount[s] || 0);
+      const stageData   = stageLabels.map(s => stageCount[s] || 0);
       if (stageLabels.length > 0) {
-        createBarChart('dash-stage-chart', stageLabels, stageData, {
-          singleColor: '#5c7cfa',
+        createHorizontalBarChart('dash-stage-chart', stageLabels, stageData, {
+          singleColor: '#2563eb',
+          maxBarThickness: 22,
           onClickLabel: (label) => showDrilldown('contacts-stage', encodeURIComponent(label)),
         });
       }
+
+      // Deal pipeline — horizontal bar (deal stage names are also long)
       const dealStageKeys = Object.keys(dealsByStage).filter(k => dealsByStage[k] > 0);
       if (dealStageKeys.length > 0) {
-        createBarChart('dash-deal-stage-chart', dealStageKeys, dealStageKeys.map(k => dealsByStage[k]), {
-          singleColor: '#20c997',
+        createHorizontalBarChart('dash-deal-stage-chart', dealStageKeys, dealStageKeys.map(k => dealsByStage[k]), {
+          singleColor: '#0ea5e9',
+          maxBarThickness: 22,
           onClickLabel: (label) => showDrilldown('deals-stage', encodeURIComponent(label)),
         });
       }
-    }, 50);
+    });
   }
 
-  if (currentDashboardTab === 'deals' && typeof createBarChart === 'function') {
-    setTimeout(() => {
+  if (currentDashboardTab === 'deals' && typeof initChart === 'function') {
+    initChart(() => {
       const stageKeys = Object.keys(dealsByStage).filter(k => dealsByStage[k] > 0);
       if (stageKeys.length > 0) {
-        createBarChart('deal-stage-bar-chart', stageKeys, stageKeys.map(k => dealsByStage[k]), {
+        createHorizontalBarChart('deal-stage-bar-chart', stageKeys, stageKeys.map(k => dealsByStage[k]), {
+          singleColor: '#2563eb',
+          maxBarThickness: 24,
           onClickLabel: (label) => showDrilldown('deals-stage', encodeURIComponent(label)),
         });
       }
@@ -617,7 +638,7 @@ async function renderDashboard() {
           onClickLabel: (label) => showDrilldown('deals-source', encodeURIComponent(label)),
         });
       }
-    }, 50);
+    });
   }
 }
 
