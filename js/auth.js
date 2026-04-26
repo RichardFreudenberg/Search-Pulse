@@ -86,12 +86,9 @@ function markInviteUsed(code, email) {
   }
 }
 
-/** Returns true if invite is required (i.e. at least one account already exists). */
+/** Registration is open to everyone — no invite code required. */
 async function isInviteRequired() {
-  try {
-    const users = await DB.getAll(STORES.users);
-    return users.length > 0;
-  } catch { return false; }
+  return false;
 }
 
 function generateVerificationCode() {
@@ -159,41 +156,6 @@ function logout() {
   localStorage.removeItem('pulse_user_id');
   document.getElementById('auth-screen').classList.remove('hidden');
   document.getElementById('app-shell').classList.add('hidden');
-}
-
-/** One-click guest login — no account or password required. */
-async function loginAsGuest() {
-  const GUEST_ID = 'pulse-guest-demo';
-  const btn = document.getElementById('guest-login-btn');
-  if (btn) { btn.disabled = true; btn.textContent = 'Loading demo…'; }
-
-  try {
-    // Reuse an existing guest session or create one fresh
-    let guest = await DB.get(STORES.users, GUEST_ID).catch(() => null);
-
-    if (!guest) {
-      guest = {
-        id:            GUEST_ID,
-        name:          'Demo User',
-        email:         'guest@pulse-demo.com',
-        passwordHash:  '',
-        emailVerified: true,
-        isGuest:       true,
-        createdAt:     new Date().toISOString(),
-      };
-      try { await DB.add(STORES.users, guest); } catch (_) {}
-      await _createDefaultUserData(GUEST_ID);
-      await seedDemoData(GUEST_ID);
-      localStorage.setItem('pulse_show_tutorial_' + GUEST_ID, '1');
-    }
-
-    setCurrentUser(guest);
-    showApp();
-    showToast('Welcome! You\'re exploring Pulse as a guest.', 'success');
-  } catch (err) {
-    if (btn) { btn.disabled = false; btn.textContent = '✦ Try Demo — no account needed'; }
-    showToast('Could not start demo: ' + (err.message || 'Unknown error'), 'error');
-  }
 }
 
 function _showAuthPanel(name) {
@@ -464,19 +426,23 @@ function setupAuthForms() {
     }
   });
 
-  // Register form — leads to verification
+  // Register form — creates account instantly, no email verification needed
   document.getElementById('register-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     const btn = e.target.querySelector('button[type="submit"]');
     btn.disabled = true;
-    btn.textContent = 'Checking…';
+    btn.textContent = 'Creating account…';
     try {
-      const name = document.getElementById('register-name').value.trim();
-      const email = document.getElementById('register-email').value.trim();
+      const name     = document.getElementById('register-name').value.trim();
+      const email    = document.getElementById('register-email').value.trim();
       const password = document.getElementById('register-password').value;
       const passwordConfirm = document.getElementById('register-password-confirm').value;
-      const inviteCode = (document.getElementById('register-invite')?.value || '').trim();
 
+      if (!name) {
+        showToast('Please enter your name', 'error');
+        btn.disabled = false; btn.textContent = 'Create account';
+        return;
+      }
       if (password !== passwordConfirm) {
         showToast('Passwords do not match', 'error');
         document.getElementById('register-password-confirm').focus();
@@ -489,7 +455,7 @@ function setupAuthForms() {
         return;
       }
 
-      // Check if user already exists before proceeding
+      // Check email isn't already taken
       const existing = await DB.getAll(STORES.users);
       if (existing.find(u => u.email === email)) {
         showToast('An account with this email already exists', 'error');
@@ -497,43 +463,29 @@ function setupAuthForms() {
         return;
       }
 
-      // ── Invite gate (skipped for the very first account = owner) ──
-      if (existing.length > 0) {
-        if (!inviteCode) {
-          showToast('An invite code is required during the pilot phase', 'error');
-          document.getElementById('register-invite')?.focus();
-          btn.disabled = false; btn.textContent = 'Create account';
-          return;
-        }
-        const valid = await validateInviteCode(inviteCode);
-        if (!valid) {
-          showToast('Invalid invite code — please check and try again', 'error');
-          document.getElementById('register-invite')?.select();
-          btn.disabled = false; btn.textContent = 'Create account';
-          return;
-        }
-      }
+      // Create the account directly — no invite code, no email verification
+      const passwordHash = await hashPassword(password);
+      const user = {
+        id: generateId(),
+        name,
+        email,
+        passwordHash,
+        emailVerified: true,
+        createdAt: new Date().toISOString(),
+      };
+      await DB.add(STORES.users, user);
+      await _createDefaultUserData(user.id);
+      await seedDemoData(user.id);
 
-      // Generate code and show verification screen
-      const code = generateVerificationCode();
-      pendingVerification = { name, email, password, code, inviteCode };
+      // Flag for onboarding tutorial
+      localStorage.setItem('pulse_show_tutorial_' + user.id, '1');
 
-      document.getElementById('verify-email-display').textContent = email;
-      showAuthVerify();
-      setupOtpInputs();
-
-      // Focus first OTP input
-      setTimeout(() => {
-        const firstInput = document.querySelector('.otp-input[data-index="0"]');
-        if (firstInput) firstInput.focus();
-      }, 100);
-
-      // "Send" the verification email
-      await sendVerificationEmail(email, code);
-
-      showToast('Verification code sent to ' + email, 'info');
+      setCurrentUser(user);
+      showApp();
+      showToast('Welcome to Pulse, ' + name.split(' ')[0] + '!', 'success');
     } catch (err) {
-      showToast(err.message, 'error');
+      btn.disabled = false; btn.textContent = 'Create account';
+      showToast(err.message || 'Could not create account', 'error');
     }
   });
 
