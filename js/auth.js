@@ -86,9 +86,10 @@ function markInviteUsed(code, email) {
   }
 }
 
-/** Registration is open to everyone — no invite code required. */
+/** Invite required for everyone except the very first account (the owner). */
 async function isInviteRequired() {
-  return false;
+  const users = await DB.getAll(STORES.users);
+  return users.length > 0;
 }
 
 function generateVerificationCode() {
@@ -448,7 +449,7 @@ function setupAuthForms() {
     }
   });
 
-  // Register form — creates account instantly, no email verification needed
+  // Register form — invite code required after the first (owner) account
   document.getElementById('register-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     const btn = e.target.querySelector('button[type="submit"]');
@@ -459,6 +460,7 @@ function setupAuthForms() {
       const email    = document.getElementById('register-email').value.trim();
       const password = document.getElementById('register-password').value;
       const passwordConfirm = document.getElementById('register-password-confirm').value;
+      const inviteCode = (document.getElementById('register-invite')?.value || '').trim().toUpperCase();
 
       if (!name) {
         showToast('Please enter your name', 'error');
@@ -477,6 +479,24 @@ function setupAuthForms() {
         return;
       }
 
+      // Validate invite code if required
+      const inviteRequired = await isInviteRequired();
+      if (inviteRequired) {
+        if (!inviteCode) {
+          showToast('An invite code is required to create an account', 'error');
+          document.getElementById('register-invite')?.focus();
+          btn.disabled = false; btn.textContent = 'Create account';
+          return;
+        }
+        const valid = await validateInviteCode(inviteCode);
+        if (!valid) {
+          showToast('Invalid invite code — please check and try again', 'error');
+          document.getElementById('register-invite')?.focus();
+          btn.disabled = false; btn.textContent = 'Create account';
+          return;
+        }
+      }
+
       // Check email isn't already taken
       const existing = await DB.getAll(STORES.users);
       if (existing.find(u => u.email === email)) {
@@ -485,7 +505,7 @@ function setupAuthForms() {
         return;
       }
 
-      // Create the account directly — no invite code, no email verification
+      // Create the account
       const passwordHash = await hashPassword(password);
       const user = {
         id: generateId(),
@@ -498,6 +518,9 @@ function setupAuthForms() {
       await DB.add(STORES.users, user);
       await _createDefaultUserData(user.id);
       await seedDemoData(user.id);
+
+      // Mark invite as used
+      if (inviteRequired && inviteCode) markInviteUsed(inviteCode, email);
 
       // Flag for onboarding tutorial
       localStorage.setItem('pulse_show_tutorial_' + user.id, '1');
