@@ -6,6 +6,17 @@ async function renderSettings() {
   const settings = await DB.get(STORES.settings, `settings_${currentUser.id}`);
   const pageContent = document.getElementById('page-content');
 
+  // Detect which API keys are managed by the shared deployment config
+  const _shared = window.PULSE_SHARED_CONFIG || {};
+  const _managed = (key) => !!(_shared[key]);
+  const _managedBadge = `
+    <div class="flex items-center gap-2 mt-1.5 px-3 py-2 rounded-lg bg-green-50 dark:bg-green-900/15 border border-green-200 dark:border-green-800">
+      <svg class="w-4 h-4 text-green-600 dark:text-green-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/>
+      </svg>
+      <span class="text-sm text-green-700 dark:text-green-300 font-medium">Managed by admin — ready to use</span>
+    </div>`;
+
   const _isDark = document.documentElement.classList.contains('dark');
   pageContent.innerHTML = `
     <div class="p-4 lg:p-8 max-w-3xl mx-auto animate-fade-in">
@@ -100,10 +111,9 @@ async function renderSettings() {
                 <p class="text-sm font-semibold">OpenAI API Key</p>
                 <p class="text-xs text-surface-400">GPT-4o-mini · <a href="https://platform.openai.com/api-keys" target="_blank" class="text-brand-600 hover:underline">platform.openai.com</a></p>
               </div>
-              ${settings?.openaiApiKey ? `<span class="text-xs px-2 py-0.5 rounded-full bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 font-medium flex-shrink-0">✓ Set</span>` : ''}
+              ${!_managed('openaiApiKey') && settings?.openaiApiKey ? `<span class="text-xs px-2 py-0.5 rounded-full bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 font-medium flex-shrink-0">✓ Set</span>` : ''}
             </div>
-            <input type="password" id="settings-openai-key" class="input-field" placeholder="sk-…"
-              value="${settings?.openaiApiKey || ''}" />
+            ${_managed('openaiApiKey') ? _managedBadge : `<input type="password" id="settings-openai-key" class="input-field" placeholder="sk-…" value="${settings?.openaiApiKey || ''}" />`}
           </div>
 
           <div class="py-4 last:pb-0">
@@ -112,10 +122,9 @@ async function renderSettings() {
                 <p class="text-sm font-semibold">Claude API Key <span class="text-xs font-normal text-surface-400 ml-1">alternative to OpenAI</span></p>
                 <p class="text-xs text-surface-400">Claude 3.5 Haiku · <a href="https://console.anthropic.com/settings/keys" target="_blank" class="text-brand-600 hover:underline">console.anthropic.com</a></p>
               </div>
-              ${settings?.claudeApiKey ? `<span class="text-xs px-2 py-0.5 rounded-full bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 font-medium flex-shrink-0">✓ Set</span>` : ''}
+              ${!_managed('claudeApiKey') && settings?.claudeApiKey ? `<span class="text-xs px-2 py-0.5 rounded-full bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 font-medium flex-shrink-0">✓ Set</span>` : ''}
             </div>
-            <input type="password" id="settings-claude-key" class="input-field" placeholder="sk-ant-…"
-              value="${settings?.claudeApiKey || ''}" />
+            ${_managed('claudeApiKey') ? _managedBadge : `<input type="password" id="settings-claude-key" class="input-field" placeholder="sk-ant-…" value="${settings?.claudeApiKey || ''}" />`}
           </div>
         </div>
       </div>
@@ -157,10 +166,9 @@ async function renderSettings() {
                 </p>
                 <p class="text-xs text-surface-400">Web research, call prep, memo market data, sourcing intelligence · <a href="https://tavily.com" target="_blank" class="text-brand-600 hover:underline">tavily.com</a> (1,000 free searches/mo)</p>
               </div>
-              ${settings?.tavilyApiKey ? `<span class="text-xs px-2 py-0.5 rounded-full bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 font-medium flex-shrink-0 ml-3">✓ Set</span>` : ''}
+              ${!_managed('tavilyApiKey') && settings?.tavilyApiKey ? `<span class="text-xs px-2 py-0.5 rounded-full bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 font-medium flex-shrink-0 ml-3">✓ Set</span>` : ''}
             </div>
-            <input type="password" id="settings-tavily-key" class="input-field" placeholder="tvly-…"
-              value="${escapeHtml(settings?.tavilyApiKey || '')}" />
+            ${_managed('tavilyApiKey') ? _managedBadge : `<input type="password" id="settings-tavily-key" class="input-field" placeholder="tvly-…" value="${escapeHtml(settings?.tavilyApiKey || '')}" />`}
           </div>
 
           <div class="py-4">
@@ -169,10 +177,9 @@ async function renderSettings() {
                 <p class="text-sm font-semibold">Firecrawl API Key <span class="text-xs font-normal text-surface-400 ml-1">optional</span></p>
                 <p class="text-xs text-surface-400">Better JS-rendered website reading for memos · <a href="https://firecrawl.dev" target="_blank" class="text-brand-600 hover:underline">firecrawl.dev</a> (500 free scrapes/mo) · falls back to Jina.ai</p>
               </div>
-              ${settings?.firecrawlApiKey ? `<span class="text-xs px-2 py-0.5 rounded-full bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 font-medium flex-shrink-0 ml-3">✓ Set</span>` : ''}
+              ${!_managed('firecrawlApiKey') && settings?.firecrawlApiKey ? `<span class="text-xs px-2 py-0.5 rounded-full bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 font-medium flex-shrink-0 ml-3">✓ Set</span>` : ''}
             </div>
-            <input type="password" id="settings-firecrawl-key" class="input-field" placeholder="fc-…"
-              value="${escapeHtml(settings?.firecrawlApiKey || '')}" />
+            ${_managed('firecrawlApiKey') ? _managedBadge : `<input type="password" id="settings-firecrawl-key" class="input-field" placeholder="fc-…" value="${escapeHtml(settings?.firecrawlApiKey || '')}" />`}
           </div>
 
           <div class="py-4">
@@ -181,10 +188,9 @@ async function renderSettings() {
                 <p class="text-sm font-semibold">RapidAPI Key <span class="text-xs font-normal text-surface-400 ml-1">LinkedIn enrichment</span></p>
                 <p class="text-xs text-surface-400">Auto-populates name, title, company, photo from LinkedIn · <a href="https://rapidapi.com/freshdata-freshdata-default/api/fresh-linkedin-profile-data" target="_blank" class="text-brand-600 hover:underline">Fresh LinkedIn Profile Data</a></p>
               </div>
-              ${settings?.rapidApiKey ? `<span class="text-xs px-2 py-0.5 rounded-full bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 font-medium flex-shrink-0 ml-3">✓ Set</span>` : ''}
+              ${!_managed('rapidApiKey') && settings?.rapidApiKey ? `<span class="text-xs px-2 py-0.5 rounded-full bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 font-medium flex-shrink-0 ml-3">✓ Set</span>` : ''}
             </div>
-            <input type="password" id="settings-rapidapi-key" class="input-field" placeholder="Paste your RapidAPI key…"
-              value="${settings?.rapidApiKey || ''}" />
+            ${_managed('rapidApiKey') ? _managedBadge : `<input type="password" id="settings-rapidapi-key" class="input-field" placeholder="Paste your RapidAPI key…" value="${settings?.rapidApiKey || ''}" />`}
           </div>
 
           <div class="py-4 last:pb-0">
@@ -193,10 +199,9 @@ async function renderSettings() {
                 <p class="text-sm font-semibold">Google Places API Key <span class="text-xs font-normal text-surface-400 ml-1">Company Scout</span></p>
                 <p class="text-xs text-surface-400">Powers map search in Company Scout · enable <strong>Places API (New)</strong> · <a href="https://console.cloud.google.com/apis/credentials" target="_blank" class="text-brand-600 hover:underline">console.cloud.google.com</a> · leave blank to use free OpenStreetMap</p>
               </div>
-              ${settings?.googlePlacesApiKey ? `<span class="text-xs px-2 py-0.5 rounded-full bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 font-medium flex-shrink-0 ml-3">✓ Set</span>` : ''}
+              ${!_managed('googlePlacesApiKey') && settings?.googlePlacesApiKey ? `<span class="text-xs px-2 py-0.5 rounded-full bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 font-medium flex-shrink-0 ml-3">✓ Set</span>` : ''}
             </div>
-            <input type="password" id="settings-google-places-key" class="input-field" placeholder="AIza…"
-              value="${settings?.googlePlacesApiKey || ''}" />
+            ${_managed('googlePlacesApiKey') ? _managedBadge : `<input type="password" id="settings-google-places-key" class="input-field" placeholder="AIza…" value="${settings?.googlePlacesApiKey || ''}" />`}
           </div>
 
         </div>
@@ -507,12 +512,14 @@ async function saveSettings() {
   settings.defaultFollowUpDays = parseInt(document.getElementById('settings-default-followup').value) || 14;
   settings.baseCurrency        = document.getElementById('settings-base-currency')?.value    || 'USD';
   settings.numberDisplayFormat = document.getElementById('settings-number-format')?.value    || 'auto';
-  settings.tavilyApiKey = document.getElementById('settings-tavily-key')?.value.trim() || '';
-  settings.firecrawlApiKey = document.getElementById('settings-firecrawl-key')?.value.trim() || '';
-  settings.openaiApiKey = document.getElementById('settings-openai-key').value.trim();
-  settings.claudeApiKey = document.getElementById('settings-claude-key').value.trim();
-  settings.googlePlacesApiKey = document.getElementById('settings-google-places-key').value.trim();
-  settings.rapidApiKey        = document.getElementById('settings-rapidapi-key').value.trim();
+  // Only save API keys that are not managed by shared config (field exists in DOM)
+  const _sf = id => document.getElementById(id);
+  if (_sf('settings-openai-key'))        settings.openaiApiKey       = _sf('settings-openai-key').value.trim();
+  if (_sf('settings-claude-key'))        settings.claudeApiKey       = _sf('settings-claude-key').value.trim();
+  if (_sf('settings-tavily-key'))        settings.tavilyApiKey       = _sf('settings-tavily-key').value.trim();
+  if (_sf('settings-firecrawl-key'))     settings.firecrawlApiKey    = _sf('settings-firecrawl-key').value.trim();
+  if (_sf('settings-rapidapi-key'))      settings.rapidApiKey        = _sf('settings-rapidapi-key').value.trim();
+  if (_sf('settings-google-places-key')) settings.googlePlacesApiKey = _sf('settings-google-places-key').value.trim();
   settings.linkedInProfileUrl = document.getElementById('settings-linkedin-url').value.trim();
   settings.linkedInConnected = !!settings.linkedInProfileUrl;
 

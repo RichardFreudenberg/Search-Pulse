@@ -625,6 +625,9 @@ async function _createDefaultUserData(userId) {
   ];
   for (const tag of defaultTags) await DB.add(STORES.tags, { ...tag, userId });
 
+  // Inherit shared API keys from deployment config (if set by admin)
+  const _sharedCfg = window.PULSE_SHARED_CONFIG || {};
+
   await DB.add(STORES.settings, {
     id: `settings_${userId}`,
     userId,
@@ -636,7 +639,12 @@ async function _createDefaultUserData(userId) {
       'New intro': 7, 'Met once': 14, 'Active relationship': 30,
       'Warm relationship': 60, 'Needs follow-up': 3,
     },
-    openaiApiKey: '', claudeApiKey: '', rapidApiKey: '',
+    openaiApiKey:       _sharedCfg.openaiApiKey       || '',
+    claudeApiKey:       _sharedCfg.claudeApiKey       || '',
+    tavilyApiKey:       _sharedCfg.tavilyApiKey       || '',
+    firecrawlApiKey:    _sharedCfg.firecrawlApiKey    || '',
+    rapidApiKey:        _sharedCfg.rapidApiKey        || '',
+    googlePlacesApiKey: _sharedCfg.googlePlacesApiKey || '',
     linkedInConnected: false, linkedInProfileUrl: '',
     newsRegions: ['USA', 'Europe'],
   });
