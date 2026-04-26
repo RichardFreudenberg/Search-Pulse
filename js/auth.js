@@ -161,6 +161,41 @@ function logout() {
   document.getElementById('app-shell').classList.add('hidden');
 }
 
+/** One-click guest login — no account or password required. */
+async function loginAsGuest() {
+  const GUEST_ID = 'pulse-guest-demo';
+  const btn = document.getElementById('guest-login-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Loading demo…'; }
+
+  try {
+    // Reuse an existing guest session or create one fresh
+    let guest = await DB.get(STORES.users, GUEST_ID).catch(() => null);
+
+    if (!guest) {
+      guest = {
+        id:            GUEST_ID,
+        name:          'Demo User',
+        email:         'guest@pulse-demo.com',
+        passwordHash:  '',
+        emailVerified: true,
+        isGuest:       true,
+        createdAt:     new Date().toISOString(),
+      };
+      try { await DB.add(STORES.users, guest); } catch (_) {}
+      await _createDefaultUserData(GUEST_ID);
+      await seedDemoData(GUEST_ID);
+      localStorage.setItem('pulse_show_tutorial_' + GUEST_ID, '1');
+    }
+
+    setCurrentUser(guest);
+    showApp();
+    showToast('Welcome! You\'re exploring Pulse as a guest.', 'success');
+  } catch (err) {
+    if (btn) { btn.disabled = false; btn.textContent = '✦ Try Demo — no account needed'; }
+    showToast('Could not start demo: ' + (err.message || 'Unknown error'), 'error');
+  }
+}
+
 function _showAuthPanel(name) {
   ['login', 'register', 'verify', 'reset', 'new-password', 'recover'].forEach(s =>
     document.getElementById(`auth-${s}`).classList.toggle('hidden', s !== name)
