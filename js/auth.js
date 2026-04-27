@@ -1,26 +1,15 @@
 /* ============================================
-   Pulse — Authentication
+   Pulse — Authentication (Firebase Auth)
    ============================================ */
 
 let currentUser = null;
-let pendingVerification = null; // { user, code, email }
-let pendingPasswordReset = null; // { email, code, expiresAt }
 
-async function hashPassword(password) {
-  const encoder = new TextEncoder();
-  const data = encoder.encode(password);
-  const hash = await crypto.subtle.digest('SHA-256', data);
-  return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, '0')).join('');
-}
-
-// ─── Pilot Invite System ──────────────────────────────────────────────────────
+// ─── Invite System ────────────────────────────────────────────────────────────
 // Invite codes are self-validating: PULSE-{8 hex random}-{4 hex checksum}
-// The checksum = first 4 hex chars of SHA-256(SALT + random).
-// No server or DB lookup needed — any valid code can be verified offline.
-// The first account in an empty DB is always the owner (no invite needed).
+// No server or DB lookup needed — valid codes verify offline.
 
-const _INVITE_SALT = 'PulsePilot2025#SearchFund';
-const _INVITE_STORE_KEY = 'pulse_pilot_invites'; // localStorage key for generated codes
+const _INVITE_SALT      = 'PulsePilot2025#SearchFund';
+const _INVITE_STORE_KEY = 'pulse_pilot_invites';
 
 async function _inviteChecksum(random8) {
   const data = new TextEncoder().encode(_INVITE_SALT + random8);
@@ -30,158 +19,139 @@ async function _inviteChecksum(random8) {
     .join('').slice(0, 4).toUpperCase();
 }
 
-/** Generate a new cryptographically-signed invite code. */
 async function generateInviteCode() {
-  const bytes = crypto.getRandomValues(new Uint8Array(4));
+  const bytes  = crypto.getRandomValues(new Uint8Array(4));
   const random = Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('').toUpperCase();
-  const cs = await _inviteChecksum(random);
+  const cs     = await _inviteChecksum(random);
   return `PULSE-${random}-${cs}`;
 }
 
-/**
- * Validate an invite code. Returns true if the checksum is correct.
- * Does NOT check if the code has been used (stateless by design for pilot).
- */
 async function validateInviteCode(code) {
   if (!code || typeof code !== 'string') return false;
   const clean = code.trim().toUpperCase().replace(/\s+/g, '');
   const m = clean.match(/^PULSE-([A-F0-9]{8})-([A-F0-9]{4})$/);
   if (!m) return false;
-  const expected = await _inviteChecksum(m[1]);
-  return expected === m[2];
+  return (await _inviteChecksum(m[1])) === m[2];
 }
 
-/** Load all saved invites from localStorage. */
 function loadSavedInvites() {
   try { return JSON.parse(localStorage.getItem(_INVITE_STORE_KEY) || '[]'); }
   catch { return []; }
 }
-
-/** Persist invites to localStorage. */
 function saveInvites(list) {
   localStorage.setItem(_INVITE_STORE_KEY, JSON.stringify(list));
 }
-
-/**
- * Generate + store a new invite and return the record.
- * @param {string} note  Optional label (e.g. "for John Smith")
- */
 async function createNewInvite(note = '') {
-  const code = await generateInviteCode();
+  const code   = await generateInviteCode();
   const record = { code, note, createdAt: new Date().toISOString(), usedByEmail: null, usedAt: null };
-  const list = loadSavedInvites();
-  list.unshift(record); // newest first
+  const list   = loadSavedInvites();
+  list.unshift(record);
   saveInvites(list);
   return record;
 }
-
-/** Mark an invite as used (called after successful registration). */
 function markInviteUsed(code, email) {
   const list = loadSavedInvites();
-  const rec = list.find(i => i.code.toUpperCase() === code.toUpperCase());
+  const rec  = list.find(i => i.code.toUpperCase() === code.toUpperCase());
   if (rec && !rec.usedAt) {
-    rec.usedAt = new Date().toISOString();
+    rec.usedAt      = new Date().toISOString();
     rec.usedByEmail = email;
     saveInvites(list);
   }
 }
 
-/** Invite required for everyone except the very first account (the owner). */
+// Invite required for all except the first (owner) account.
+// We track this with a Firestore /config/registration document.
 async function isInviteRequired() {
-  const users = await DB.getAll(STORES.users);
-  return users.length > 0;
-}
-
-function generateVerificationCode() {
-  return Math.floor(100000 + Math.random() * 900000).toString();
-}
-
-async function register(name, email, password) {
-  const existing = await DB.getAll(STORES.users);
-  if (existing.find(u => u.email === email)) {
-    throw new Error('An account with this email already exists');
+  try {
+    const doc = await firebase.firestore()
+      .collection('config').doc('registration').get();
+    return doc.exists && doc.data().hasOwner === true;
+  } catch {
+    return false;
   }
+}
 
-  const passwordHash = await hashPassword(password);
-  const user = {
-    id: generateId(),
-    name,
-    email,
-    passwordHash,
-    emailVerified: false,
-    createdAt: new Date().toISOString(),
+// ─── Firebase user → app user shape ──────────────────────────────────────────
+
+function _fbUserToAppUser(fbUser) {
+  if (!fbUser) return null;
+  return {
+    id:            fbUser.uid,
+    name:          fbUser.displayName || fbUser.email.split('@')[0],
+    email:         fbUser.email,
+    emailVerified: fbUser.emailVerified,
   };
-
-  await DB.add(STORES.users, user);
-  await _createDefaultUserData(user.id);
-  return user;
 }
 
-async function login(email, password) {
-  const users = await DB.getAll(STORES.users);
-  const user = users.find(u => u.email === email);
-  if (!user) throw new Error('No account found with this email');
-
-  const passwordHash = await hashPassword(password);
-  if (user.passwordHash !== passwordHash) throw new Error('Incorrect password');
-
-  return user;
-}
+// ─── Session ──────────────────────────────────────────────────────────────────
 
 function setCurrentUser(user) {
   currentUser = user;
-  localStorage.setItem('pulse_user_id', user.id);
-  document.getElementById('sidebar-user-name').textContent = user.name;
-  document.getElementById('user-avatar-initial').textContent = user.name.charAt(0).toUpperCase();
+  const nameEl   = document.getElementById('sidebar-user-name');
+  const avatarEl = document.getElementById('user-avatar-initial');
+  if (nameEl)   nameEl.textContent   = user.name;
+  if (avatarEl) avatarEl.textContent = user.name.charAt(0).toUpperCase();
 }
 
+// restoreSession is no longer used directly — Firebase's onAuthStateChanged
+// (wired up in initApp) handles session restoration automatically.
 async function restoreSession() {
-  const userId = localStorage.getItem('pulse_user_id');
-  if (!userId) return null;
+  return new Promise(resolve => {
+    const unsub = firebase.auth().onAuthStateChanged(fbUser => {
+      unsub();
+      if (fbUser) {
+        const appUser = _fbUserToAppUser(fbUser);
+        setCurrentUser(appUser);
+        _applyUserTheme(appUser.id);
+        resolve(appUser);
+      } else {
+        resolve(null);
+      }
+    });
+  });
+}
 
-  const user = await DB.get(STORES.users, userId);
-  if (user) {
-    setCurrentUser(user);
-    const settings = await DB.get(STORES.settings, `settings_${user.id}`);
-    if (settings && settings.theme) {
-      const html = document.documentElement;
-      html.classList.remove('dark', 'light');
-      html.classList.add(settings.theme);
+async function _applyUserTheme(userId) {
+  try {
+    const settings = await DB.get(STORES.settings, `settings_${userId}`);
+    if (settings?.theme) {
+      document.documentElement.classList.remove('dark', 'light');
+      document.documentElement.classList.add(settings.theme);
     }
-  }
-  return user;
+  } catch (_) {}
 }
 
 function logout() {
+  firebase.auth().signOut();
   currentUser = null;
-  localStorage.removeItem('pulse_user_id');
   document.getElementById('auth-screen').classList.remove('hidden');
   document.getElementById('app-shell').classList.add('hidden');
+  showAuthLogin();
 }
+
+// ─── Auth panels ─────────────────────────────────────────────────────────────
 
 function _showAuthPanel(name) {
   ['login', 'register', 'verify', 'reset', 'new-password', 'recover'].forEach(s =>
-    document.getElementById(`auth-${s}`).classList.toggle('hidden', s !== name)
+    document.getElementById(`auth-${s}`)?.classList.toggle('hidden', s !== name)
   );
 }
 function showAuthLogin()       { _showAuthPanel('login'); }
 function showAuthVerify()      { _showAuthPanel('verify'); }
-function showAuthReset()       {
-  _showAuthPanel('reset');
-  const h = document.getElementById('new-password-hint');
-  if (h) h.innerHTML = '';
-  const c = document.getElementById('new-password-code');
-  if (c) c.value = '';
-}
 function showAuthNewPassword() { _showAuthPanel('new-password'); }
+function showAuthReset() {
+  _showAuthPanel('reset');
+  const resetStatus = document.getElementById('reset-status');
+  if (resetStatus) { resetStatus.innerHTML = ''; resetStatus.classList.add('hidden'); }
+  const btn = document.getElementById('reset-submit-btn');
+  if (btn) { btn.disabled = false; btn.textContent = 'Send reset link'; }
+}
 
 async function showAuthRegister() {
   _showAuthPanel('register');
-  // Show or hide the invite field depending on whether accounts already exist
   const required = await isInviteRequired();
   const wrap = document.getElementById('invite-code-wrap');
   if (wrap) wrap.classList.toggle('hidden', !required);
-  // Pre-fill from URL param if present
   const urlInvite = new URLSearchParams(window.location.search).get('invite');
   if (urlInvite) {
     const field = document.getElementById('register-invite');
@@ -189,511 +159,217 @@ async function showAuthRegister() {
   }
 }
 
+// ─── Account recovery (legacy — kept as stub) ─────────────────────────────────
+
 async function startAccountRecovery() {
   _showAuthPanel('recover');
   const statusEl  = document.getElementById('recover-status');
   const resultsEl = document.getElementById('recover-results');
-  resultsEl.innerHTML = '';
-  statusEl.textContent = 'Scanning all local databases for your account…';
-
-  let found;
-  try {
-    found = await scanAllDBsForAccounts();
-  } catch (err) {
-    statusEl.textContent = 'Scan failed: ' + err.message;
-    return;
-  }
-
-  if (found.length === 0) {
-    statusEl.textContent = 'No accounts found in any other local database. Your data may have been cleared by the browser, or was stored under a different browser profile.';
-    return;
-  }
-
-  statusEl.textContent = `Found ${found.reduce((n, f) => n + f.users.length, 0)} account(s) in ${found.length} database(s). Click "Restore" to import into Pulse.`;
-
-  found.forEach(({ dbName, data, users }) => {
-    users.forEach(user => {
-      const card = document.createElement('div');
-      card.className = 'flex items-center justify-between bg-surface-50 dark:bg-surface-800 border border-surface-200 dark:border-surface-700 rounded p-3';
-      card.innerHTML = `
-        <div>
-          <p class="text-sm font-medium">${user.name || '(no name)'}</p>
-          <p class="text-xs text-surface-500">${user.email} &mdash; <span class="font-mono text-xs">${dbName}</span></p>
-        </div>
-        <button class="btn-primary text-xs px-3 py-1.5">Restore</button>
-      `;
-      card.querySelector('button').addEventListener('click', async () => {
-        card.querySelector('button').textContent = 'Importing…';
-        card.querySelector('button').disabled = true;
-        try {
-          await importLegacyData(data);
-          indexedDB.deleteDatabase(dbName);
-          showToast('Account restored — sign in now', 'success');
-          // Pre-fill email on login screen
-          showAuthLogin();
-          const emailField = document.getElementById('login-email');
-          if (emailField) emailField.value = user.email;
-          document.getElementById('login-password').focus();
-        } catch (err) {
-          showToast('Restore failed: ' + err.message, 'error');
-          card.querySelector('button').textContent = 'Retry';
-          card.querySelector('button').disabled = false;
-        }
-      });
-      resultsEl.appendChild(card);
-    });
-  });
+  if (resultsEl) resultsEl.innerHTML = '';
+  if (statusEl) statusEl.textContent =
+    'Account recovery is not available in the cloud version. ' +
+    'Use "Forgot password?" on the sign-in page to reset your password via email.';
 }
 
-// Password visibility toggle (press-and-hold)
+// ─── Password visibility toggle ───────────────────────────────────────────────
+
 function showPassword(inputId) {
   const input = document.getElementById(inputId);
   if (input) input.type = 'text';
   const prefix = inputId.replace('-password', '');
-  const eyeOff = document.getElementById(`${prefix}-eye-off`);
-  const eyeOn = document.getElementById(`${prefix}-eye-on`);
-  if (eyeOff) eyeOff.classList.add('hidden');
-  if (eyeOn) eyeOn.classList.remove('hidden');
+  document.getElementById(`${prefix}-eye-off`)?.classList.add('hidden');
+  document.getElementById(`${prefix}-eye-on`)?.classList.remove('hidden');
 }
-
 function hidePassword(inputId) {
   const input = document.getElementById(inputId);
   if (input) input.type = 'password';
   const prefix = inputId.replace('-password', '');
-  const eyeOff = document.getElementById(`${prefix}-eye-off`);
-  const eyeOn = document.getElementById(`${prefix}-eye-on`);
-  if (eyeOff) eyeOff.classList.remove('hidden');
-  if (eyeOn) eyeOn.classList.add('hidden');
+  document.getElementById(`${prefix}-eye-off`)?.classList.remove('hidden');
+  document.getElementById(`${prefix}-eye-on`)?.classList.add('hidden');
 }
 
-// OTP input behavior
+// ─── OTP inputs (kept for verify panel) ──────────────────────────────────────
+
 function setupOtpInputs() {
   const inputs = document.querySelectorAll('.otp-input');
   inputs.forEach((input, i) => {
     input.addEventListener('input', (e) => {
       const val = e.target.value.replace(/[^0-9]/g, '');
       e.target.value = val;
-      if (val && i < inputs.length - 1) {
-        inputs[i + 1].focus();
-      }
+      if (val && i < inputs.length - 1) inputs[i + 1].focus();
     });
     input.addEventListener('keydown', (e) => {
-      if (e.key === 'Backspace' && !e.target.value && i > 0) {
-        inputs[i - 1].focus();
-      }
+      if (e.key === 'Backspace' && !e.target.value && i > 0) inputs[i - 1].focus();
     });
     input.addEventListener('paste', (e) => {
       e.preventDefault();
-      const pastedData = (e.clipboardData || window.clipboardData).getData('text').replace(/[^0-9]/g, '');
-      for (let j = 0; j < Math.min(pastedData.length, 6); j++) {
-        const idx = j < 3 ? j : j; // skip the dash separator
-        if (inputs[idx]) inputs[idx].value = pastedData[j];
+      const pasted = (e.clipboardData || window.clipboardData).getData('text').replace(/[^0-9]/g, '');
+      for (let j = 0; j < Math.min(pasted.length, 6); j++) {
+        if (inputs[j]) inputs[j].value = pasted[j];
       }
-      if (pastedData.length >= 6) {
-        inputs[inputs.length - 1].focus();
-      }
+      if (pasted.length >= 6) inputs[inputs.length - 1].focus();
     });
   });
 }
-
 function getOtpValue() {
-  const inputs = document.querySelectorAll('.otp-input');
-  return Array.from(inputs).map(i => i.value).join('');
+  return Array.from(document.querySelectorAll('.otp-input')).map(i => i.value).join('');
 }
 
-async function sendPasswordResetEmail(email, code) {
-  console.log(`[Pulse] Password reset code for ${email}: ${code}`);
+// ─── Default user data ────────────────────────────────────────────────────────
 
-  // This hint lives on the new-password panel — it's already rendered (just hidden),
-  // so we can populate it now and it will be visible once the panel switches.
-  const hintEl = document.getElementById('new-password-hint');
-
-  try {
-    const ejsRaw = localStorage.getItem('pulse_emailjs_config');
-    const ejsCfg = ejsRaw ? JSON.parse(ejsRaw) : null;
-
-    if (ejsCfg && ejsCfg.publicKey && ejsCfg.serviceId && ejsCfg.templateId && window.emailjs) {
-      emailjs.init({ publicKey: ejsCfg.publicKey });
-      await emailjs.send(ejsCfg.serviceId, ejsCfg.templateId, {
-        to_email: email,
-        to_name: '',
-        code: code,
-        app_name: 'Pulse CRM',
-        subject: 'Your Pulse CRM password reset code',
-      });
-      if (hintEl) {
-        hintEl.innerHTML = `
-          <div style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:10px 12px;display:flex;align-items:center;gap:8px;">
-            <svg style="width:16px;height:16px;color:#16a34a;flex-shrink:0;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
-            <span style="font-size:13px;color:#15803d;font-weight:500;">Reset code sent to ${escapeHtml(email)}</span>
-          </div>`;
-      }
-      return;
-    }
-  } catch (err) {
-    console.warn('[Pulse] EmailJS reset email failed:', err);
-  }
-
-  // No email service — show the code directly on the panel and auto-fill the input.
-  if (hintEl) {
-    hintEl.innerHTML = `
-      <div style="background:#eff6ff;border:1px solid #93c5fd;border-radius:8px;padding:12px;">
-        <p style="font-size:12px;color:#1d4ed8;margin-bottom:8px;font-weight:600;">Your reset code (copy it below):</p>
-        <div style="display:flex;align-items:center;gap:10px;">
-          <span id="reset-code-display" style="font-family:monospace;font-size:22px;letter-spacing:0.3em;background:#fff;border:1px solid #bfdbfe;padding:6px 14px;border-radius:6px;color:#1e3a8a;">${code}</span>
-          <button type="button" onclick="
-            document.getElementById('new-password-code').value='${code}';
-            this.textContent='✓ Filled';this.style.color='#16a34a';"
-            style="font-size:12px;color:#2563eb;background:none;border:none;cursor:pointer;text-decoration:underline;white-space:nowrap;">
-            Auto-fill →
-          </button>
-        </div>
-        <p style="font-size:11px;color:#6b7280;margin-top:8px;">This code expires in 15 minutes. Enter it in the field below.</p>
-      </div>`;
-  }
-
-  // Also auto-fill the code input if it's already in the DOM
-  const codeInput = document.getElementById('new-password-code');
-  if (codeInput) codeInput.value = code;
-}
-
-async function sendVerificationEmail(email, code) {
-  console.log(`[Pulse] Verification code for ${email}: ${code}`);
-
-  const hint = document.getElementById('verify-code-hint');
-
-  // Try EmailJS if configured
-  try {
-    const ejsRaw = localStorage.getItem('pulse_emailjs_config');
-    const ejsCfg = ejsRaw ? JSON.parse(ejsRaw) : null;
-
-    if (ejsCfg && ejsCfg.publicKey && ejsCfg.serviceId && ejsCfg.templateId && window.emailjs) {
-      emailjs.init({ publicKey: ejsCfg.publicKey });
-      await emailjs.send(ejsCfg.serviceId, ejsCfg.templateId, {
-        to_email: email,
-        to_name: pendingVerification?.name || '',
-        code: code,
-        app_name: 'Pulse CRM',
-      });
-      // Success — hide code, show confirmation
-      if (hint) {
-        hint.innerHTML = `<span class="inline-flex items-center gap-1.5 text-green-600 dark:text-green-400 text-sm font-medium"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> Verification email sent to ${email}</span>`;
-      }
-      return;
-    }
-  } catch (err) {
-    console.warn('[Pulse] EmailJS send failed:', err);
-    // Fall through to show code hint below
-  }
-
-  // Fallback: show code in UI (local / no EmailJS configured)
-  if (hint) {
-    hint.innerHTML = `
-      <span class="bg-surface-100 dark:bg-surface-800 px-3 py-1.5 rounded-lg font-mono text-base tracking-widest">${code}</span>
-      <br><span class="text-surface-400 text-xs mt-1 inline-block">
-        No email service configured — code shown here.
-        <button onclick="navigate('settings')" class="text-brand-600 hover:underline ml-1">Configure EmailJS in Settings →</button>
-      </span>`;
-  }
-}
-
-function resendVerificationCode() {
-  if (!pendingVerification) return;
-  pendingVerification.code = generateVerificationCode();
-  sendVerificationEmail(pendingVerification.email, pendingVerification.code);
-  showToast('New verification code sent', 'info');
-}
-
-async function resetPassword(email, newPassword) {
-  const users = await DB.getAll(STORES.users);
-  const user = users.find(u => u.email === email);
-  if (!user) throw new Error('No account found with this email');
-
-  const passwordHash = await hashPassword(newPassword);
-  user.passwordHash = passwordHash;
-  await DB.put(STORES.users, user);
-  return user;
-}
-
-function setupAuthForms() {
-  // Login form
-  document.getElementById('login-form').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const btn = e.target.querySelector('button[type="submit"]');
-    const origLabel = btn.textContent;
-    btn.textContent = 'Signing in…';
-    btn.disabled = true;
-    try {
-      const email = document.getElementById('login-email').value;
-      const password = document.getElementById('login-password').value;
-      const user = await login(email, password);
-      setCurrentUser(user);
-      showApp();
-      showToast('Welcome back, ' + user.name.split(' ')[0], 'success');
-    } catch (err) {
-      btn.textContent = origLabel;
-      btn.disabled = false;
-      showToast(err.message, 'error');
-
-      // If the account wasn't found, show the recovery button and auto-run the scan.
-      if (err.message && err.message.toLowerCase().includes('no account')) {
-        const recoverBtn = document.getElementById('recover-btn');
-        if (recoverBtn) {
-          recoverBtn.style.display = 'block'; // was display:none — make it visible
-          const labelEl = document.getElementById('recover-btn-label');
-          if (labelEl) labelEl.textContent = 'Account not found — click to scan & recover your data';
-        }
-        // Auto-run the scan after a brief delay
-        setTimeout(() => startAccountRecovery(), 800);
-      }
-    }
-  });
-
-  // Register form — invite code required after the first (owner) account
-  document.getElementById('register-form').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const btn = e.target.querySelector('button[type="submit"]');
-    btn.disabled = true;
-    btn.textContent = 'Creating account…';
-    try {
-      const name     = document.getElementById('register-name').value.trim();
-      const email    = document.getElementById('register-email').value.trim();
-      const password = document.getElementById('register-password').value;
-      const passwordConfirm = document.getElementById('register-password-confirm').value;
-      const inviteCode = (document.getElementById('register-invite')?.value || '').trim().toUpperCase();
-
-      if (!name) {
-        showToast('Please enter your name', 'error');
-        btn.disabled = false; btn.textContent = 'Create account';
-        return;
-      }
-      if (password !== passwordConfirm) {
-        showToast('Passwords do not match', 'error');
-        document.getElementById('register-password-confirm').focus();
-        btn.disabled = false; btn.textContent = 'Create account';
-        return;
-      }
-      if (password.length < 8) {
-        showToast('Password must be at least 8 characters', 'error');
-        btn.disabled = false; btn.textContent = 'Create account';
-        return;
-      }
-
-      // Validate invite code if required
-      const inviteRequired = await isInviteRequired();
-      if (inviteRequired) {
-        if (!inviteCode) {
-          showToast('An invite code is required to create an account', 'error');
-          document.getElementById('register-invite')?.focus();
-          btn.disabled = false; btn.textContent = 'Create account';
-          return;
-        }
-        const valid = await validateInviteCode(inviteCode);
-        if (!valid) {
-          showToast('Invalid invite code — please check and try again', 'error');
-          document.getElementById('register-invite')?.focus();
-          btn.disabled = false; btn.textContent = 'Create account';
-          return;
-        }
-      }
-
-      // Check email isn't already taken
-      const existing = await DB.getAll(STORES.users);
-      if (existing.find(u => u.email === email)) {
-        showToast('An account with this email already exists', 'error');
-        btn.disabled = false; btn.textContent = 'Create account';
-        return;
-      }
-
-      // Create the account
-      const passwordHash = await hashPassword(password);
-      const user = {
-        id: generateId(),
-        name,
-        email,
-        passwordHash,
-        emailVerified: true,
-        createdAt: new Date().toISOString(),
-      };
-      await DB.add(STORES.users, user);
-      await _createDefaultUserData(user.id);
-      await seedDemoData(user.id);
-
-      // Mark invite as used
-      if (inviteRequired && inviteCode) markInviteUsed(inviteCode, email);
-
-      // Flag for onboarding tutorial
-      localStorage.setItem('pulse_show_tutorial_' + user.id, '1');
-
-      setCurrentUser(user);
-      showApp();
-      showToast('Welcome to Pulse, ' + name.split(' ')[0] + '!', 'success');
-    } catch (err) {
-      btn.disabled = false; btn.textContent = 'Create account';
-      showToast(err.message || 'Could not create account', 'error');
-    }
-  });
-
-  // Reset password — Step 1: send code to email
-  document.getElementById('reset-form').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const btn = e.target.querySelector('button[type="submit"]');
-    const origLabel = btn.textContent;
-    btn.textContent = 'Sending…';
-    btn.disabled = true;
-    try {
-      const email = document.getElementById('reset-email').value.trim();
-      const users = await DB.getAll(STORES.users);
-      if (!users.find(u => u.email === email)) throw new Error('No account found with this email');
-
-      const code = generateVerificationCode();
-      pendingPasswordReset = { email, code, expiresAt: Date.now() + 15 * 60 * 1000 };
-
-      await sendPasswordResetEmail(email, code);
-
-      showAuthNewPassword();
-      const targetEl = document.getElementById('reset-target-email');
-      if (targetEl) targetEl.textContent = `Code sent to ${email}`;
-      document.getElementById('new-password-code')?.focus();
-    } catch (err) {
-      showToast(err.message, 'error');
-      btn.textContent = origLabel;
-      btn.disabled = false;
-    }
-  });
-
-  // Reset password — Step 2: verify code + set new password
-  document.getElementById('new-password-form').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const btn = e.target.querySelector('button[type="submit"]');
-    const origLabel = btn.textContent;
-    btn.textContent = 'Saving…';
-    btn.disabled = true;
-    try {
-      if (!pendingPasswordReset) throw new Error('No reset in progress — please request a new code');
-      if (Date.now() > pendingPasswordReset.expiresAt) {
-        pendingPasswordReset = null;
-        throw new Error('Reset code expired — please request a new one');
-      }
-
-      const enteredCode = document.getElementById('new-password-code').value.trim();
-      if (enteredCode !== pendingPasswordReset.code) throw new Error('Incorrect reset code');
-
-      const password = document.getElementById('new-password-password').value;
-      const passwordConfirm = document.getElementById('new-password-confirm').value;
-      if (password !== passwordConfirm) throw new Error('Passwords do not match');
-      if (password.length < 8) throw new Error('Password must be at least 8 characters');
-
-      await resetPassword(pendingPasswordReset.email, password);
-      const email = pendingPasswordReset.email;
-      pendingPasswordReset = null;
-
-      showToast('Password updated — please sign in', 'success');
-      document.getElementById('login-email').value = email;
-      showAuthLogin();
-    } catch (err) {
-      showToast(err.message, 'error');
-      btn.textContent = origLabel;
-      btn.disabled = false;
-    }
-  });
-
-  // Verification form
-  document.getElementById('verify-form').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    if (!pendingVerification) {
-      showToast('No pending verification', 'error');
-      return;
-    }
-
-    const enteredCode = getOtpValue();
-    if (enteredCode.length !== 6) {
-      showToast('Please enter all 6 digits', 'warning');
-      return;
-    }
-
-    if (enteredCode !== pendingVerification.code) {
-      showToast('Invalid verification code', 'error');
-      // Shake the inputs
-      document.getElementById('otp-container').style.animation = 'none';
-      setTimeout(() => {
-        document.getElementById('otp-container').style.animation = 'shake 0.5s ease';
-      }, 10);
-      return;
-    }
-
-    // Code is correct — create the account
-    try {
-      const user = await register(
-        pendingVerification.name,
-        pendingVerification.email,
-        pendingVerification.password
-      );
-      user.emailVerified = true;
-      await DB.put(STORES.users, user);
-
-      // Record invite code as used (tracked in owner's localStorage for pilot management)
-      if (pendingVerification.inviteCode) {
-        markInviteUsed(pendingVerification.inviteCode, pendingVerification.email);
-      }
-
-      setCurrentUser(user);
-      await seedDemoData(user.id);
-      pendingVerification = null;
-
-      // Flag this user for the onboarding tutorial (persists across page refresh)
-      localStorage.setItem('pulse_show_tutorial_' + user.id, '1');
-
-      showApp();
-      showToast('Welcome to Pulse, ' + user.name.split(' ')[0] + '!', 'success');
-    } catch (err) {
-      showToast(err.message, 'error');
-    }
-  });
-}
-
-/**
- * Create default tags + settings for a brand-new user.
- */
 async function _createDefaultUserData(userId) {
   const defaultTags = [
-    { name: 'Search Fund', color: 'blue' },
-    { name: 'PE/VC', color: 'purple' },
-    { name: 'Operator', color: 'green' },
-    { name: 'Advisor', color: 'yellow' },
-    { name: 'Banker', color: 'teal' },
-    { name: 'Broker', color: 'gray' },
-    { name: 'LP', color: 'red' },
-    { name: 'CEO', color: 'blue' },
-    { name: 'Board Member', color: 'purple' },
+    { name: 'Search Fund', color: 'blue'   },
+    { name: 'PE/VC',       color: 'purple' },
+    { name: 'Operator',    color: 'green'  },
+    { name: 'Advisor',     color: 'yellow' },
+    { name: 'Banker',      color: 'teal'   },
+    { name: 'Broker',      color: 'gray'   },
+    { name: 'LP',          color: 'red'    },
+    { name: 'CEO',         color: 'blue'   },
+    { name: 'Board Member',color: 'purple' },
     { name: 'Industry Expert', color: 'green' },
   ];
-  for (const tag of defaultTags) await DB.add(STORES.tags, { ...tag, userId });
+  for (const tag of defaultTags) {
+    await DB.add(STORES.tags, { ...tag, userId, id: generateId() });
+  }
 
-  // Inherit shared API keys from deployment config (if set by admin)
   const _sharedCfg = window.PULSE_SHARED_CONFIG || {};
-
   await DB.add(STORES.settings, {
-    id: `settings_${userId}`,
+    id:                  `settings_${userId}`,
     userId,
-    theme: 'light',
-    emailReminders: false,
-    reminderEmail: '',
+    theme:               'light',
+    emailReminders:      false,
+    reminderEmail:       '',
     defaultFollowUpDays: 14,
     stageCadence: {
       'New intro': 7, 'Met once': 14, 'Active relationship': 30,
       'Warm relationship': 60, 'Needs follow-up': 3,
     },
-    openaiApiKey:       _sharedCfg.openaiApiKey       || '',
-    claudeApiKey:       _sharedCfg.claudeApiKey       || '',
-    tavilyApiKey:       _sharedCfg.tavilyApiKey       || '',
-    firecrawlApiKey:    _sharedCfg.firecrawlApiKey    || '',
-    rapidApiKey:        _sharedCfg.rapidApiKey        || '',
-    googlePlacesApiKey: _sharedCfg.googlePlacesApiKey || '',
-    linkedInConnected: false, linkedInProfileUrl: '',
-    newsRegions: ['USA', 'Europe'],
+    openaiApiKey:        _sharedCfg.openaiApiKey       || '',
+    claudeApiKey:        _sharedCfg.claudeApiKey       || '',
+    tavilyApiKey:        _sharedCfg.tavilyApiKey       || '',
+    firecrawlApiKey:     _sharedCfg.firecrawlApiKey    || '',
+    rapidApiKey:         _sharedCfg.rapidApiKey        || '',
+    googlePlacesApiKey:  _sharedCfg.googlePlacesApiKey || '',
+    linkedInConnected:   false,
+    linkedInProfileUrl:  '',
+    newsRegions:         ['USA', 'Europe'],
   });
 }
+
+// ─── Auth form wiring ─────────────────────────────────────────────────────────
+
+function setupAuthForms() {
+
+  // ── Login ──────────────────────────────────────────────────────────────────
+  document.getElementById('login-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const btn = e.target.querySelector('button[type="submit"]');
+    btn.disabled = true; btn.textContent = 'Signing in…';
+    try {
+      const email    = document.getElementById('login-email').value.trim();
+      const password = document.getElementById('login-password').value;
+      const result   = await firebase.auth().signInWithEmailAndPassword(email, password);
+      const appUser  = _fbUserToAppUser(result.user);
+      setCurrentUser(appUser);
+      await _applyUserTheme(appUser.id);
+      showApp();
+      showToast('Welcome back, ' + appUser.name.split(' ')[0], 'success');
+    } catch (err) {
+      btn.disabled = false; btn.textContent = 'Sign in';
+      const msg = err.code === 'auth/user-not-found' ? 'No account found with this email'
+                : err.code === 'auth/wrong-password'  ? 'Incorrect password'
+                : err.code === 'auth/invalid-credential' ? 'Incorrect email or password'
+                : err.message;
+      showToast(msg, 'error');
+    }
+  });
+
+  // ── Register ───────────────────────────────────────────────────────────────
+  document.getElementById('register-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const btn = e.target.querySelector('button[type="submit"]');
+    btn.disabled = true; btn.textContent = 'Creating account…';
+    try {
+      const name            = document.getElementById('register-name').value.trim();
+      const email           = document.getElementById('register-email').value.trim();
+      const password        = document.getElementById('register-password').value;
+      const passwordConfirm = document.getElementById('register-password-confirm').value;
+      const inviteCode      = (document.getElementById('register-invite')?.value || '').trim().toUpperCase();
+
+      if (!name) { showToast('Please enter your name', 'error'); btn.disabled = false; btn.textContent = 'Create account'; return; }
+      if (password !== passwordConfirm) { showToast('Passwords do not match', 'error'); btn.disabled = false; btn.textContent = 'Create account'; return; }
+      if (password.length < 8) { showToast('Password must be at least 8 characters', 'error'); btn.disabled = false; btn.textContent = 'Create account'; return; }
+
+      // Validate invite code if required
+      const inviteRequired = await isInviteRequired();
+      if (inviteRequired) {
+        if (!inviteCode) { showToast('An invite code is required', 'error'); document.getElementById('register-invite')?.focus(); btn.disabled = false; btn.textContent = 'Create account'; return; }
+        const valid = await validateInviteCode(inviteCode);
+        if (!valid) { showToast('Invalid invite code — please check and try again', 'error'); document.getElementById('register-invite')?.focus(); btn.disabled = false; btn.textContent = 'Create account'; return; }
+      }
+
+      // Create Firebase Auth account
+      const result = await firebase.auth().createUserWithEmailAndPassword(email, password);
+      await result.user.updateProfile({ displayName: name });
+
+      const appUser = _fbUserToAppUser({ ...result.user, displayName: name });
+      setCurrentUser(appUser);
+
+      // Create default data + seed demo
+      await _createDefaultUserData(appUser.id);
+      await seedDemoData(appUser.id);
+
+      // Mark owner registration so future users need invite
+      if (!inviteRequired) {
+        await firebase.firestore().collection('config').doc('registration')
+          .set({ hasOwner: true, registeredAt: new Date().toISOString() });
+      }
+
+      if (inviteRequired && inviteCode) markInviteUsed(inviteCode, email);
+
+      localStorage.setItem('pulse_show_tutorial_' + appUser.id, '1');
+      showApp();
+      showToast('Welcome to Pulse, ' + name.split(' ')[0] + '!', 'success');
+    } catch (err) {
+      btn.disabled = false; btn.textContent = 'Create account';
+      const msg = err.code === 'auth/email-already-in-use' ? 'An account with this email already exists'
+                : err.message;
+      showToast(msg, 'error');
+    }
+  });
+
+  // ── Forgot password ────────────────────────────────────────────────────────
+  document.getElementById('reset-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const btn       = document.getElementById('reset-submit-btn') || e.target.querySelector('button[type="submit"]');
+    const statusEl  = document.getElementById('reset-status');
+    btn.disabled = true; btn.textContent = 'Sending…';
+    try {
+      const email = document.getElementById('reset-email').value.trim();
+      await firebase.auth().sendPasswordResetEmail(email, {
+        url: window.location.origin + window.location.pathname,
+      });
+      if (statusEl) {
+        statusEl.innerHTML = `
+          <div style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:12px;text-align:center;">
+            <p style="font-size:14px;font-weight:600;color:#15803d;margin-bottom:4px;">Reset link sent!</p>
+            <p style="font-size:12px;color:#4ade80;">Check your inbox for <strong>${email}</strong> and click the link to set a new password.</p>
+          </div>`;
+        statusEl.classList.remove('hidden');
+      }
+      btn.textContent = 'Sent ✓';
+    } catch (err) {
+      btn.disabled = false; btn.textContent = 'Send reset link';
+      const msg = err.code === 'auth/user-not-found' ? 'No account found with this email'
+                : err.message;
+      showToast(msg, 'error');
+    }
+  });
+}
+
+// ─── Delete account ───────────────────────────────────────────────────────────
 
 function deleteAccount() {
   openModal(`
@@ -733,68 +409,67 @@ function deleteAccount() {
 }
 
 async function confirmDeleteAccount() {
-  const input = document.getElementById('delete-account-password');
+  const input   = document.getElementById('delete-account-password');
   const errorEl = document.getElementById('delete-account-error');
-  if (!input) return;
+  if (!input || !input.value) { input?.focus(); return; }
 
-  const password = input.value;
-  if (!password) { input.focus(); return; }
+  try {
+    const fbUser     = firebase.auth().currentUser;
+    const credential = firebase.auth.EmailAuthProvider.credential(fbUser.email, input.value);
+    await fbUser.reauthenticateWithCredential(credential);
 
-  const user = await DB.get(STORES.users, currentUser.id);
-  const enteredHash = await hashPassword(password);
-  if (enteredHash !== user.passwordHash) {
-    errorEl.classList.remove('hidden');
-    input.value = '';
-    input.focus();
-    return;
-  }
+    // Delete all Firestore subcollections for this user
+    const uid           = fbUser.uid;
+    const storesToPurge = Object.values(STORES).filter(s => s !== 'users');
+    for (const store of storesToPurge) {
+      try {
+        const snap  = await firebase.firestore().collection('users').doc(uid).collection(store).get();
+        if (snap.empty) continue;
+        const batch = firebase.firestore().batch();
+        snap.docs.forEach(d => batch.delete(d.ref));
+        await batch.commit();
+      } catch (_) {}
+    }
+    // Delete the user document itself
+    await firebase.firestore().collection('users').doc(uid).delete().catch(() => {});
 
-  closeModal();
+    // Delete Firebase Auth account
+    await fbUser.delete();
 
-  for (const store of Object.values(STORES)) {
-    if (store === 'users' || store === 'settings') continue;
-    const items = await DB.getAll(store);
-    for (const item of items) {
-      if (item.userId === currentUser.id) await DB.delete(store, item.id);
+    closeModal();
+    currentUser = null;
+    localStorage.removeItem('pulse_show_tutorial_' + uid);
+    document.getElementById('auth-screen').classList.remove('hidden');
+    document.getElementById('app-shell').classList.add('hidden');
+    showAuthLogin();
+    showToast('Account deleted', 'info');
+  } catch (err) {
+    if (err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
+      errorEl?.classList.remove('hidden');
+      input.value = ''; input.focus();
+    } else {
+      showToast('Error: ' + err.message, 'error');
     }
   }
-  await DB.delete(STORES.settings, `settings_${user.id}`);
-  await DB.delete(STORES.users, user.id);
-
-  localStorage.removeItem('pulse_user_id');
-  localStorage.removeItem('pulse_show_tutorial_' + user.id);
-  currentUser = null;
-
-  document.getElementById('auth-screen').classList.remove('hidden');
-  document.getElementById('app-shell').classList.add('hidden');
-  showAuthLogin();
-  showToast('Account deleted', 'info');
 }
+
+// ─── showApp ─────────────────────────────────────────────────────────────────
 
 function showApp() {
   document.getElementById('auth-screen').classList.add('hidden');
   document.getElementById('app-shell').classList.remove('hidden');
 
-  // Seed the demo deal for this user (fire-and-forget — won't block the UI)
-  if (currentUser) {
-    seedDemoDeal(currentUser.id).catch(() => {});
-  }
+  if (currentUser) seedDemoDeal(currentUser.id).catch(() => {});
 
-  // Restore the page from URL hash (so refresh keeps you on the same tab)
-  const hashPage = location.hash.slice(1);
+  const hashPage  = location.hash.slice(1);
   const startPage = (hashPage && typeof VALID_PAGES !== 'undefined' && VALID_PAGES.has(hashPage))
-    ? hashPage
-    : 'dashboard';
+    ? hashPage : 'dashboard';
   navigate(startPage);
   checkReminders();
 
-  // Show onboarding tutorial for new users (flag set at registration time)
   if (currentUser && localStorage.getItem('pulse_show_tutorial_' + currentUser.id)) {
-    setTimeout(() => {
-      if (typeof startTutorial === 'function') startTutorial();
-    }, 600);
+    setTimeout(() => { if (typeof startTutorial === 'function') startTutorial(); }, 600);
   }
 
-  // Restore Gmail token if user had connected previously
   if (typeof initGmailSync === 'function') initGmailSync();
 }

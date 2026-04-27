@@ -763,68 +763,35 @@ async function seedDemoDeal(userId) {
 // ============================================
 // App Initialization
 // ============================================
-async function initApp() {
-  // 1 — Migrate legacy databases (fire-and-forget errors are safe here)
-  try {
-    await migrateLegacyDB();
-  } catch (err) {
-    console.warn('[Pulse] Legacy DB migration failed (non-fatal):', err);
-  }
-
-  // 2 — Open / upgrade the main database
-  let dbOk = false;
-  try {
-    await openDB();
-    dbOk = true;
-  } catch (err) {
-    console.error('[Pulse] DB open failed:', err);
-    if (err && (err.message === 'DB_BLOCKED' || err.message === 'DB_OPEN_TIMEOUT')) {
-      // Surface a human-readable banner — don't block the rest of init.
-      setTimeout(() => {
-        if (typeof showToast === 'function') {
-          showToast(
-            'Database upgrade blocked — please close other Pulse tabs and refresh.',
-            'warning'
-          );
-        }
-      }, 200);
-    }
-  }
-
-  // 3 — Check for shared dashboard link before anything else
+function initApp() {
+  // 1 — Check for shared dashboard link before anything else
   if (typeof checkSharedDashboardRoute === 'function' && checkSharedDashboardRoute()) {
-    return; // Render shared view, skip auth
+    return;
   }
 
-  // 4 — Always wire up the auth forms regardless of DB status.
-  //     Without this call the login submit handler is never attached,
-  //     which makes the Sign-In button appear broken.
-  try {
-    setupAuthForms();
-  } catch (err) {
-    console.error('[Pulse] setupAuthForms failed:', err);
-  }
+  // 2 — Wire up auth forms
+  try { setupAuthForms(); } catch (err) { console.error('[Pulse] setupAuthForms failed:', err); }
+  try { setupGlobalSearch(); } catch (_) {}
 
-  try {
-    setupGlobalSearch();
-  } catch (_) {}
-
-  // 5 — Restore session (skip if DB failed to open)
-  if (dbOk) {
-    try {
-      const user = await restoreSession();
-      if (user) {
-        showApp();
-        return;
-      }
-    } catch (err) {
-      console.warn('[Pulse] Session restore failed:', err);
-    }
-  }
-
-  // 6 — Show login screen
+  // 3 — Firebase handles session restore via onAuthStateChanged.
+  //     Show auth screen immediately; Firebase will call showApp() if logged in.
   document.getElementById('auth-screen').classList.remove('hidden');
   document.getElementById('app-shell').classList.add('hidden');
+
+  firebase.auth().onAuthStateChanged(async (fbUser) => {
+    if (fbUser) {
+      const appUser = {
+        id:            fbUser.uid,
+        name:          fbUser.displayName || fbUser.email.split('@')[0],
+        email:         fbUser.email,
+        emailVerified: fbUser.emailVerified,
+      };
+      setCurrentUser(appUser);
+      await _applyUserTheme(appUser.id).catch(() => {});
+      showApp();
+    }
+    // If no user, auth screen is already visible — nothing more to do.
+  });
 }
 
 // Boot

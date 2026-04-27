@@ -248,14 +248,14 @@
       <!-- ── RESET PASSWORD — Step 1: request code ── -->
       <div id="auth-reset" class="hidden">
         <h2 class="auth-panel-title" style="font-family:'DM Serif Display',serif;font-size:22px;color:#0d0d14;margin-bottom:4px;">Reset password</h2>
-        <p class="auth-panel-sub" style="font-size:13px;color:#9191a8;margin-bottom:20px;">Enter your email and we'll send you a reset code.</p>
+        <p class="auth-panel-sub" style="font-size:13px;color:#9191a8;margin-bottom:20px;">Enter your email and we'll send you a password reset link.</p>
         <form id="reset-form" class="auth-form" style="display:flex;flex-direction:column;gap:12px;">
           <div>
             <label class="field-label">Email</label>
             <input type="email" id="reset-email" required class="input-field" placeholder="you@example.com" autocomplete="email" />
           </div>
-          <div id="reset-code-hint" class="hidden"></div>
-          <button type="submit" class="btn-primary w-full" style="height:42px;">Send reset code</button>
+          <div id="reset-status" class="hidden"></div>
+          <button type="submit" id="reset-submit-btn" class="btn-primary w-full" style="height:42px;">Send reset link</button>
         </form>
         <div class="auth-footer-row" style="justify-content:center;margin-top:1rem;">
           <button onclick="showAuthLogin()" class="auth-link">← Back to sign in</button>
@@ -597,10 +597,16 @@
   <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 
-  <!-- Scripts (v=8 busts any browser cache of previously loaded versions) -->
+  <!-- Firebase (must load before db.js and auth.js) -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+
+  <!-- Scripts -->
   <script src="js/shared-config.js?v=1"></script>
-  <script src="js/db.js?v=20260425"></script>
-  <script src="js/auth.js?v=20260425"></script>
+  <script src="js/firebase-config.js?v=1"></script>
+  <script src="js/db.js?v=20260426"></script>
+  <script src="js/auth.js?v=20260426"></script>
   <script src="js/utils.js?v=8"></script>
   <script src="js/toast.js?v=8"></script>
   <script src="js/modal.js?v=20260424"></script>
