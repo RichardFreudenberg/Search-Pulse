@@ -789,6 +789,8 @@ function initApp() {
       setCurrentUser(appUser);
       await _applyUserTheme(appUser.id).catch(() => {});
       showApp();
+      // Offer to migrate any old local IndexedDB data to Firestore
+      setTimeout(() => showMigrationPromptIfNeeded().catch(() => {}), 1500);
     }
     // If no user, auth screen is already visible — nothing more to do.
   });
