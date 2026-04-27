@@ -93,15 +93,17 @@ async function isOwner() {
   } catch { return false; }
 }
 
-// Invite required for all except the first (owner) account.
-// We track this with a Firestore /config/registration document.
+// Invite required for everyone except the very first account ever created.
+// Logic: if /config/registration exists → owner is set up → require invite.
+//        if doc missing → fresh install, first user is the owner (no invite).
+//        if error reading → fail safe, require invite.
 async function isInviteRequired() {
   try {
     const doc = await firebase.firestore()
       .collection('config').doc('registration').get();
-    return doc.exists && doc.data().hasOwner === true;
+    return doc.exists; // doc exists = owner already registered = invite required
   } catch {
-    return false;
+    return true; // fail safe: require invite if Firestore is unreachable
   }
 }
 
