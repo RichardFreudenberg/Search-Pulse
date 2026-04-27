@@ -296,29 +296,28 @@ async function renderSettings() {
       <!-- Gmail Sync (dynamic card) -->
       ${typeof renderGmailSyncCard === 'function' ? renderGmailSyncCard(settings) : ''}
 
-      <!-- ── PILOT ACCESS ── only shown to the owner account ── -->
-      ${currentUser.email === 'rfreudenberg@mba2027.hbs.edu' ? `
-      <p class="settings-section-label">Pilot Access</p>
-
-      <div class="card mb-4">
-        <div class="flex items-start justify-between mb-4">
-          <div class="flex-1 mr-4">
-            <p class="text-sm font-semibold">Invite Codes</p>
-            <p class="text-xs text-surface-400 mt-0.5">Generate single-use invite codes to give others access during the pilot. Each code is cryptographically signed — no server needed.</p>
+      <!-- ── PILOT ACCESS ── shown to owner only, populated async below ── -->
+      <div id="invite-section" class="hidden">
+        <p class="settings-section-label">Access Control</p>
+        <div class="card mb-4">
+          <div class="flex items-start justify-between mb-4">
+            <div class="flex-1 mr-4">
+              <p class="text-sm font-semibold">Invite Codes</p>
+              <p class="text-xs text-surface-400 mt-0.5">Generate single-use invite codes to give others access. Each code is cryptographically signed. Share the link and they'll have the code pre-filled on the sign-up page.</p>
+            </div>
+            <button onclick="settingsGenerateInvite()" id="generate-invite-btn" class="btn-primary btn-sm flex items-center gap-2 flex-shrink-0">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 4v16m8-8H4"/></svg>
+              New Invite
+            </button>
           </div>
-          <button onclick="settingsGenerateInvite()" id="generate-invite-btn" class="btn-primary btn-sm flex items-center gap-2 flex-shrink-0">
-            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 4v16m8-8H4"/></svg>
-            New Invite
-          </button>
+          <div id="invite-list-container" class="space-y-2">
+            <p class="text-xs text-surface-400 py-2">Loading…</p>
+          </div>
+          <p class="text-xs text-surface-400 mt-3 pt-3 border-t border-surface-100 dark:border-surface-800">
+            Share a code directly (<code class="bg-surface-100 dark:bg-surface-800 px-1 rounded font-mono">PULSE-XXXXXXXX-XXXX</code>) or use the share link button to send a URL that pre-fills the invite field on the sign-up page.
+          </p>
         </div>
-        <div id="invite-list-container" class="space-y-2">
-          <!-- Populated on load -->
-        </div>
-        <p class="text-xs text-surface-400 mt-3 pt-3 border-t border-surface-100 dark:border-surface-800">
-          Share a code directly (<code class="bg-surface-100 dark:bg-surface-800 px-1 rounded font-mono">PULSE-XXXXXXXX-XXXX</code>) or use the share link button to send a URL that pre-fills the invite field on the sign-up page.
-        </p>
       </div>
-      ` : ''}
 
       <!-- ── DATA MANAGEMENT ────────────────────────── -->
       <p class="settings-section-label">Data Management</p>
@@ -384,18 +383,20 @@ async function renderSettings() {
     if (el) el.textContent = `${stats.count} cached entries · ${stats.totalKB} KB · ${stats.expiredCount} expired`;
   }
 
-  // Populate invite list
-  renderInviteList();
+  // Show invite section only for the owner, then populate
+  isOwner().then(owner => {
+    const section = document.getElementById('invite-section');
+    if (section) section.classList.toggle('hidden', !owner);
+    if (owner) renderInviteList();
+  });
 }
 
 // ── Invite Management ────────────────────────────────────────
-function renderInviteList() {
-  // Only the owner account can view/manage invite codes
-  if (!currentUser || currentUser.email !== 'rfreudenberg@mba2027.hbs.edu') return;
+async function renderInviteList() {
   const container = document.getElementById('invite-list-container');
   if (!container) return;
 
-  const invites = (typeof loadSavedInvites === 'function') ? loadSavedInvites() : [];
+  const invites = await loadSavedInvites();
 
   if (invites.length === 0) {
     container.innerHTML = `
@@ -457,8 +458,7 @@ function renderInviteList() {
 }
 
 async function settingsGenerateInvite() {
-  // Only the owner account may generate invite codes
-  if (!currentUser || currentUser.email !== 'rfreudenberg@mba2027.hbs.edu') {
+  if (!(await isOwner())) {
     showToast('You do not have permission to generate invite codes.', 'error');
     return;
   }

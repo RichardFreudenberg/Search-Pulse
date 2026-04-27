@@ -34,29 +34,63 @@ async function validateInviteCode(code) {
   return (await _inviteChecksum(m[1])) === m[2];
 }
 
-function loadSavedInvites() {
-  try { return JSON.parse(localStorage.getItem(_INVITE_STORE_KEY) || '[]'); }
-  catch { return []; }
+// ── Invite code storage (Firestore /inviteCodes collection) ──────────────────
+
+async function loadSavedInvites() {
+  const uid = firebase.auth().currentUser?.uid;
+  if (!uid) return [];
+  try {
+    const snap = await firebase.firestore().collection('inviteCodes')
+      .where('createdByUid', '==', uid).get();
+    return snap.docs.map(d => d.data())
+      .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  } catch { return []; }
 }
-function saveInvites(list) {
-  localStorage.setItem(_INVITE_STORE_KEY, JSON.stringify(list));
-}
+
 async function createNewInvite(note = '') {
-  const code   = await generateInviteCode();
-  const record = { code, note, createdAt: new Date().toISOString(), usedByEmail: null, usedAt: null };
-  const list   = loadSavedInvites();
-  list.unshift(record);
-  saveInvites(list);
+  const code = await generateInviteCode();
+  const uid  = firebase.auth().currentUser?.uid;
+  const record = {
+    code, note,
+    createdByUid: uid,
+    createdAt:    new Date().toISOString(),
+    usedByEmail:  null,
+    usedAt:       null,
+  };
+  await firebase.firestore().collection('inviteCodes').doc(code).set(record);
   return record;
 }
-function markInviteUsed(code, email) {
-  const list = loadSavedInvites();
-  const rec  = list.find(i => i.code.toUpperCase() === code.toUpperCase());
-  if (rec && !rec.usedAt) {
-    rec.usedAt      = new Date().toISOString();
-    rec.usedByEmail = email;
-    saveInvites(list);
+
+async function markInviteUsed(code, email) {
+  try {
+    await firebase.firestore().collection('inviteCodes').doc(code).update({
+      usedByEmail: email,
+      usedAt:      new Date().toISOString(),
+    });
+  } catch (err) {
+    console.warn('[Pulse] markInviteUsed:', err.message);
   }
+}
+
+// ── Ownership check ───────────────────────────────────────────────────────────
+
+async function isOwner() {
+  try {
+    const uid = firebase.auth().currentUser?.uid;
+    if (!uid) return false;
+    const doc = await firebase.firestore().collection('config').doc('registration').get();
+    if (!doc.exists) return false;
+    const data = doc.data();
+    // If ownerUid is already set, compare directly
+    if (data.ownerUid) return data.ownerUid === uid;
+    // First login after migration: no ownerUid yet — claim it now
+    if (data.hasOwner) {
+      await firebase.firestore().collection('config').doc('registration')
+        .update({ ownerUid: uid });
+      return true;
+    }
+    return false;
+  } catch { return false; }
 }
 
 // Invite required for all except the first (owner) account.
@@ -324,7 +358,7 @@ function setupAuthForms() {
       // Mark owner registration so future users need invite
       if (!inviteRequired) {
         await firebase.firestore().collection('config').doc('registration')
-          .set({ hasOwner: true, registeredAt: new Date().toISOString() });
+          .set({ hasOwner: true, ownerUid: appUser.id, registeredAt: new Date().toISOString() });
       }
 
       if (inviteRequired && inviteCode) markInviteUsed(inviteCode, email);
