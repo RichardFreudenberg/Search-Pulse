@@ -160,6 +160,12 @@ async function _applyUserTheme(userId) {
 function logout() {
   firebase.auth().signOut();
   currentUser = null;
+  window._pRegistering = false;
+
+  // Reset button states so the form is never left in a disabled state
+  const loginBtn = document.querySelector('#login-form button[type="submit"]');
+  if (loginBtn) { loginBtn.disabled = false; loginBtn.textContent = 'Sign in'; }
+
   document.getElementById('auth-screen').classList.remove('hidden');
   document.getElementById('app-shell').classList.add('hidden');
   showAuthLogin();
@@ -296,37 +302,51 @@ async function _createDefaultUserData(userId) {
 
 // ─── Auth form wiring ─────────────────────────────────────────────────────────
 
+// Guard: prevent binding auth form listeners more than once (e.g. if called twice)
+let _authFormsWired = false;
+
+// Flag: tells onAuthStateChanged to stand down while registration is in progress.
+// The register handler seeds demo data and calls showApp() itself when ready.
+window._pRegistering = false;
+
 function setupAuthForms() {
+  if (_authFormsWired) return;
+  _authFormsWired = true;
 
   // ── Login ──────────────────────────────────────────────────────────────────
+  // NOTE: We do NOT call showApp() here — onAuthStateChanged in app.js handles
+  // it. This avoids a double-call race condition.
   document.getElementById('login-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     const btn = e.target.querySelector('button[type="submit"]');
+    if (!btn) return;
     btn.disabled = true; btn.textContent = 'Signing in…';
     try {
       const email    = document.getElementById('login-email').value.trim();
       const password = document.getElementById('login-password').value;
-      const result   = await firebase.auth().signInWithEmailAndPassword(email, password);
-      const appUser  = _fbUserToAppUser(result.user);
-      setCurrentUser(appUser);
-      await _applyUserTheme(appUser.id);
-      showApp();
-      showToast('Welcome back, ' + appUser.name.split(' ')[0], 'success');
+      // onAuthStateChanged will fire, set currentUser, and call showApp()
+      await firebase.auth().signInWithEmailAndPassword(email, password);
+      showToast('Welcome back!', 'success');
     } catch (err) {
       btn.disabled = false; btn.textContent = 'Sign in';
-      const msg = err.code === 'auth/user-not-found' ? 'No account found with this email'
-                : err.code === 'auth/wrong-password'  ? 'Incorrect password'
-                : err.code === 'auth/invalid-credential' ? 'Incorrect email or password'
+      const msg = err.code === 'auth/user-not-found'      ? 'No account found with this email'
+                : err.code === 'auth/wrong-password'       ? 'Incorrect password'
+                : err.code === 'auth/invalid-credential'   ? 'Incorrect email or password'
                 : err.message;
       showToast(msg, 'error');
     }
   });
 
   // ── Register ───────────────────────────────────────────────────────────────
+  // We use window._pRegistering = true so that onAuthStateChanged does NOT call
+  // showApp() while we are still seeding data. We call showApp() ourselves once
+  // everything is ready.
   document.getElementById('register-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     const btn = e.target.querySelector('button[type="submit"]');
+    if (!btn) return;
     btn.disabled = true; btn.textContent = 'Creating account…';
+    window._pRegistering = true;
     try {
       const name            = document.getElementById('register-name').value.trim();
       const email           = document.getElementById('register-email').value.trim();
@@ -334,26 +354,27 @@ function setupAuthForms() {
       const passwordConfirm = document.getElementById('register-password-confirm').value;
       const inviteCode      = (document.getElementById('register-invite')?.value || '').trim().toUpperCase();
 
-      if (!name) { showToast('Please enter your name', 'error'); btn.disabled = false; btn.textContent = 'Create account'; return; }
-      if (password !== passwordConfirm) { showToast('Passwords do not match', 'error'); btn.disabled = false; btn.textContent = 'Create account'; return; }
-      if (password.length < 8) { showToast('Password must be at least 8 characters', 'error'); btn.disabled = false; btn.textContent = 'Create account'; return; }
+      if (!name) { showToast('Please enter your name', 'error'); btn.disabled = false; btn.textContent = 'Create account'; window._pRegistering = false; return; }
+      if (password !== passwordConfirm) { showToast('Passwords do not match', 'error'); btn.disabled = false; btn.textContent = 'Create account'; window._pRegistering = false; return; }
+      if (password.length < 8) { showToast('Password must be at least 8 characters', 'error'); btn.disabled = false; btn.textContent = 'Create account'; window._pRegistering = false; return; }
 
       // Validate invite code if required
       const inviteRequired = await isInviteRequired();
       if (inviteRequired) {
-        if (!inviteCode) { showToast('An invite code is required', 'error'); document.getElementById('register-invite')?.focus(); btn.disabled = false; btn.textContent = 'Create account'; return; }
+        if (!inviteCode) { showToast('An invite code is required', 'error'); document.getElementById('register-invite')?.focus(); btn.disabled = false; btn.textContent = 'Create account'; window._pRegistering = false; return; }
         const valid = await validateInviteCode(inviteCode);
-        if (!valid) { showToast('Invalid invite code — please check and try again', 'error'); document.getElementById('register-invite')?.focus(); btn.disabled = false; btn.textContent = 'Create account'; return; }
+        if (!valid) { showToast('Invalid invite code — please check and try again', 'error'); document.getElementById('register-invite')?.focus(); btn.disabled = false; btn.textContent = 'Create account'; window._pRegistering = false; return; }
       }
 
-      // Create Firebase Auth account
+      // Create Firebase Auth account — onAuthStateChanged will fire but will
+      // see window._pRegistering === true and skip showApp()
       const result = await firebase.auth().createUserWithEmailAndPassword(email, password);
       await result.user.updateProfile({ displayName: name });
 
       const appUser = _fbUserToAppUser({ ...result.user, displayName: name });
       setCurrentUser(appUser);
 
-      // Create default data + seed demo
+      // Seed data BEFORE showing the app so the tutorial has data to show
       await _createDefaultUserData(appUser.id);
       await seedDemoData(appUser.id);
 
@@ -366,9 +387,13 @@ function setupAuthForms() {
       if (inviteRequired && inviteCode) markInviteUsed(inviteCode, email);
 
       localStorage.setItem('pulse_show_tutorial_' + appUser.id, '1');
+
+      // All data is ready — now safe to show the app
+      window._pRegistering = false;
       showApp();
       showToast('Welcome to Pulse, ' + name.split(' ')[0] + '!', 'success');
     } catch (err) {
+      window._pRegistering = false;
       btn.disabled = false; btn.textContent = 'Create account';
       const msg = err.code === 'auth/email-already-in-use' ? 'An account with this email already exists'
                 : err.message;
@@ -492,8 +517,19 @@ async function confirmDeleteAccount() {
 // ─── showApp ─────────────────────────────────────────────────────────────────
 
 function showApp() {
-  document.getElementById('auth-screen').classList.add('hidden');
-  document.getElementById('app-shell').classList.remove('hidden');
+  const authScreen = document.getElementById('auth-screen');
+  const appShell   = document.getElementById('app-shell');
+  if (!authScreen || !appShell) return;
+
+  // Guard: if the app is already visible this is a duplicate call (e.g. from
+  // both the login handler and onAuthStateChanged firing at the same time).
+  // Just ensure the panels are correct and bail — don't re-navigate or re-init.
+  const alreadyVisible = !appShell.classList.contains('hidden');
+
+  authScreen.classList.add('hidden');
+  appShell.classList.remove('hidden');
+
+  if (alreadyVisible) return;
 
   if (currentUser) seedDemoDeal(currentUser.id).catch(() => {});
 

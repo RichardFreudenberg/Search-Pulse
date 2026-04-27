@@ -501,6 +501,12 @@ async function renderReengageSuggestions(contacts, companyMap) {
 // Seed Demo Data
 // ============================================
 async function seedDemoData(userId) {
+  // Idempotency guard: don't seed if demo companies already exist for this user
+  try {
+    const existing = await DB.getAll(STORES.companies);
+    if (existing.some(c => c.userId === userId && c.isDemo)) return;
+  } catch (_) {}
+
   // Companies
   const companies = [
     { name: 'Alpine Investors', industry: 'Private Equity', size: '100-200', website: 'https://alpineinvestors.com', description: 'PeopleFirst PE firm focused on software and services', logoUrl: '' },
@@ -782,6 +788,10 @@ function initApp() {
 
   firebase.auth().onAuthStateChanged(async (fbUser) => {
     if (fbUser) {
+      // If the register handler is running, it will call showApp() itself
+      // once demo data is seeded. Skip here to avoid a race condition.
+      if (window._pRegistering) return;
+
       const appUser = {
         id:            fbUser.uid,
         name:          fbUser.displayName || fbUser.email.split('@')[0],
@@ -791,6 +801,7 @@ function initApp() {
       setCurrentUser(appUser);
       await _applyUserTheme(appUser.id).catch(() => {});
       showApp();
+      showToast('Welcome back, ' + appUser.name.split(' ')[0] + '!', 'success');
       // Offer to migrate any old local IndexedDB data to Firestore
       setTimeout(() => showMigrationPromptIfNeeded().catch(() => {}), 1500);
     }
