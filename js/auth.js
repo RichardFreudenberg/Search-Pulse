@@ -158,17 +158,16 @@ async function _applyUserTheme(userId) {
 }
 
 function logout() {
-  firebase.auth().signOut();
+  firebase.auth().signOut().catch(() => {});
   currentUser = null;
   window._pRegistering = false;
 
-  // Reset button states so the form is never left in a disabled state
-  const loginBtn = document.querySelector('#login-form button[type="submit"]');
-  if (loginBtn) { loginBtn.disabled = false; loginBtn.textContent = 'Sign in'; }
+  // Return URL to root — no stale page hash on the login screen
+  history.replaceState(null, '', window.location.pathname);
 
   document.getElementById('auth-screen').classList.remove('hidden');
   document.getElementById('app-shell').classList.add('hidden');
-  showAuthLogin();
+  showAuthLogin(); // also resets the login button
 }
 
 // ─── Auth panels ─────────────────────────────────────────────────────────────
@@ -178,7 +177,12 @@ function _showAuthPanel(name) {
     document.getElementById(`auth-${s}`)?.classList.toggle('hidden', s !== name)
   );
 }
-function showAuthLogin()       { _showAuthPanel('login'); }
+function showAuthLogin() {
+  _showAuthPanel('login');
+  // Always ensure the submit button is usable when the login panel is shown
+  const btn = document.querySelector('#login-form button[type="submit"]');
+  if (btn) { btn.disabled = false; btn.textContent = 'Sign in'; }
+}
 function showAuthVerify()      { _showAuthPanel('verify'); }
 function showAuthNewPassword() { _showAuthPanel('new-password'); }
 function showAuthReset() {
@@ -314,8 +318,8 @@ function setupAuthForms() {
   _authFormsWired = true;
 
   // ── Login ──────────────────────────────────────────────────────────────────
-  // NOTE: We do NOT call showApp() here — onAuthStateChanged in app.js handles
-  // it. This avoids a double-call race condition.
+  // onAuthStateChanged (app.js) handles setCurrentUser + showApp so we don't
+  // duplicate that work here. We just fire the Firebase call and handle errors.
   document.getElementById('login-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     const btn = e.target.querySelector('button[type="submit"]');
@@ -324,16 +328,20 @@ function setupAuthForms() {
     try {
       const email    = document.getElementById('login-email').value.trim();
       const password = document.getElementById('login-password').value;
-      // onAuthStateChanged will fire, set currentUser, and call showApp()
+      // Set flag so onAuthStateChanged knows this is a fresh login (show toast)
+      window._freshLogin = true;
       await firebase.auth().signInWithEmailAndPassword(email, password);
-      showToast('Welcome back!', 'success');
+      // onAuthStateChanged will call showApp() — nothing more needed here
     } catch (err) {
-      btn.disabled = false; btn.textContent = 'Sign in';
+      window._freshLogin = false;
       const msg = err.code === 'auth/user-not-found'      ? 'No account found with this email'
                 : err.code === 'auth/wrong-password'       ? 'Incorrect password'
                 : err.code === 'auth/invalid-credential'   ? 'Incorrect email or password'
                 : err.message;
       showToast(msg, 'error');
+    } finally {
+      // Always re-enable so button is never stuck disabled
+      btn.disabled = false; btn.textContent = 'Sign in';
     }
   });
 

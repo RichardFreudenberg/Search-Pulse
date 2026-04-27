@@ -801,7 +801,13 @@ function initApp() {
       setCurrentUser(appUser);
       await _applyUserTheme(appUser.id).catch(() => {});
       showApp();
-      showToast('Welcome back, ' + appUser.name.split(' ')[0] + '!', 'success');
+
+      // Show welcome toast only on an explicit login — not on every page load
+      if (window._freshLogin) {
+        window._freshLogin = false;
+        showToast('Welcome back, ' + appUser.name.split(' ')[0] + '!', 'success');
+      }
+
       // Offer to migrate any old local IndexedDB data to Firestore
       setTimeout(() => showMigrationPromptIfNeeded().catch(() => {}), 1500);
     }
