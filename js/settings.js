@@ -350,6 +350,13 @@ async function renderSettings() {
           </div>
           <div class="flex items-center justify-between py-3">
             <div>
+              <p class="text-sm font-semibold">Clear Sample Data</p>
+              <p class="text-xs text-surface-400">Remove all demo contacts, deals, and notes created for the tour</p>
+            </div>
+            <button onclick="clearDemoDataFromSettings()" class="btn-secondary btn-sm flex-shrink-0">Clear</button>
+          </div>
+          <div class="flex items-center justify-between py-3">
+            <div>
               <p class="text-sm font-semibold text-red-600">Reset All Data</p>
               <p class="text-xs text-surface-400">Permanently delete all contacts, calls, deals, and notes</p>
             </div>
@@ -606,6 +613,17 @@ async function importData(event) {
     navigate('dashboard');
   } catch (err) {
     showToast('Import failed: ' + err.message, 'error');
+  }
+}
+
+async function clearDemoDataFromSettings() {
+  if (!currentUser) return;
+  try {
+    await clearDemoData();
+    showToast('Sample data cleared!', 'success');
+    navigate('dashboard');
+  } catch (err) {
+    showToast('Could not clear sample data: ' + err.message, 'error');
   }
 }
 

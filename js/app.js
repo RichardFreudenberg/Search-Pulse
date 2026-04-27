@@ -617,6 +617,8 @@ async function seedDemoData(userId) {
 // Seed Demo Deal — Apex Precision Manufacturing
 // ============================================
 async function seedDemoDeal(userId) {
+  // Don't re-seed if the user has already cleared demo data
+  if (localStorage.getItem('pulse_demo_cleared_' + userId)) return;
   // Only seed if the user has no deals yet
   const existing = await DB.getAll(STORES.deals).catch(() => []);
   if (existing.some(d => d.userId === userId)) return;
