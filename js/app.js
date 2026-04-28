@@ -792,6 +792,38 @@ function initApp() {
       // once demo data is seeded. Skip here to avoid a race condition.
       if (window._pRegistering) return;
 
+      // ── Session policy ────────────────────────────────────────────────────
+      // Users must log in every time they open the site unless they explicitly
+      // checked "Remember me for 7 days". We enforce this by checking two
+      // localStorage/sessionStorage markers set during sign-in:
+      //
+      //   pulse_remember_until  (localStorage)  — timestamp, set only when
+      //     "Remember me" was checked. Expires after 7 days.
+      //   pulse_session_active  (sessionStorage) — set for normal logins.
+      //     sessionStorage is automatically cleared when the browser closes,
+      //     so this naturally expires at the end of the browser session.
+      //
+      // If neither marker is present the user has a stale LOCAL-persisted
+      // session from before this feature was introduced — sign them out once.
+      // ─────────────────────────────────────────────────────────────────────
+      const rememberUntil = localStorage.getItem('pulse_remember_until');
+      const sessionActive = sessionStorage.getItem('pulse_session_active');
+
+      if (rememberUntil) {
+        if (Date.now() > parseInt(rememberUntil, 10)) {
+          // Remember-me has expired — force re-login
+          localStorage.removeItem('pulse_remember_until');
+          await firebase.auth().signOut().catch(() => {});
+          return;
+        }
+        // else: valid remember-me session — continue
+      } else if (!sessionActive) {
+        // No valid session marker — legacy LOCAL session or stale token
+        await firebase.auth().signOut().catch(() => {});
+        return;
+      }
+      // ─────────────────────────────────────────────────────────────────────
+
       // Check if the owner has revoked this user's access
       const hasAccess = await checkUserAccess().catch(() => true);
       if (!hasAccess) {

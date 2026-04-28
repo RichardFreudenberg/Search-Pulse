@@ -222,6 +222,10 @@ function logout() {
   currentUser = null;
   window._pRegistering = false;
 
+  // Clear both session markers so the next page load requires a fresh login
+  localStorage.removeItem('pulse_remember_until');
+  sessionStorage.removeItem('pulse_session_active');
+
   // Return URL to root — no stale page hash on the login screen
   history.replaceState(null, '', window.location.pathname);
 
@@ -386,11 +390,32 @@ function setupAuthForms() {
     if (!btn) return;
     btn.disabled = true; btn.textContent = 'Signing in…';
     try {
-      const email    = document.getElementById('login-email').value.trim();
-      const password = document.getElementById('login-password').value;
+      const email      = document.getElementById('login-email').value.trim();
+      const password   = document.getElementById('login-password').value;
+      const rememberMe = document.getElementById('login-remember')?.checked || false;
+
+      // Set Firebase persistence BEFORE signing in:
+      //   LOCAL  = survives browser restart (only when "Remember me" is checked)
+      //   SESSION = cleared when the tab/browser closes (default)
+      await firebase.auth().setPersistence(
+        rememberMe
+          ? firebase.auth.Auth.Persistence.LOCAL
+          : firebase.auth.Auth.Persistence.SESSION
+      );
+
       // Set flag so onAuthStateChanged knows this is a fresh login (show toast)
       window._freshLogin = true;
       await firebase.auth().signInWithEmailAndPassword(email, password);
+
+      // Store session markers so onAuthStateChanged can validate the session
+      if (rememberMe) {
+        localStorage.setItem('pulse_remember_until',
+          String(Date.now() + 7 * 24 * 60 * 60 * 1000));
+        sessionStorage.removeItem('pulse_session_active');
+      } else {
+        localStorage.removeItem('pulse_remember_until');
+        sessionStorage.setItem('pulse_session_active', '1');
+      }
       // onAuthStateChanged will call showApp() — nothing more needed here
     } catch (err) {
       window._freshLogin = false;
@@ -434,6 +459,10 @@ function setupAuthForms() {
         if (!valid) { showToast('Invalid invite code — please check and try again', 'error'); document.getElementById('register-invite')?.focus(); btn.disabled = false; btn.textContent = 'Create account'; window._pRegistering = false; return; }
       }
 
+      // New accounts use SESSION persistence by default — user must log in again
+      // after closing the browser (same policy as "no remember me" on login)
+      await firebase.auth().setPersistence(firebase.auth.Auth.Persistence.SESSION);
+
       // Create Firebase Auth account — onAuthStateChanged will fire but will
       // see window._pRegistering === true and skip showApp()
       const result = await firebase.auth().createUserWithEmailAndPassword(email, password);
@@ -458,6 +487,8 @@ function setupAuthForms() {
 
       // All data is ready — now safe to show the app
       window._pRegistering = false;
+      // Mark this as a valid active session (SESSION persistence)
+      sessionStorage.setItem('pulse_session_active', '1');
       showApp();
       showToast('Welcome to Pulse, ' + name.split(' ')[0] + '!', 'success');
     } catch (err) {
