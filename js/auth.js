@@ -745,33 +745,54 @@ async function confirmDeleteAccount() {
   if (!input || !input.value) { input?.focus(); return; }
 
   if (deleteBtn) { deleteBtn.disabled = true; deleteBtn.textContent = 'Deleting…'; }
-
-  // Prevent onAuthStateChanged from interfering while deletion is in progress.
-  // Without this flag, reauthenticateWithCredential() triggers the handler
-  // which would call signOut() and revoke the token before delete() runs.
+  if (errorEl)   { errorEl.textContent = ''; errorEl.classList.add('hidden'); }
   window._pDeletingAccount = true;
 
   try {
     const fbUser = firebase.auth().currentUser;
     if (!fbUser) throw new Error('No signed-in user found — please refresh and try again.');
 
-    const savedEmail = fbUser.email;
-    const uid        = fbUser.uid;
+    const email  = fbUser.email;
+    const uid    = fbUser.uid;
+    const apiKey = firebase.app().options.apiKey;
 
-    // ── Re-authenticate to get a FRESH user reference ────────────────────
-    // IMPORTANT: use the UserCredential returned by reauthenticateWithCredential
-    // rather than the pre-reauth fbUser snapshot. In Firebase SDK v10 compat,
-    // the returned .user is guaranteed to carry fresh auth tokens — using the
-    // old reference can cause delete() to silently skip the server call.
-    const credential    = firebase.auth.EmailAuthProvider.credential(savedEmail, input.value);
-    const reAuthResult  = await fbUser.reauthenticateWithCredential(credential);
-    const freshUser     = reAuthResult.user;
-    if (!freshUser) throw new Error('Reauthentication did not return a valid user.');
+    // ── Step 1: Sign in via REST to verify password + get a guaranteed-fresh token ──
+    // We bypass reauthenticateWithCredential entirely because the Firebase SDK
+    // v10 compat layer can return a resolved promise without actually sending
+    // the token-refresh request to Firebase's servers (a known issue when
+    // Firestore offline persistence is enabled).  Calling the REST API directly
+    // gives us an idToken that we KNOW came from Firebase's servers right now.
+    const signInRes = await fetch(
+      `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${encodeURIComponent(apiKey)}`,
+      {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ email, password: input.value, returnSecureToken: true }),
+      }
+    );
+    const signInBody = await signInRes.json().catch(() => ({}));
 
+    if (!signInRes.ok) {
+      // Wrong password — show inline error, re-enable button, bail out
+      const msg = signInBody?.error?.message || '';
+      const isWrongPassword = msg.includes('INVALID_PASSWORD') ||
+                              msg.includes('INVALID_LOGIN_CREDENTIALS') ||
+                              msg.includes('EMAIL_NOT_FOUND');
+      if (isWrongPassword) {
+        if (errorEl) { errorEl.textContent = 'Incorrect password. Please try again.'; errorEl.classList.remove('hidden'); }
+        input.value = ''; input.focus();
+        window._pDeletingAccount = false;
+        if (deleteBtn) { deleteBtn.disabled = false; deleteBtn.textContent = 'Delete My Account'; }
+        return;
+      }
+      throw Object.assign(new Error(msg || 'Sign-in failed'), { code: 'auth/sign-in-api-error' });
+    }
+
+    const idToken = signInBody.idToken;
+    if (!idToken) throw new Error('Firebase did not return an ID token — please try again.');
+
+    // ── Step 2: Firestore cleanup (parallel, never blocks auth deletion) ──────
     const db = firebase.firestore();
-
-    // ── Firestore cleanup — parallel, never blocks the auth deletion ──────
-    // Promise.allSettled never throws so auth deletion is always reached.
     const storesToPurge = Object.values(STORES).filter(s => s !== 'users');
     await Promise.allSettled([
       ...storesToPurge.map(store =>
@@ -785,20 +806,11 @@ async function confirmDeleteAccount() {
       ),
       db.collection('users').doc(uid).delete().catch(() => {}),
       db.collection('userAccess').doc(uid).delete().catch(() => {}),
-      // Invite code stays consumed — re-registration requires a NEW invite code
     ]);
 
-    // ── Delete the Firebase Auth account via REST API ─────────────────────
-    // We bypass the SDK's user.delete() because in Firebase v10 compat the
-    // SDK can silently skip the server-side DELETE when the internal token
-    // state is stale (the account appears deleted locally but persists in
-    // Firebase Auth, causing "email already in use" on re-registration).
-    //
-    // Instead: force-refresh the ID token to get a guaranteed-fresh JWT,
-    // then call the Firebase Auth REST endpoint directly. This is exactly
-    // what the SDK does internally — without the caching layer that breaks.
-    const idToken = await freshUser.getIdToken(/* forceRefresh= */ true);
-    const apiKey  = firebase.app().options.apiKey;
+    // ── Step 3: Delete the Firebase Auth account via REST ─────────────────────
+    // We use the idToken obtained in Step 1 — it came directly from Firebase's
+    // servers so it is guaranteed valid regardless of any local SDK cache state.
     const delRes  = await fetch(
       `https://identitytoolkit.googleapis.com/v1/accounts:delete?key=${encodeURIComponent(apiKey)}`,
       {
@@ -810,35 +822,23 @@ async function confirmDeleteAccount() {
     if (!delRes.ok) {
       const body = await delRes.json().catch(() => ({}));
       const msg  = body?.error?.message || ('HTTP ' + delRes.status);
-      // Map common REST error codes to Firebase Auth error codes so the
-      // catch block can show the right message to the user.
-      const code = msg === 'INVALID_ID_TOKEN'   ? 'auth/invalid-user-token'
-                 : msg === 'USER_NOT_FOUND'      ? 'auth/user-not-found'
-                 : msg === 'TOKEN_EXPIRED'        ? 'auth/requires-recent-login'
-                 : 'auth/deletion-api-error';
-      throw Object.assign(new Error(msg), { code });
+      throw Object.assign(new Error(msg), { code: 'auth/deletion-api-error' });
     }
 
-    // Sign out to clear the locally-cached Firebase Auth token — the account
-    // is already gone on the server, so signOut just cleans up local state.
+    // ── Step 4: Clear the local Firebase SDK session ──────────────────────────
     await firebase.auth().signOut().catch(() => {});
 
-    // ── Success — clear state and show register panel ─────────────────────
+    // ── Step 5: Success UI ────────────────────────────────────────────────────
     window._pDeletingAccount = false;
     closeModal();
     currentUser = null;
     localStorage.removeItem('pulse_remember_until');
     sessionStorage.removeItem('pulse_session_active');
     localStorage.removeItem('pulse_show_tutorial_' + uid);
-
-    // Store a marker so the register panel can show a helpful context banner
     sessionStorage.setItem('pulse_just_deleted', '1');
 
     document.getElementById('auth-screen').classList.remove('hidden');
     document.getElementById('app-shell').classList.add('hidden');
-
-    // Send them to REGISTER (not login) — they need a new invite code to
-    // get back in, so pointing them at the login form is confusing.
     showAuthRegister();
     showToast('Account deleted — use a new invite code to create a fresh account', 'info');
 
@@ -846,25 +846,12 @@ async function confirmDeleteAccount() {
     window._pDeletingAccount = false;
     if (deleteBtn) { deleteBtn.disabled = false; deleteBtn.textContent = 'Delete My Account'; }
     console.error('[Pulse] Account deletion failed:', err.code, err.message, err);
-
-    if (err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
-      if (errorEl) {
-        errorEl.textContent = 'Incorrect password. Please try again.';
-        errorEl.classList.remove('hidden');
-      }
-      input.value = ''; input.focus();
-    } else if (err.code === 'auth/requires-recent-login') {
-      input.value = '';
-      showToast('Session expired — please enter your password and try again.', 'error');
-      input.focus();
-    } else {
-      const diagCode = err.code || 'unknown';
-      if (errorEl) {
-        errorEl.textContent = 'Deletion failed (' + diagCode + ') — please try again.';
-        errorEl.classList.remove('hidden');
-      }
-      showToast('Deletion failed (' + diagCode + '): ' + (err.message || ''), 'error');
+    const diagCode = err.code || 'unknown';
+    if (errorEl) {
+      errorEl.textContent = 'Deletion failed (' + diagCode + ') — please try again.';
+      errorEl.classList.remove('hidden');
     }
+    showToast('Deletion failed (' + diagCode + '): ' + (err.message || ''), 'error');
   }
 }
 
