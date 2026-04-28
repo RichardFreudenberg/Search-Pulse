@@ -537,8 +537,9 @@ function setupAuthForms() {
     } catch (err) {
       window._pRegistering = false;
       btn.disabled = false; btn.textContent = 'Create account';
-      const msg = err.code === 'auth/email-already-in-use' ? 'An account with this email already exists'
-                : err.message;
+      const msg = err.code === 'auth/email-already-in-use'
+                  ? 'An account with this email already exists. If you recently deleted your account, please wait a few seconds and try again.'
+                  : err.message;
       showToast(msg, 'error');
     }
   });
@@ -599,7 +600,7 @@ function deleteAccount() {
       </div>
       <div class="flex justify-end gap-3">
         <button onclick="closeModal()" class="btn-secondary">Cancel</button>
-        <button onclick="confirmDeleteAccount()" class="btn-danger flex items-center gap-2">
+        <button id="delete-account-confirm-btn" onclick="confirmDeleteAccount()" class="btn-danger flex items-center gap-2">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
           </svg>
@@ -612,62 +613,65 @@ function deleteAccount() {
 }
 
 async function confirmDeleteAccount() {
-  const input   = document.getElementById('delete-account-password');
-  const errorEl = document.getElementById('delete-account-error');
+  const input     = document.getElementById('delete-account-password');
+  const errorEl   = document.getElementById('delete-account-error');
+  const deleteBtn = document.getElementById('delete-account-confirm-btn');
   if (!input || !input.value) { input?.focus(); return; }
 
+  if (deleteBtn) { deleteBtn.disabled = true; deleteBtn.textContent = 'Deleting…'; }
+
   try {
-    const fbUser     = firebase.auth().currentUser;
+    const fbUser = firebase.auth().currentUser;
+    if (!fbUser) throw new Error('No signed-in user found — please refresh and try again.');
+
     const credential = firebase.auth.EmailAuthProvider.credential(fbUser.email, input.value);
     await fbUser.reauthenticateWithCredential(credential);
 
     const uid = fbUser.uid;
     const db  = firebase.firestore();
 
-    // ── Firestore cleanup (must happen while user is still authenticated) ──
-
-    // 1. Delete all user subcollections
+    // ── Firestore cleanup — run ALL operations in parallel so nothing can
+    //    block fbUser.delete(). Promise.allSettled never throws even if
+    //    individual tasks fail, so deletion always reaches the end.
     const storesToPurge = Object.values(STORES).filter(s => s !== 'users');
-    for (const store of storesToPurge) {
-      try {
-        const snap = await db.collection('users').doc(uid).collection(store).get();
-        if (snap.empty) continue;
-        const batch = db.batch();
-        snap.docs.forEach(d => batch.delete(d.ref));
-        await batch.commit();
-      } catch (_) {}
-    }
-    await db.collection('users').doc(uid).delete().catch(() => {});
+    await Promise.allSettled([
 
-    // 2. Delete the userAccess record
-    await db.collection('userAccess').doc(uid).delete().catch(() => {});
+      // Delete every user subcollection
+      ...storesToPurge.map(store =>
+        db.collection('users').doc(uid).collection(store).get()
+          .then(snap => {
+            if (snap.empty) return;
+            const b = db.batch();
+            snap.docs.forEach(d => b.delete(d.ref));
+            return b.commit();
+          }).catch(() => {})
+      ),
 
-    // 3. Reset any invite codes used by this account so the owner can re-invite
-    //    the same person (or the person can re-register with a fresh code).
-    //    Must run before fbUser.delete() since Firestore needs valid auth.
-    try {
-      const codeSnap = await db.collection('inviteCodes')
-        .where('usedByUid', '==', uid).get();
-      if (!codeSnap.empty) {
-        const batch = db.batch();
-        codeSnap.docs.forEach(d => batch.update(d.ref, {
-          usedByEmail:   null,
-          usedByName:    null,
-          usedByUid:     null,
-          usedAt:        null,
-          deactivated:   false,
-          deactivatedAt: null,
-        }));
-        await batch.commit();
-      }
-    } catch (_) {}
+      // Delete the top-level user document
+      db.collection('users').doc(uid).delete().catch(() => {}),
 
-    // ── Delete Firebase Auth account last (auth needed for all ops above) ──
+      // Delete the access record
+      db.collection('userAccess').doc(uid).delete().catch(() => {}),
+
+      // Reset any invite code used by this account so the owner can
+      // re-invite the same person (or they can register with a new code)
+      db.collection('inviteCodes').where('usedByUid', '==', uid).get()
+        .then(snap => {
+          if (snap.empty) return;
+          const b = db.batch();
+          snap.docs.forEach(d => b.update(d.ref, {
+            usedByEmail: null, usedByName: null, usedByUid: null,
+            usedAt: null, deactivated: false, deactivatedAt: null,
+          }));
+          return b.commit();
+        }).catch(() => {}),
+    ]);
+
+    // ── Delete Firebase Auth account — runs after all Firestore ops ──────
     await fbUser.delete();
 
     closeModal();
     currentUser = null;
-    // Clear session markers so a fresh login is required
     localStorage.removeItem('pulse_remember_until');
     sessionStorage.removeItem('pulse_session_active');
     localStorage.removeItem('pulse_show_tutorial_' + uid);
@@ -675,12 +679,19 @@ async function confirmDeleteAccount() {
     document.getElementById('app-shell').classList.add('hidden');
     showAuthLogin();
     showToast('Account deleted', 'info');
+
   } catch (err) {
+    if (deleteBtn) { deleteBtn.disabled = false; deleteBtn.textContent = 'Delete My Account'; }
     if (err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
       errorEl?.classList.remove('hidden');
       input.value = ''; input.focus();
+    } else if (err.code === 'auth/requires-recent-login') {
+      // Shouldn't happen since we just reauthenticated, but handle gracefully
+      input.value = '';
+      showToast('Session expired — please enter your password and try again.', 'error');
+      input.focus();
     } else {
-      showToast('Error: ' + err.message, 'error');
+      showToast('Deletion failed: ' + (err.message || err.code), 'error');
     }
   }
 }
