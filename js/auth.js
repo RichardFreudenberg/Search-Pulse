@@ -4,7 +4,7 @@
 
 // Version marker — visible in browser console (F12) so you can confirm
 // the live site is running the latest code after a hard refresh.
-console.log('[Pulse] auth.js loaded — version 20260428q (REST-delete)');
+console.log('[Pulse] auth.js loaded — version 20260428r (REST-delete)');
 
 let currentUser = null;
 
