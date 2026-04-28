@@ -342,7 +342,7 @@
         </div>
       </div>
     </div><!-- /sp-card-outer -->
-    <p style="text-align:center;font-size:11px;color:#c4c4d4;margin-top:12px;user-select:none;">v20260428s</p>
+    <p style="text-align:center;font-size:11px;color:#c4c4d4;margin-top:12px;user-select:none;">v20260428t</p>
   </div><!-- /auth-screen -->
 
   <!-- Main App -->
@@ -626,7 +626,7 @@
   <script src="js/shared-config.js?v=1"></script>
   <script src="js/firebase-config.js?v=1"></script>
   <script src="js/db.js?v=20260426"></script>
-  <script src="js/auth.js?v=20260428s"></script>
+  <script src="js/auth.js?v=20260428t"></script>
   <script src="js/utils.js?v=8"></script>
   <script src="js/toast.js?v=8"></script>
   <script src="js/modal.js?v=20260424"></script>
@@ -743,6 +743,26 @@
       show();
       setInterval(show, 6000);
     }, 2500);
+  }
+
+  // Register service worker — forces index.html to always load fresh from
+  // the network so stale cached code can never block an update.
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('sw.js').then(function(reg) {
+      console.log('[Pulse] Service worker active, scope:', reg.scope);
+      // If the SW just updated (new version waiting), reload immediately
+      if (reg.waiting) { reg.waiting.postMessage('SKIP_WAITING'); location.reload(); }
+      reg.addEventListener('updatefound', function() {
+        var newSW = reg.installing;
+        if (!newSW) return;
+        newSW.addEventListener('statechange', function() {
+          if (newSW.state === 'installed' && navigator.serviceWorker.controller) {
+            console.log('[Pulse] New SW installed — reloading for latest version…');
+            location.reload();
+          }
+        });
+      });
+    }).catch(function(e) { console.warn('[Pulse] SW registration failed:', e); });
   }
 
   // Init when page loads
