@@ -786,6 +786,12 @@ function initApp() {
   document.getElementById('auth-screen').classList.remove('hidden');
   document.getElementById('app-shell').classList.add('hidden');
 
+  // 3a — If an invite link was shared (?invite=PULSE-...) auto-open the register
+  //      panel so the code is pre-filled and the user lands in the right place.
+  if (new URLSearchParams(window.location.search).get('invite')) {
+    showAuthRegister().catch(() => {});
+  }
+
   firebase.auth().onAuthStateChanged(async (fbUser) => {
     if (fbUser) {
       // If the register handler is running, it will call showApp() itself

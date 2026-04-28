@@ -34,6 +34,29 @@ async function validateInviteCode(code) {
   return (await _inviteChecksum(m[1])) === m[2];
 }
 
+// Full invite validation: checks cryptographic format AND looks up the code in
+// Firestore to confirm it exists, hasn't been used, and isn't deactivated.
+// Returns null when the code is valid, or a user-facing error string on failure.
+// Falls back to crypto-only if Firestore is unreachable (user not yet signed in).
+async function _fullCheckInviteCode(code) {
+  const clean = (code || '').trim().toUpperCase().replace(/\s+/g, '');
+  if (!(await validateInviteCode(clean))) {
+    return 'Invalid invite code — please check and try again';
+  }
+  try {
+    const doc = await firebase.firestore().collection('inviteCodes').doc(clean).get();
+    if (!doc.exists) {
+      return 'This invite code was not found — please check with the person who sent it';
+    }
+    const data = doc.data();
+    if (data.deactivated) return 'This invite code has been deactivated';
+    if (data.usedAt)      return 'This invite code has already been used';
+  } catch {
+    // Firestore rules block reads before auth (expected) — crypto check passed, proceed
+  }
+  return null; // valid
+}
+
 // ── Invite code storage (Firestore /inviteCodes collection) ──────────────────
 
 async function loadSavedInvites() {
@@ -245,7 +268,7 @@ function showAuthLogin() {
   _showAuthPanel('login');
   // Always ensure the submit button is usable when the login panel is shown
   const btn = document.querySelector('#login-form button[type="submit"]');
-  if (btn) { btn.disabled = false; btn.textContent = 'Sign in'; }
+  if (btn) { btn.disabled = false; btn.innerHTML = _SIGN_IN_BTN_HTML; }
 }
 function showAuthVerify()      { _showAuthPanel('verify'); }
 function showAuthNewPassword() { _showAuthPanel('new-password'); }
@@ -370,6 +393,13 @@ async function _createDefaultUserData(userId) {
 
 // ─── Auth form wiring ─────────────────────────────────────────────────────────
 
+// Cached HTML for the sign-in button (including the SVG arrow).
+// Using innerHTML to restore it prevents the icon being stripped by textContent resets.
+const _SIGN_IN_BTN_HTML =
+  'Sign in <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+  'stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0">' +
+  '<path d="M5 12h14m-7-7 7 7-7 7"/></svg>';
+
 // Guard: prevent binding auth form listeners more than once (e.g. if called twice)
 let _authFormsWired = false;
 
@@ -395,7 +425,7 @@ function setupAuthForms() {
       const rememberMe = document.getElementById('login-remember')?.checked || false;
 
       // Set Firebase persistence BEFORE signing in:
-      //   LOCAL  = survives browser restart (only when "Remember me" is checked)
+      //   LOCAL   = survives browser restart (only when "Remember me" is checked)
       //   SESSION = cleared when the tab/browser closes (default)
       await firebase.auth().setPersistence(
         rememberMe
@@ -403,11 +433,10 @@ function setupAuthForms() {
           : firebase.auth.Auth.Persistence.SESSION
       );
 
-      // Set flag so onAuthStateChanged knows this is a fresh login (show toast)
-      window._freshLogin = true;
-      await firebase.auth().signInWithEmailAndPassword(email, password);
-
-      // Store session markers so onAuthStateChanged can validate the session
+      // ⚠️  CRITICAL: set session markers BEFORE signInWithEmailAndPassword.
+      // Firebase fires onAuthStateChanged during (not after) the sign-in await,
+      // so if we set markers after, the policy check sees nothing and immediately
+      // signs the user back out — making the button appear to do nothing.
       if (rememberMe) {
         localStorage.setItem('pulse_remember_until',
           String(Date.now() + 7 * 24 * 60 * 60 * 1000));
@@ -416,17 +445,23 @@ function setupAuthForms() {
         localStorage.removeItem('pulse_remember_until');
         sessionStorage.setItem('pulse_session_active', '1');
       }
+
+      window._freshLogin = true;
+      await firebase.auth().signInWithEmailAndPassword(email, password);
       // onAuthStateChanged will call showApp() — nothing more needed here
     } catch (err) {
       window._freshLogin = false;
+      // Sign-in failed — remove any markers we just set
+      localStorage.removeItem('pulse_remember_until');
+      sessionStorage.removeItem('pulse_session_active');
       const msg = err.code === 'auth/user-not-found'      ? 'No account found with this email'
                 : err.code === 'auth/wrong-password'       ? 'Incorrect password'
                 : err.code === 'auth/invalid-credential'   ? 'Incorrect email or password'
                 : err.message;
       showToast(msg, 'error');
     } finally {
-      // Always re-enable so button is never stuck disabled
-      btn.disabled = false; btn.textContent = 'Sign in';
+      // Always re-enable and restore the full button HTML (including SVG arrow)
+      btn.disabled = false; btn.innerHTML = _SIGN_IN_BTN_HTML;
     }
   });
 
@@ -454,9 +489,17 @@ function setupAuthForms() {
       // Validate invite code if required
       const inviteRequired = await isInviteRequired();
       if (inviteRequired) {
-        if (!inviteCode) { showToast('An invite code is required', 'error'); document.getElementById('register-invite')?.focus(); btn.disabled = false; btn.textContent = 'Create account'; window._pRegistering = false; return; }
-        const valid = await validateInviteCode(inviteCode);
-        if (!valid) { showToast('Invalid invite code — please check and try again', 'error'); document.getElementById('register-invite')?.focus(); btn.disabled = false; btn.textContent = 'Create account'; window._pRegistering = false; return; }
+        if (!inviteCode) {
+          showToast('An invite code is required', 'error');
+          document.getElementById('register-invite')?.focus();
+          btn.disabled = false; btn.textContent = 'Create account'; window._pRegistering = false; return;
+        }
+        const inviteErr = await _fullCheckInviteCode(inviteCode);
+        if (inviteErr) {
+          showToast(inviteErr, 'error');
+          document.getElementById('register-invite')?.focus();
+          btn.disabled = false; btn.textContent = 'Create account'; window._pRegistering = false; return;
+        }
       }
 
       // New accounts use SESSION persistence by default — user must log in again
