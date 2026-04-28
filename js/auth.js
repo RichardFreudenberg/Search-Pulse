@@ -78,7 +78,10 @@ async function createNewInvite(note = '') {
     createdByUid: uid,
     createdAt:    new Date().toISOString(),
     usedByEmail:  null,
+    usedByName:   null,
+    usedByUid:    null,
     usedAt:       null,
+    deactivated:  false,
   };
   await firebase.firestore().collection('inviteCodes').doc(code).set(record);
   return record;
@@ -290,6 +293,64 @@ async function showAuthRegister() {
     const field = document.getElementById('register-invite');
     if (field && !field.value) field.value = urlInvite.toUpperCase();
   }
+
+  // Show a context banner if the user just deleted their account
+  const justDeleted = sessionStorage.getItem('pulse_just_deleted');
+  const bannerId    = 'register-deleted-banner';
+  let banner        = document.getElementById(bannerId);
+  if (justDeleted) {
+    sessionStorage.removeItem('pulse_just_deleted');
+    if (!banner) {
+      banner = document.createElement('div');
+      banner.id = bannerId;
+      banner.style.cssText =
+        'background:#fffbeb;border:1px solid #fcd34d;border-radius:8px;' +
+        'padding:10px 12px;margin-bottom:12px;font-size:12px;color:#92400e;line-height:1.4;';
+      banner.innerHTML =
+        '<strong>Account deleted.</strong> To create a new account with the same email, ' +
+        'ask the app owner for a new invite code and fill in the form below.';
+      // Insert before the form
+      const form = document.getElementById('register-form');
+      if (form) form.parentNode.insertBefore(banner, form);
+    }
+    banner.style.display = 'block';
+  } else if (banner) {
+    banner.style.display = 'none';
+  }
+}
+
+// ─── Password reset via Firebase email link ───────────────────────────────────
+// When the user clicks a Firebase password-reset email, they land on the app URL
+// with ?mode=resetPassword&oobCode=XXX in the query string (requires "Custom
+// action URL" to be configured in Firebase Console → Auth → Templates).
+// initApp() in app.js detects this and calls handlePasswordReset(oobCode).
+
+let _pendingOobCode = null;
+
+async function handlePasswordReset(oobCode) {
+  window._pResettingPassword = true;
+  _pendingOobCode = oobCode;
+
+  // Make sure the auth screen is showing (not the app)
+  document.getElementById('auth-screen')?.classList.remove('hidden');
+  document.getElementById('app-shell')?.classList.add('hidden');
+
+  try {
+    // Verify the code with Firebase and get the email it belongs to
+    const email = await firebase.auth().verifyPasswordResetCode(oobCode);
+    const emailEl = document.getElementById('reset-target-email');
+    if (emailEl) emailEl.textContent = 'Setting new password for ' + email;
+    // Clear any stale error
+    const errEl = document.getElementById('new-password-error');
+    if (errEl) { errEl.textContent = ''; errEl.classList.add('hidden'); }
+    _showAuthPanel('new-password');
+  } catch (err) {
+    _pendingOobCode = null;
+    window._pResettingPassword = false;
+    showToast('This password reset link has expired or is invalid. Please request a new one.', 'error');
+    history.replaceState(null, '', window.location.pathname);
+    showAuthLogin();
+  }
 }
 
 // ─── Account recovery (legacy — kept as stub) ─────────────────────────────────
@@ -454,10 +515,17 @@ function setupAuthForms() {
       // Sign-in failed — remove any markers we just set
       localStorage.removeItem('pulse_remember_until');
       sessionStorage.removeItem('pulse_session_active');
-      const msg = err.code === 'auth/user-not-found'      ? 'No account found with this email'
-                : err.code === 'auth/wrong-password'       ? 'Incorrect password'
-                : err.code === 'auth/invalid-credential'   ? 'Incorrect email or password'
-                : err.message;
+      // auth/user-not-found and auth/invalid-credential both fire when an
+      // account doesn't exist (including deleted accounts).  Show a hint so
+      // the user knows they need to register rather than keep retrying login.
+      let msg;
+      if (err.code === 'auth/user-not-found' || err.code === 'auth/invalid-credential') {
+        msg = 'No account found with this email. If you deleted your account, use "Create account" with a new invite code.';
+      } else if (err.code === 'auth/wrong-password') {
+        msg = 'Incorrect password';
+      } else {
+        msg = err.message;
+      }
       showToast(msg, 'error');
     } finally {
       // Always re-enable and restore the full button HTML (including SVG arrow)
@@ -524,7 +592,10 @@ function setupAuthForms() {
           .set({ hasOwner: true, ownerUid: appUser.id, registeredAt: new Date().toISOString() });
       }
 
-      if (inviteRequired && inviteCode) markInviteUsed(inviteCode, email, name, appUser.id);
+      // Await markInviteUsed so the code is stamped as used BEFORE the app
+      // opens. Without await, a race window allows the same code to be reused
+      // from a second tab during the brief gap before Firestore is updated.
+      if (inviteRequired && inviteCode) await markInviteUsed(inviteCode, email, name, appUser.id);
 
       localStorage.setItem('pulse_show_tutorial_' + appUser.id, '1');
 
@@ -538,7 +609,7 @@ function setupAuthForms() {
       window._pRegistering = false;
       btn.disabled = false; btn.textContent = 'Create account';
       const msg = err.code === 'auth/email-already-in-use'
-                  ? 'An account with this email already exists. If you recently deleted your account, please wait a few seconds and try again.'
+                  ? 'An account already exists with this email address.'
                   : err.message;
       showToast(msg, 'error');
     }
@@ -553,22 +624,77 @@ function setupAuthForms() {
     try {
       const email = document.getElementById('reset-email').value.trim();
       await firebase.auth().sendPasswordResetEmail(email, {
+        // continueUrl brings the user back to the app after Firebase handles the reset.
+        // NOTE: For the in-app reset flow, you must ALSO configure a Custom Action URL
+        // in Firebase Console → Authentication → Templates → Password reset → Edit.
+        // Set it to: https://your-app-domain.com/index.html
+        // Firebase will then redirect to that URL with ?mode=resetPassword&oobCode=...
+        // and this app will handle it with handlePasswordReset().
         url: window.location.origin + window.location.pathname,
       });
       if (statusEl) {
         statusEl.innerHTML = `
           <div style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:12px;text-align:center;">
             <p style="font-size:14px;font-weight:600;color:#15803d;margin-bottom:4px;">Reset link sent!</p>
-            <p style="font-size:12px;color:#4ade80;">Check your inbox for <strong>${email}</strong> and click the link to set a new password.</p>
+            <p style="font-size:12px;color:#166534;">Check your inbox for <strong>${email}</strong> and click the link to set a new password. It may take a minute to arrive.</p>
           </div>`;
         statusEl.classList.remove('hidden');
       }
       btn.textContent = 'Sent ✓';
     } catch (err) {
       btn.disabled = false; btn.textContent = 'Send reset link';
-      const msg = err.code === 'auth/user-not-found' ? 'No account found with this email'
+      const msg = err.code === 'auth/user-not-found'  ? 'No account found with this email'
+                : err.code === 'auth/invalid-email'   ? 'Please enter a valid email address'
                 : err.message;
       showToast(msg, 'error');
+    }
+  });
+
+  // ── New password (Firebase reset link flow) ────────────────────────────────
+  // This form is shown when the user clicks a Firebase password-reset email
+  // link that redirects to this app with ?mode=resetPassword&oobCode=...
+  // handlePasswordReset() (called from initApp) verifies the code and shows
+  // this panel. The oobCode is stored in _pendingOobCode.
+  document.getElementById('new-password-form')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const btn    = document.getElementById('new-password-submit-btn') || e.target.querySelector('button[type="submit"]');
+    const errEl  = document.getElementById('new-password-error');
+    if (errEl) { errEl.textContent = ''; errEl.classList.add('hidden'); }
+
+    if (!_pendingOobCode) {
+      showToast('No reset session found. Please click the link in your email again.', 'error');
+      showAuthReset();
+      return;
+    }
+
+    const newPassword     = document.getElementById('new-password-password').value;
+    const confirmPassword = document.getElementById('new-password-confirm').value;
+
+    if (newPassword !== confirmPassword) {
+      if (errEl) { errEl.textContent = 'Passwords do not match'; errEl.classList.remove('hidden'); }
+      return;
+    }
+    if (newPassword.length < 8) {
+      if (errEl) { errEl.textContent = 'Password must be at least 8 characters'; errEl.classList.remove('hidden'); }
+      return;
+    }
+
+    if (btn) { btn.disabled = true; btn.textContent = 'Setting password…'; }
+    try {
+      await firebase.auth().confirmPasswordReset(_pendingOobCode, newPassword);
+      _pendingOobCode = null;
+      window._pResettingPassword = false;
+      // Clean the URL so a refresh doesn't re-trigger the reset flow
+      history.replaceState(null, '', window.location.pathname);
+      showAuthLogin();
+      showToast('Password updated! You can now sign in with your new password.', 'success');
+    } catch (err) {
+      if (btn) { btn.disabled = false; btn.textContent = 'Set new password'; }
+      const msg = err.code === 'auth/expired-action-code'  ? 'This reset link has expired. Please request a new one.'
+                : err.code === 'auth/invalid-action-code'  ? 'This reset link is invalid or has already been used.'
+                : err.code === 'auth/weak-password'        ? 'Password is too weak — please choose a stronger one.'
+                : err.message;
+      if (errEl) { errEl.textContent = msg; errEl.classList.remove('hidden'); }
     }
   });
 }
@@ -620,23 +746,34 @@ async function confirmDeleteAccount() {
 
   if (deleteBtn) { deleteBtn.disabled = true; deleteBtn.textContent = 'Deleting…'; }
 
+  // Prevent onAuthStateChanged from interfering while deletion is in progress.
+  // Without this flag, reauthenticateWithCredential() triggers the handler
+  // which would call signOut() and revoke the token before delete() runs.
+  window._pDeletingAccount = true;
+
   try {
     const fbUser = firebase.auth().currentUser;
     if (!fbUser) throw new Error('No signed-in user found — please refresh and try again.');
 
-    const credential = firebase.auth.EmailAuthProvider.credential(fbUser.email, input.value);
-    await fbUser.reauthenticateWithCredential(credential);
+    const savedEmail = fbUser.email;
+    const uid        = fbUser.uid;
 
-    const uid = fbUser.uid;
-    const db  = firebase.firestore();
+    // ── Re-authenticate to get a FRESH user reference ────────────────────
+    // IMPORTANT: use the UserCredential returned by reauthenticateWithCredential
+    // rather than the pre-reauth fbUser snapshot. In Firebase SDK v10 compat,
+    // the returned .user is guaranteed to carry fresh auth tokens — using the
+    // old reference can cause delete() to silently skip the server call.
+    const credential    = firebase.auth.EmailAuthProvider.credential(savedEmail, input.value);
+    const reAuthResult  = await fbUser.reauthenticateWithCredential(credential);
+    const freshUser     = reAuthResult.user;
+    if (!freshUser) throw new Error('Reauthentication did not return a valid user.');
 
-    // ── Firestore cleanup — run ALL operations in parallel so nothing can
-    //    block fbUser.delete(). Promise.allSettled never throws even if
-    //    individual tasks fail, so deletion always reaches the end.
+    const db = firebase.firestore();
+
+    // ── Firestore cleanup — parallel, never blocks the auth deletion ──────
+    // Promise.allSettled never throws so auth deletion is always reached.
     const storesToPurge = Object.values(STORES).filter(s => s !== 'users');
     await Promise.allSettled([
-
-      // Delete every user subcollection
       ...storesToPurge.map(store =>
         db.collection('users').doc(uid).collection(store).get()
           .then(snap => {
@@ -646,52 +783,87 @@ async function confirmDeleteAccount() {
             return b.commit();
           }).catch(() => {})
       ),
-
-      // Delete the top-level user document
       db.collection('users').doc(uid).delete().catch(() => {}),
-
-      // Delete the access record
       db.collection('userAccess').doc(uid).delete().catch(() => {}),
-
-      // Reset any invite code used by this account so the owner can
-      // re-invite the same person (or they can register with a new code)
-      db.collection('inviteCodes').where('usedByUid', '==', uid).get()
-        .then(snap => {
-          if (snap.empty) return;
-          const b = db.batch();
-          snap.docs.forEach(d => b.update(d.ref, {
-            usedByEmail: null, usedByName: null, usedByUid: null,
-            usedAt: null, deactivated: false, deactivatedAt: null,
-          }));
-          return b.commit();
-        }).catch(() => {}),
+      // Invite code stays consumed — re-registration requires a NEW invite code
     ]);
 
-    // ── Delete Firebase Auth account — runs after all Firestore ops ──────
-    await fbUser.delete();
+    // ── Delete the Firebase Auth account via REST API ─────────────────────
+    // We bypass the SDK's user.delete() because in Firebase v10 compat the
+    // SDK can silently skip the server-side DELETE when the internal token
+    // state is stale (the account appears deleted locally but persists in
+    // Firebase Auth, causing "email already in use" on re-registration).
+    //
+    // Instead: force-refresh the ID token to get a guaranteed-fresh JWT,
+    // then call the Firebase Auth REST endpoint directly. This is exactly
+    // what the SDK does internally — without the caching layer that breaks.
+    const idToken = await freshUser.getIdToken(/* forceRefresh= */ true);
+    const apiKey  = firebase.app().options.apiKey;
+    const delRes  = await fetch(
+      `https://identitytoolkit.googleapis.com/v1/accounts:delete?key=${encodeURIComponent(apiKey)}`,
+      {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ idToken }),
+      }
+    );
+    if (!delRes.ok) {
+      const body = await delRes.json().catch(() => ({}));
+      const msg  = body?.error?.message || ('HTTP ' + delRes.status);
+      // Map common REST error codes to Firebase Auth error codes so the
+      // catch block can show the right message to the user.
+      const code = msg === 'INVALID_ID_TOKEN'   ? 'auth/invalid-user-token'
+                 : msg === 'USER_NOT_FOUND'      ? 'auth/user-not-found'
+                 : msg === 'TOKEN_EXPIRED'        ? 'auth/requires-recent-login'
+                 : 'auth/deletion-api-error';
+      throw Object.assign(new Error(msg), { code });
+    }
 
+    // Sign out to clear the locally-cached Firebase Auth token — the account
+    // is already gone on the server, so signOut just cleans up local state.
+    await firebase.auth().signOut().catch(() => {});
+
+    // ── Success — clear state and show register panel ─────────────────────
+    window._pDeletingAccount = false;
     closeModal();
     currentUser = null;
     localStorage.removeItem('pulse_remember_until');
     sessionStorage.removeItem('pulse_session_active');
     localStorage.removeItem('pulse_show_tutorial_' + uid);
+
+    // Store a marker so the register panel can show a helpful context banner
+    sessionStorage.setItem('pulse_just_deleted', '1');
+
     document.getElementById('auth-screen').classList.remove('hidden');
     document.getElementById('app-shell').classList.add('hidden');
-    showAuthLogin();
-    showToast('Account deleted', 'info');
+
+    // Send them to REGISTER (not login) — they need a new invite code to
+    // get back in, so pointing them at the login form is confusing.
+    showAuthRegister();
+    showToast('Account deleted — use a new invite code to create a fresh account', 'info');
 
   } catch (err) {
+    window._pDeletingAccount = false;
     if (deleteBtn) { deleteBtn.disabled = false; deleteBtn.textContent = 'Delete My Account'; }
+    console.error('[Pulse] Account deletion failed:', err.code, err.message, err);
+
     if (err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
-      errorEl?.classList.remove('hidden');
+      if (errorEl) {
+        errorEl.textContent = 'Incorrect password. Please try again.';
+        errorEl.classList.remove('hidden');
+      }
       input.value = ''; input.focus();
     } else if (err.code === 'auth/requires-recent-login') {
-      // Shouldn't happen since we just reauthenticated, but handle gracefully
       input.value = '';
       showToast('Session expired — please enter your password and try again.', 'error');
       input.focus();
     } else {
-      showToast('Deletion failed: ' + (err.message || err.code), 'error');
+      const diagCode = err.code || 'unknown';
+      if (errorEl) {
+        errorEl.textContent = 'Deletion failed (' + diagCode + ') — please try again.';
+        errorEl.classList.remove('hidden');
+      }
+      showToast('Deletion failed (' + diagCode + '): ' + (err.message || ''), 'error');
     }
   }
 }

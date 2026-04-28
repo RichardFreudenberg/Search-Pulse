@@ -607,7 +607,7 @@ async function settingsGenerateInvite() {
   if (btn) { btn.disabled = true; btn.textContent = 'Generating…'; }
 
   try {
-    await createNewInvite(); // generates + saves to localStorage
+    await createNewInvite(); // generates + saves to Firestore /inviteCodes
     renderInviteList();
     showToast('Invite code generated!', 'success');
   } catch (err) {

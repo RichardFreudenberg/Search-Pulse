@@ -788,8 +788,18 @@ function initApp() {
 
   // 3a — If an invite link was shared (?invite=PULSE-...) auto-open the register
   //      panel so the code is pre-filled and the user lands in the right place.
-  if (new URLSearchParams(window.location.search).get('invite')) {
+  const _initParams = new URLSearchParams(window.location.search);
+  if (_initParams.get('invite')) {
     showAuthRegister().catch(() => {});
+  }
+
+  // 3b — Detect Firebase Auth action URLs (e.g., password reset link clicked).
+  //      Firebase redirects to ?mode=resetPassword&oobCode=XXX when a custom
+  //      action URL is configured in Firebase Console → Auth → Templates.
+  if (_initParams.get('mode') === 'resetPassword' && _initParams.get('oobCode')) {
+    if (typeof handlePasswordReset === 'function') {
+      handlePasswordReset(_initParams.get('oobCode')).catch(console.error);
+    }
   }
 
   firebase.auth().onAuthStateChanged(async (fbUser) => {
@@ -797,6 +807,14 @@ function initApp() {
       // If the register handler is running, it will call showApp() itself
       // once demo data is seeded. Skip here to avoid a race condition.
       if (window._pRegistering) return;
+
+      // If we're in the middle of a password reset, don't auto-login
+      if (window._pResettingPassword) return;
+
+      // If account deletion is in progress, don't let reauthentication's
+      // onAuthStateChanged trigger the session policy check — it could call
+      // signOut() and revoke the token before fbUser.delete() runs.
+      if (window._pDeletingAccount) return;
 
       // ── Session policy ────────────────────────────────────────────────────
       // Users must log in every time they open the site unless they explicitly
@@ -856,8 +874,31 @@ function initApp() {
 
       // Offer to migrate any old local IndexedDB data to Firestore
       setTimeout(() => showMigrationPromptIfNeeded().catch(() => {}), 1500);
+
+    } else {
+      // ── No authenticated user ─────────────────────────────────────────────
+      // This fires when:
+      //   • Page loads with no session (initial state — auth screen already showing)
+      //   • Account is deleted (fbUser.delete() → Firebase clears token → fires null)
+      //   • Token expires
+      //   • Signed out from another tab (LOCAL persistence shared across tabs)
+      //
+      // If the app shell is currently visible we must push back to the login
+      // screen. Without this, the app stays open after account deletion.
+      // Skip only while registration or password-reset flows are in progress.
+      if (!window._pRegistering && !window._pResettingPassword && !window._pDeletingAccount) {
+        const appShell = document.getElementById('app-shell');
+        if (appShell && !appShell.classList.contains('hidden')) {
+          // App was showing — force back to login
+          currentUser = null;
+          localStorage.removeItem('pulse_remember_until');
+          sessionStorage.removeItem('pulse_session_active');
+          appShell.classList.add('hidden');
+          document.getElementById('auth-screen')?.classList.remove('hidden');
+          showAuthLogin();
+        }
+      }
     }
-    // If no user, auth screen is already visible — nothing more to do.
   });
 }
 
