@@ -786,10 +786,16 @@ function initApp() {
   document.getElementById('auth-screen').classList.remove('hidden');
   document.getElementById('app-shell').classList.add('hidden');
 
-  // 3a — If an invite link was shared (?invite=PULSE-...) auto-open the register
-  //      panel so the code is pre-filled and the user lands in the right place.
+  // 3a — Handle special landing states on page load
   const _initParams = new URLSearchParams(window.location.search);
-  if (_initParams.get('invite')) {
+  if (sessionStorage.getItem('pulse_just_deleted')) {
+    // User just completed account deletion — land on register panel so they
+    // can immediately create a new account with a new invite code.
+    // showAuthRegister() reads pulse_just_deleted, shows the "Account deleted"
+    // banner, then clears the flag.
+    showAuthRegister().catch(() => {});
+  } else if (_initParams.get('invite')) {
+    // Shared invite link — pre-open register panel and pre-fill the invite code.
     showAuthRegister().catch(() => {});
   }
 

@@ -4,7 +4,7 @@
 
 // Version marker — visible in browser console (F12) so you can confirm
 // the live site is running the latest code after a hard refresh.
-console.log('[Pulse] auth.js loaded — version 20260428t (REST-delete+verify)');
+console.log('[Pulse] auth.js loaded — version 20260428u (REST-delete+verify+reload)');
 
 let currentUser = null;
 
@@ -850,22 +850,30 @@ async function confirmDeleteAccount() {
     }
     // verifyRes is 400 (user not found) — account is truly deleted ✓
 
-    // ── Step 4: Clear the local Firebase SDK session ──────────────────────────
+    // ── Step 4: Best-effort SDK sign-out ─────────────────────────────────────
     await firebase.auth().signOut().catch(() => {});
 
-    // ── Step 5: Success UI ────────────────────────────────────────────────────
+    // ── Step 5: Full page reload (the only truly reliable clean-slate) ────────
+    // Manipulating the DOM after deletion is NOT sufficient: the Firebase SDK
+    // can still have the old auth session in memory or in IndexedDB.  The next
+    // onAuthStateChanged callback (which fires when something touches Auth after
+    // _pDeletingAccount is cleared) would see fbUser !== null, pass the session-
+    // policy check (no markers → signOut → fires null), but the timing window
+    // means the app sometimes opens with the deleted account before null fires.
+    //
+    // A location.replace() wipes ALL in-memory state.  On the fresh page load:
+    //   • Firebase re-initialises with no in-memory user.
+    //   • If IndexedDB has a stale token, the server rejects it (account gone)
+    //     and Firebase fires onAuthStateChanged(null) — user stays on auth screen.
+    //   • pulse_just_deleted (sessionStorage survives same-tab navigations)
+    //     tells initApp() to open the register panel instead of login.
     window._pDeletingAccount = false;
     closeModal();
-    currentUser = null;
     localStorage.removeItem('pulse_remember_until');
     sessionStorage.removeItem('pulse_session_active');
     localStorage.removeItem('pulse_show_tutorial_' + uid);
     sessionStorage.setItem('pulse_just_deleted', '1');
-
-    document.getElementById('auth-screen').classList.remove('hidden');
-    document.getElementById('app-shell').classList.add('hidden');
-    showAuthRegister();
-    showToast('Account deleted — use a new invite code to create a fresh account', 'info');
+    location.replace(location.pathname);
 
   } catch (err) {
     window._pDeletingAccount = false;
