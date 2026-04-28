@@ -621,26 +621,55 @@ async function confirmDeleteAccount() {
     const credential = firebase.auth.EmailAuthProvider.credential(fbUser.email, input.value);
     await fbUser.reauthenticateWithCredential(credential);
 
-    // Delete all Firestore subcollections for this user
-    const uid           = fbUser.uid;
+    const uid = fbUser.uid;
+    const db  = firebase.firestore();
+
+    // ── Firestore cleanup (must happen while user is still authenticated) ──
+
+    // 1. Delete all user subcollections
     const storesToPurge = Object.values(STORES).filter(s => s !== 'users');
     for (const store of storesToPurge) {
       try {
-        const snap  = await firebase.firestore().collection('users').doc(uid).collection(store).get();
+        const snap = await db.collection('users').doc(uid).collection(store).get();
         if (snap.empty) continue;
-        const batch = firebase.firestore().batch();
+        const batch = db.batch();
         snap.docs.forEach(d => batch.delete(d.ref));
         await batch.commit();
       } catch (_) {}
     }
-    // Delete the user document itself
-    await firebase.firestore().collection('users').doc(uid).delete().catch(() => {});
+    await db.collection('users').doc(uid).delete().catch(() => {});
 
-    // Delete Firebase Auth account
+    // 2. Delete the userAccess record
+    await db.collection('userAccess').doc(uid).delete().catch(() => {});
+
+    // 3. Reset any invite codes used by this account so the owner can re-invite
+    //    the same person (or the person can re-register with a fresh code).
+    //    Must run before fbUser.delete() since Firestore needs valid auth.
+    try {
+      const codeSnap = await db.collection('inviteCodes')
+        .where('usedByUid', '==', uid).get();
+      if (!codeSnap.empty) {
+        const batch = db.batch();
+        codeSnap.docs.forEach(d => batch.update(d.ref, {
+          usedByEmail:   null,
+          usedByName:    null,
+          usedByUid:     null,
+          usedAt:        null,
+          deactivated:   false,
+          deactivatedAt: null,
+        }));
+        await batch.commit();
+      }
+    } catch (_) {}
+
+    // ── Delete Firebase Auth account last (auth needed for all ops above) ──
     await fbUser.delete();
 
     closeModal();
     currentUser = null;
+    // Clear session markers so a fresh login is required
+    localStorage.removeItem('pulse_remember_until');
+    sessionStorage.removeItem('pulse_session_active');
     localStorage.removeItem('pulse_show_tutorial_' + uid);
     document.getElementById('auth-screen').classList.remove('hidden');
     document.getElementById('app-shell').classList.add('hidden');

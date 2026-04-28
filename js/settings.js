@@ -454,9 +454,15 @@ async function renderInviteList() {
     }
 
     // ── Action buttons ───────────────────────────────────────
+    // Trash icon reused across all delete buttons
+    const _trashSvg = `<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>`;
+    const _deleteBtn = `<button onclick="settingsDeleteInvite('${safeCode}','${safeUid}')" title="Delete invite code"
+      class="inline-flex items-center gap-1 text-xs px-2 py-1 rounded border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-800 hover:bg-red-50 dark:hover:bg-red-900/20 hover:border-red-200 dark:hover:border-red-800 hover:text-red-600 dark:hover:text-red-400 text-surface-500 transition-colors">
+      ${_trashSvg} Delete</button>`;
+
     let actionHtml = '';
     if (!isUsed) {
-      // Unused: copy + share link
+      // Unused: copy + share link + delete
       actionHtml = `
         <div class="flex items-center gap-1.5 flex-shrink-0">
           <button onclick="settingsCopyInvite('${safeCode}')" title="Copy invite code"
@@ -469,9 +475,10 @@ async function renderInviteList() {
             <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z"/></svg>
             Share link
           </button>
+          ${_deleteBtn}
         </div>`;
     } else if (safeUid) {
-      // Used code with a known UID: show revoke or restore
+      // Used code with a known UID: revoke/restore + delete
       if (isRevoked) {
         actionHtml = `
           <div class="flex items-center gap-1.5 flex-shrink-0">
@@ -480,6 +487,7 @@ async function renderInviteList() {
               <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
               Restore
             </button>
+            ${_deleteBtn}
           </div>`;
       } else {
         actionHtml = `
@@ -489,8 +497,12 @@ async function renderInviteList() {
               <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"/></svg>
               Revoke
             </button>
+            ${_deleteBtn}
           </div>`;
       }
+    } else {
+      // Used code without a known UID (pre-feature legacy code) — delete only
+      actionHtml = `<div class="flex items-center gap-1.5 flex-shrink-0">${_deleteBtn}</div>`;
     }
 
     return `
@@ -531,6 +543,57 @@ async function settingsRestoreInvite(code, uid) {
     renderInviteList();
   } catch (err) {
     showToast('Failed to restore: ' + err.message, 'error');
+  }
+}
+
+function settingsDeleteInvite(code, uid) {
+  const hasUser = !!uid;
+  const warning = hasUser
+    ? 'This will permanently delete the invite code and remove the user\'s access record. The user\'s account and data are not affected — only the audit trail is removed. <strong>This cannot be undone.</strong>'
+    : 'This will permanently delete the invite code. <strong>This cannot be undone.</strong>';
+
+  openModal(`
+    <div class="p-6">
+      <div class="flex items-center gap-3 mb-4">
+        <div class="w-10 h-10 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center flex-shrink-0">
+          <svg class="w-5 h-5 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+          </svg>
+        </div>
+        <div>
+          <h3 class="text-lg font-semibold">Delete Invite Code</h3>
+          <code class="text-xs font-mono text-surface-500">${escapeHtml(code)}</code>
+        </div>
+      </div>
+      <p class="text-sm text-surface-500 mb-5">${warning}</p>
+      <div class="flex justify-end gap-3">
+        <button onclick="closeModal()" class="btn-secondary">Cancel</button>
+        <button onclick="confirmDeleteInvite('${escapeHtml(code)}','${escapeHtml(uid || '')}')"
+          class="btn-danger flex items-center gap-2">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+          </svg>
+          Delete
+        </button>
+      </div>
+    </div>
+  `, { small: true });
+}
+
+async function confirmDeleteInvite(code, uid) {
+  closeModal();
+  try {
+    const db = firebase.firestore();
+    // Delete the invite code document
+    await db.collection('inviteCodes').doc(code).delete();
+    // If a user was associated, also remove their access record
+    if (uid) {
+      await db.collection('userAccess').doc(uid).delete().catch(() => {});
+    }
+    showToast('Invite code deleted', 'success');
+    renderInviteList();
+  } catch (err) {
+    showToast('Failed to delete invite code: ' + err.message, 'error');
   }
 }
 
