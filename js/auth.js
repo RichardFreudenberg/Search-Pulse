@@ -4,7 +4,7 @@
 
 // Version marker — visible in browser console (F12) so you can confirm
 // the live site is running the latest code after a hard refresh.
-console.log('[Pulse] auth.js loaded — version 20260428r (REST-delete)');
+console.log('[Pulse] auth.js loaded — version 20260428s (REST-delete+verify)');
 
 let currentUser = null;
 
@@ -828,6 +828,27 @@ async function confirmDeleteAccount() {
       const msg  = body?.error?.message || ('HTTP ' + delRes.status);
       throw Object.assign(new Error(msg), { code: 'auth/deletion-api-error' });
     }
+
+    // ── Step 3b: Verify the account is truly gone ─────────────────────────────
+    // Try signing in again — it MUST fail with a 400 if deletion worked.
+    // If it succeeds (200), the account still exists and we surface a real error
+    // instead of showing false "Account deleted" success.
+    const verifyRes = await fetch(
+      `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${encodeURIComponent(apiKey)}`,
+      {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ email, password: input.value, returnSecureToken: true }),
+      }
+    );
+    if (verifyRes.ok) {
+      // Account still exists — deletion silently failed; surface a real error
+      throw Object.assign(
+        new Error('Account could not be deleted. Please try again or contact support.'),
+        { code: 'auth/deletion-verify-failed' }
+      );
+    }
+    // verifyRes is 400 (user not found) — account is truly deleted ✓
 
     // ── Step 4: Clear the local Firebase SDK session ──────────────────────────
     await firebase.auth().signOut().catch(() => {});
