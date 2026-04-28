@@ -61,15 +61,75 @@ async function createNewInvite(note = '') {
   return record;
 }
 
-async function markInviteUsed(code, email) {
+async function markInviteUsed(code, email, name, uid) {
   try {
     await firebase.firestore().collection('inviteCodes').doc(code).update({
       usedByEmail: email,
+      usedByName:  name || null,
+      usedByUid:   uid  || null,
       usedAt:      new Date().toISOString(),
     });
+    // Create an access record so the owner can revoke this user later
+    if (uid) {
+      await firebase.firestore().collection('userAccess').doc(uid).set({
+        active:     true,
+        inviteCode: code,
+        createdAt:  new Date().toISOString(),
+      });
+    }
   } catch (err) {
     console.warn('[Pulse] markInviteUsed:', err.message);
   }
+}
+
+// ── Access revocation helpers (owner-only write, user-own read) ───────────────
+
+// Returns false if the current user's access has been revoked by the owner.
+// Fails open (returns true) so a Firestore rules error never locks out a user.
+async function checkUserAccess() {
+  const uid = firebase.auth().currentUser?.uid;
+  if (!uid) return true;
+  try {
+    const doc = await firebase.firestore().collection('userAccess').doc(uid).get();
+    if (!doc.exists) return true; // no record = legacy user or owner
+    return doc.data().active !== false;
+  } catch {
+    return true; // fail open — rules not yet updated or offline
+  }
+}
+
+async function revokeUserAccess(code, uid) {
+  const db = firebase.firestore();
+  const batch = db.batch();
+  if (code) {
+    batch.update(db.collection('inviteCodes').doc(code), {
+      deactivated:   true,
+      deactivatedAt: new Date().toISOString(),
+    });
+  }
+  if (uid) {
+    batch.set(db.collection('userAccess').doc(uid),
+      { active: false, updatedAt: new Date().toISOString() },
+      { merge: true });
+  }
+  await batch.commit();
+}
+
+async function restoreUserAccess(code, uid) {
+  const db = firebase.firestore();
+  const batch = db.batch();
+  if (code) {
+    batch.update(db.collection('inviteCodes').doc(code), {
+      deactivated:   false,
+      deactivatedAt: null,
+    });
+  }
+  if (uid) {
+    batch.set(db.collection('userAccess').doc(uid),
+      { active: true, updatedAt: new Date().toISOString() },
+      { merge: true });
+  }
+  await batch.commit();
 }
 
 // ── Ownership check ───────────────────────────────────────────────────────────
@@ -392,7 +452,7 @@ function setupAuthForms() {
           .set({ hasOwner: true, ownerUid: appUser.id, registeredAt: new Date().toISOString() });
       }
 
-      if (inviteRequired && inviteCode) markInviteUsed(inviteCode, email);
+      if (inviteRequired && inviteCode) markInviteUsed(inviteCode, email, name, appUser.id);
 
       localStorage.setItem('pulse_show_tutorial_' + appUser.id, '1');
 

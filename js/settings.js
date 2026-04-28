@@ -415,53 +415,123 @@ async function renderInviteList() {
   }
 
   container.innerHTML = invites.map((inv) => {
-    const isUsed = !!inv.usedAt;
-    const createdDate = new Date(inv.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
-    const usedDate  = inv.usedAt ? new Date(inv.usedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '';
-    const safeCode  = escapeHtml(inv.code);
-    const encodedCode = encodeURIComponent(inv.code);
+    const isUsed       = !!inv.usedAt;
+    const isRevoked    = !!inv.deactivated;
+    const createdDate  = new Date(inv.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+    const usedDate     = inv.usedAt ? new Date(inv.usedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '';
+    const safeCode     = escapeHtml(inv.code);
+    const encodedCode  = encodeURIComponent(inv.code);
+    const safeName     = escapeHtml(inv.usedByName  || '');
+    const safeEmail    = escapeHtml(inv.usedByEmail || '');
+    const safeUid      = escapeHtml(inv.usedByUid   || '');
+
+    // ── Visual state ─────────────────────────────────────────
+    let borderClass, dotClass, badgeHtml, codeClass;
+    if (isRevoked) {
+      borderClass = 'border-red-200 dark:border-red-900/40 bg-red-50 dark:bg-red-950/20';
+      dotClass    = 'bg-red-400';
+      codeClass   = 'text-red-400 dark:text-red-500 line-through';
+      badgeHtml   = `<span class="text-xs px-1.5 py-0.5 rounded-full bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 font-medium">Revoked</span>`;
+    } else if (isUsed) {
+      borderClass = 'border-surface-100 dark:border-surface-800 bg-surface-50 dark:bg-surface-900/40';
+      dotClass    = 'bg-surface-300';
+      codeClass   = 'text-surface-400';
+      badgeHtml   = `<span class="text-xs px-1.5 py-0.5 rounded-full bg-surface-200 dark:bg-surface-700 text-surface-500 font-medium">Used</span>`;
+    } else {
+      borderClass = 'border-brand-200 dark:border-brand-900/40 bg-brand-50 dark:bg-brand-950';
+      dotClass    = 'bg-green-400';
+      codeClass   = 'text-brand-700 dark:text-brand-300';
+      badgeHtml   = `<span class="text-xs px-1.5 py-0.5 rounded-full bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 font-medium">Active</span>`;
+    }
+
+    // ── User info line (for used codes) ──────────────────────
+    let userInfoHtml = '';
+    if (isUsed) {
+      const namePart  = safeName  ? `<span class="font-medium text-surface-600 dark:text-surface-300">${safeName}</span>` : '';
+      const emailPart = safeEmail ? `<span class="${safeName ? 'text-surface-400' : 'font-medium text-surface-600 dark:text-surface-300'}">${safeEmail}</span>` : 'unknown';
+      const who       = [namePart, emailPart].filter(Boolean).join(' &middot; ');
+      userInfoHtml    = ` &middot; ${who} &middot; ${usedDate}`;
+    }
+
+    // ── Action buttons ───────────────────────────────────────
+    let actionHtml = '';
+    if (!isUsed) {
+      // Unused: copy + share link
+      actionHtml = `
+        <div class="flex items-center gap-1.5 flex-shrink-0">
+          <button onclick="settingsCopyInvite('${safeCode}')" title="Copy invite code"
+            class="inline-flex items-center gap-1 text-xs px-2 py-1 rounded border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-800 hover:bg-surface-50 dark:hover:bg-surface-700 text-surface-700 dark:text-surface-300 transition-colors">
+            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+            Copy
+          </button>
+          <button onclick="settingsCopyShareLink('${encodedCode}')" title="Copy share link with pre-filled code"
+            class="inline-flex items-center gap-1 text-xs px-2 py-1 rounded border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-800 hover:bg-surface-50 dark:hover:bg-surface-700 text-surface-700 dark:text-surface-300 transition-colors">
+            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z"/></svg>
+            Share link
+          </button>
+        </div>`;
+    } else if (safeUid) {
+      // Used code with a known UID: show revoke or restore
+      if (isRevoked) {
+        actionHtml = `
+          <div class="flex items-center gap-1.5 flex-shrink-0">
+            <button onclick="settingsRestoreInvite('${safeCode}','${safeUid}')"
+              class="inline-flex items-center gap-1 text-xs px-2 py-1 rounded border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-800 hover:bg-surface-50 dark:hover:bg-surface-700 text-surface-700 dark:text-surface-300 transition-colors">
+              <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
+              Restore
+            </button>
+          </div>`;
+      } else {
+        actionHtml = `
+          <div class="flex items-center gap-1.5 flex-shrink-0">
+            <button onclick="settingsRevokeInvite('${safeCode}','${safeUid}')"
+              class="inline-flex items-center gap-1 text-xs px-2 py-1 rounded border border-red-200 dark:border-red-800 bg-white dark:bg-surface-800 hover:bg-red-50 dark:hover:bg-red-900/20 text-red-600 dark:text-red-400 transition-colors">
+              <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"/></svg>
+              Revoke
+            </button>
+          </div>`;
+      }
+    }
 
     return `
-      <div class="flex items-start gap-3 p-3 rounded-lg border ${isUsed
-        ? 'border-surface-100 dark:border-surface-800 bg-surface-50 dark:bg-surface-900/40'
-        : 'border-brand-200 dark:border-brand-900/40 bg-brand-50 dark:bg-brand-950'}">
-
-        <!-- Status dot -->
+      <div class="flex items-start gap-3 p-3 rounded-lg border ${borderClass}">
         <div class="mt-1 flex-shrink-0">
-          <span class="inline-block w-2 h-2 rounded-full ${isUsed ? 'bg-surface-300' : 'bg-green-400'}"></span>
+          <span class="inline-block w-2 h-2 rounded-full ${dotClass}"></span>
         </div>
-
-        <!-- Code + meta -->
         <div class="flex-1 min-w-0">
           <div class="flex items-center flex-wrap gap-2 mb-0.5">
-            <code class="font-mono text-sm font-semibold tracking-wider ${isUsed ? 'text-surface-400' : 'text-brand-700 dark:text-brand-300'}">${safeCode}</code>
-            ${isUsed
-              ? `<span class="text-xs px-1.5 py-0.5 rounded-full bg-surface-200 dark:bg-surface-700 text-surface-500 font-medium">Used</span>`
-              : `<span class="text-xs px-1.5 py-0.5 rounded-full bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 font-medium">Active</span>`}
+            <code class="font-mono text-sm font-semibold tracking-wider ${codeClass}">${safeCode}</code>
+            ${badgeHtml}
           </div>
           <p class="text-xs text-surface-400">
-            Created ${createdDate}${inv.note ? ` · <em>${escapeHtml(inv.note)}</em>` : ''}
-            ${isUsed ? ` · Used by <span class="font-medium text-surface-600 dark:text-surface-300">${escapeHtml(inv.usedByEmail || 'unknown')}</span> on ${usedDate}` : ''}
+            Created ${createdDate}${inv.note ? ` &middot; <em>${escapeHtml(inv.note)}</em>` : ''}${userInfoHtml}
           </p>
         </div>
-
-        <!-- Action buttons (only for unused codes) -->
-        ${!isUsed ? `
-          <div class="flex items-center gap-1.5 flex-shrink-0">
-            <button onclick="settingsCopyInvite('${safeCode}')" title="Copy invite code"
-              class="inline-flex items-center gap-1 text-xs px-2 py-1 rounded border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-800 hover:bg-surface-50 dark:hover:bg-surface-700 text-surface-700 dark:text-surface-300 transition-colors">
-              <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
-              Copy
-            </button>
-            <button onclick="settingsCopyShareLink('${encodedCode}')" title="Copy share link with pre-filled code"
-              class="inline-flex items-center gap-1 text-xs px-2 py-1 rounded border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-800 hover:bg-surface-50 dark:hover:bg-surface-700 text-surface-700 dark:text-surface-300 transition-colors">
-              <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z"/></svg>
-              Share link
-            </button>
-          </div>
-        ` : ''}
+        ${actionHtml}
       </div>`;
   }).join('');
+}
+
+async function settingsRevokeInvite(code, uid) {
+  if (!(await isOwner())) return;
+  try {
+    await revokeUserAccess(code, uid);
+    showToast('Access revoked', 'success');
+    renderInviteList();
+  } catch (err) {
+    showToast('Failed to revoke: ' + err.message, 'error');
+  }
+}
+
+async function settingsRestoreInvite(code, uid) {
+  if (!(await isOwner())) return;
+  try {
+    await restoreUserAccess(code, uid);
+    showToast('Access restored', 'success');
+    renderInviteList();
+  } catch (err) {
+    showToast('Failed to restore: ' + err.message, 'error');
+  }
 }
 
 async function settingsGenerateInvite() {

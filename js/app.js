@@ -792,6 +792,14 @@ function initApp() {
       // once demo data is seeded. Skip here to avoid a race condition.
       if (window._pRegistering) return;
 
+      // Check if the owner has revoked this user's access
+      const hasAccess = await checkUserAccess().catch(() => true);
+      if (!hasAccess) {
+        await firebase.auth().signOut().catch(() => {});
+        showToast('Your access has been deactivated. Please contact the owner.', 'error');
+        return;
+      }
+
       const appUser = {
         id:            fbUser.uid,
         name:          fbUser.displayName || fbUser.email.split('@')[0],
