@@ -2,6 +2,10 @@
    Pulse — Authentication (Firebase Auth)
    ============================================ */
 
+// Version marker — visible in browser console (F12) so you can confirm
+// the live site is running the latest code after a hard refresh.
+console.log('[Pulse] auth.js loaded — version 20260428q (REST-delete)');
+
 let currentUser = null;
 
 // ─── Invite System ────────────────────────────────────────────────────────────
