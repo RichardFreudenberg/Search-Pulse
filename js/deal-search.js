@@ -106,6 +106,9 @@ async function renderDealSearch() {
         <button id="ds-tab-import" onclick="dsSwitchTab('import')" class="px-4 py-2 rounded-lg text-sm font-medium transition-colors text-surface-500 dark:text-surface-400 hover:text-surface-900 dark:hover:text-surface-100">
           📥 Import from Excel
         </button>
+        <button id="ds-tab-hr" onclick="dsSwitchTab('handelsregister')" class="px-4 py-2 rounded-lg text-sm font-medium transition-colors text-surface-500 dark:text-surface-400 hover:text-surface-900 dark:hover:text-surface-100">
+          🇩🇪 Handelsregister
+        </button>
       </div>
 
       <!-- LISTINGS TAB -->
@@ -190,6 +193,9 @@ async function renderDealSearch() {
       <div id="ds-import-panel" class="hidden">
         ${renderExcelImportPanel()}
       </div>
+
+      <!-- HANDELSREGISTER TAB — rendered lazily on first open -->
+      <div id="ds-hr-panel" class="hidden"></div>
     </div>
   `;
 }
@@ -199,9 +205,26 @@ async function renderDealSearch() {
 function dsSwitchTab(tab) {
   _dsActiveTab = tab;
   document.getElementById('ds-listings-panel').classList.toggle('hidden', tab !== 'listings');
-  document.getElementById('ds-import-panel').classList.toggle('hidden', tab !== 'import');
-  document.getElementById('ds-tab-listings').className = `px-4 py-2 rounded-lg text-sm font-medium transition-colors ${tab === 'listings' ? 'bg-white dark:bg-surface-700 shadow-sm text-surface-900 dark:text-surface-100' : 'text-surface-500 dark:text-surface-400 hover:text-surface-900 dark:hover:text-surface-100'}`;
-  document.getElementById('ds-tab-import').className = `px-4 py-2 rounded-lg text-sm font-medium transition-colors ${tab === 'import' ? 'bg-white dark:bg-surface-700 shadow-sm text-surface-900 dark:text-surface-100' : 'text-surface-500 dark:text-surface-400 hover:text-surface-900 dark:hover:text-surface-100'}`;
+  document.getElementById('ds-import-panel').classList.toggle('hidden',   tab !== 'import');
+  document.getElementById('ds-hr-panel').classList.toggle('hidden',       tab !== 'handelsregister');
+
+  const active   = 'px-4 py-2 rounded-lg text-sm font-medium transition-colors bg-white dark:bg-surface-700 shadow-sm text-surface-900 dark:text-surface-100';
+  const inactive = 'px-4 py-2 rounded-lg text-sm font-medium transition-colors text-surface-500 dark:text-surface-400 hover:text-surface-900 dark:hover:text-surface-100';
+  document.getElementById('ds-tab-listings').className = tab === 'listings'       ? active : inactive;
+  document.getElementById('ds-tab-import').className   = tab === 'import'         ? active : inactive;
+  document.getElementById('ds-tab-hr').className       = tab === 'handelsregister' ? active : inactive;
+
+  // Lazy-init the HR panel on first open
+  if (tab === 'handelsregister') {
+    const hrPanel = document.getElementById('ds-hr-panel');
+    if (hrPanel && !hrPanel.dataset.initialized) {
+      hrPanel.innerHTML = typeof renderHandelsregisterPanel === 'function'
+        ? renderHandelsregisterPanel()
+        : '<p class="p-8 text-surface-400 text-sm">Handelsregister module not loaded.</p>';
+      hrPanel.dataset.initialized = '1';
+      if (typeof initHandelsregisterPanel === 'function') initHandelsregisterPanel();
+    }
+  }
 }
 
 // ─── Source Toggling ──────────────────────────────────────────────────────────
