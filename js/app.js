@@ -822,37 +822,9 @@ function initApp() {
       // signOut() and revoke the token before fbUser.delete() runs.
       if (window._pDeletingAccount) return;
 
-      // ── Session policy ────────────────────────────────────────────────────
-      // Users must log in every time they open the site unless they explicitly
-      // checked "Remember me for 7 days". We enforce this by checking two
-      // localStorage/sessionStorage markers set during sign-in:
-      //
-      //   pulse_remember_until  (localStorage)  — timestamp, set only when
-      //     "Remember me" was checked. Expires after 7 days.
-      //   pulse_session_active  (sessionStorage) — set for normal logins.
-      //     sessionStorage is automatically cleared when the browser closes,
-      //     so this naturally expires at the end of the browser session.
-      //
-      // If neither marker is present the user has a stale LOCAL-persisted
-      // session from before this feature was introduced — sign them out once.
-      // ─────────────────────────────────────────────────────────────────────
-      const rememberUntil = localStorage.getItem('pulse_remember_until');
-      const sessionActive = sessionStorage.getItem('pulse_session_active');
-
-      if (rememberUntil) {
-        if (Date.now() > parseInt(rememberUntil, 10)) {
-          // Remember-me has expired — force re-login
-          localStorage.removeItem('pulse_remember_until');
-          await firebase.auth().signOut().catch(() => {});
-          return;
-        }
-        // else: valid remember-me session — continue
-      } else if (!sessionActive) {
-        // No valid session marker — legacy LOCAL session or stale token
-        await firebase.auth().signOut().catch(() => {});
-        return;
-      }
-      // ─────────────────────────────────────────────────────────────────────
+      // Firebase LOCAL persistence keeps the user signed in across page reloads,
+      // new tabs, and browser restarts. Token refresh is handled automatically.
+      // No custom session markers are needed.
 
       // Check if the owner has revoked this user's access
       const hasAccess = await checkUserAccess().catch(() => true);
@@ -895,10 +867,8 @@ function initApp() {
       if (!window._pRegistering && !window._pResettingPassword && !window._pDeletingAccount) {
         const appShell = document.getElementById('app-shell');
         if (appShell && !appShell.classList.contains('hidden')) {
-          // App was showing — force back to login
+          // App was showing — force back to login (token expired or signed out)
           currentUser = null;
-          localStorage.removeItem('pulse_remember_until');
-          sessionStorage.removeItem('pulse_session_active');
           appShell.classList.add('hidden');
           document.getElementById('auth-screen')?.classList.remove('hidden');
           showAuthLogin();

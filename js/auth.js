@@ -4,7 +4,7 @@
 
 // Version marker — visible in browser console (F12) so you can confirm
 // the live site is running the latest code after a hard refresh.
-console.log('[Pulse] auth.js loaded — version 20260428u (REST-delete+verify+reload)');
+console.log('[Pulse] auth.js loaded — version 20260428v (LOCAL-persistence-always)');
 
 let currentUser = null;
 
@@ -215,7 +215,15 @@ function setCurrentUser(user) {
   currentUser = user;
   const nameEl   = document.getElementById('sidebar-user-name');
   const avatarEl = document.getElementById('user-avatar-initial');
-  if (nameEl)   nameEl.textContent   = user.name;
+  if (nameEl) {
+    // Show name + email so the user always knows which account they're on
+    nameEl.classList.remove('truncate');
+    nameEl.innerHTML =
+      `<span class="block truncate font-medium">${escapeHtml(user.name)}</span>` +
+      (user.email
+        ? `<span class="block truncate text-surface-400 dark:text-surface-500" style="font-size:10px;">${escapeHtml(user.email)}</span>`
+        : '');
+  }
   if (avatarEl) avatarEl.textContent = user.name.charAt(0).toUpperCase();
 }
 
@@ -489,36 +497,16 @@ function setupAuthForms() {
       const password   = document.getElementById('login-password').value;
       const rememberMe = document.getElementById('login-remember')?.checked || false;
 
-      // Set Firebase persistence BEFORE signing in:
-      //   LOCAL   = survives browser restart (only when "Remember me" is checked)
-      //   SESSION = cleared when the tab/browser closes (default)
-      await firebase.auth().setPersistence(
-        rememberMe
-          ? firebase.auth.Auth.Persistence.LOCAL
-          : firebase.auth.Auth.Persistence.SESSION
-      );
-
-      // ⚠️  CRITICAL: set session markers BEFORE signInWithEmailAndPassword.
-      // Firebase fires onAuthStateChanged during (not after) the sign-in await,
-      // so if we set markers after, the policy check sees nothing and immediately
-      // signs the user back out — making the button appear to do nothing.
-      if (rememberMe) {
-        localStorage.setItem('pulse_remember_until',
-          String(Date.now() + 7 * 24 * 60 * 60 * 1000));
-        sessionStorage.removeItem('pulse_session_active');
-      } else {
-        localStorage.removeItem('pulse_remember_until');
-        sessionStorage.setItem('pulse_session_active', '1');
-      }
+      // Always use LOCAL persistence — auth state survives page reloads, new tabs,
+      // and browser restarts. This prevents data from "disappearing" when the user
+      // opens a new tab (sessionStorage is per-tab and not shared between tabs).
+      await firebase.auth().setPersistence(firebase.auth.Auth.Persistence.LOCAL);
 
       window._freshLogin = true;
       await firebase.auth().signInWithEmailAndPassword(email, password);
       // onAuthStateChanged will call showApp() — nothing more needed here
     } catch (err) {
       window._freshLogin = false;
-      // Sign-in failed — remove any markers we just set
-      localStorage.removeItem('pulse_remember_until');
-      sessionStorage.removeItem('pulse_session_active');
       // auth/user-not-found and auth/invalid-credential both fire when an
       // account doesn't exist (including deleted accounts).  Show a hint so
       // the user knows they need to register rather than keep retrying login.
@@ -574,9 +562,8 @@ function setupAuthForms() {
         }
       }
 
-      // New accounts use SESSION persistence by default — user must log in again
-      // after closing the browser (same policy as "no remember me" on login)
-      await firebase.auth().setPersistence(firebase.auth.Auth.Persistence.SESSION);
+      // Use LOCAL persistence — auth state survives page reloads and new tabs
+      await firebase.auth().setPersistence(firebase.auth.Auth.Persistence.LOCAL);
 
       // Create Firebase Auth account — onAuthStateChanged will fire but will
       // see window._pRegistering === true and skip showApp()
@@ -605,8 +592,6 @@ function setupAuthForms() {
 
       // All data is ready — now safe to show the app
       window._pRegistering = false;
-      // Mark this as a valid active session (SESSION persistence)
-      sessionStorage.setItem('pulse_session_active', '1');
       showApp();
       showToast('Welcome to Pulse, ' + name.split(' ')[0] + '!', 'success');
     } catch (err) {
