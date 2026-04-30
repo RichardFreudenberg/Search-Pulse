@@ -27,7 +27,12 @@ async function renderSourcing() {
   } catch (_) {}
 
   container.innerHTML = `<div class="p-4 lg:p-8 max-w-7xl mx-auto animate-fade-in">
-    ${renderPageHeader('Sourcing', 'Outreach tracker & AI letter writer')}
+    ${renderPageHeader('Sourcing', 'Outreach tracker & AI letter writer', `
+      <button onclick="openSourcingAnalyserModal()" class="btn-secondary btn-sm" title="AI analysis of your outreach campaigns">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7.5 14.25v2.25m3-4.5v4.5m3-6.75v6.75m3-9v9M6 20.25h12A2.25 2.25 0 0020.25 18V6A2.25 2.25 0 0018 3.75H6A2.25 2.25 0 003.75 6v12A2.25 2.25 0 006 20.25z"/></svg>
+        Analyse Campaigns
+      </button>
+    `)}
 
     <div id="sourcing-stats-row">
       ${_sourcingStatsHtml(campaigns)}

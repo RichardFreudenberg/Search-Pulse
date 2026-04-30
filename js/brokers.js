@@ -24,7 +24,13 @@ async function renderBrokers() {
   } catch (_) {}
 
   container.innerHTML = `<div class="p-4 lg:p-8 max-w-7xl mx-auto animate-fade-in">
-    ${renderPageHeader('Brokers', 'Track your M&A broker & intermediary relationships')}
+    ${renderPageHeader('Brokers', 'Track your M&A broker & intermediary relationships', `
+      <button onclick="openBrokerIntelligenceModal()" class="btn-secondary btn-sm" title="AI analysis of your broker network">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z"/></svg>
+        Broker Intelligence
+      </button>
+      <button onclick="openAddBrokerModal()" class="btn-primary btn-sm">+ Add Broker</button>
+    `)}
 
     <div id="brokers-stats-row">
       ${_brokersStatsHtml(brokers)}

@@ -43,6 +43,7 @@ async function viewDeal(dealId) {
     { id: 'model',      label: 'Financial Model', icon: '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3.75 3v11.25A2.25 2.25 0 006 16.5h2.25M3.75 3h-1.5m1.5 0h16.5m0 0h1.5m-1.5 0v11.25A2.25 2.25 0 0118 16.5h-2.25m-7.5 0h7.5m-7.5 0l-1 3m8.5-3l1 3m0 0l.5 1.5m-.5-1.5h-9.5m0 0l-.5 1.5M9 11.25v1.5M12 9v3.75m3-6v6" /></svg>' },
     { id: 'nda',        label: 'NDA',           icon: '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.955 11.955 0 003 12c0 6.627 5.373 12 12 12s12-5.373 12-12c0-2.13-.558-4.128-1.534-5.856"/></svg>' },
     { id: 'history',    label: 'History',       icon: '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>' },
+    { id: 'rejection',  label: 'Pass Reasons',  icon: '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.75 9.75l4.5 4.5m0-4.5l-4.5 4.5M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>' },
   ];
 
   const stageColor = DEAL_STAGE_COLORS[deal.stage] || 'gray';
@@ -71,6 +72,14 @@ async function viewDeal(dealId) {
           <button onclick="openDealMemo('${dealId}')" class="btn-secondary btn-sm" title="Generate AI investment memo">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" /></svg>
             Investment Memo
+          </button>
+          <button onclick="openFirstCallScriptModal('${dealId}')" class="btn-secondary btn-sm" title="AI first-call script for owner conversations">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 002.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 01-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 00-1.091-.852H4.5A2.25 2.25 0 002.25 4.5v2.25z"/></svg>
+            First-Call Script
+          </button>
+          <button onclick="openDealValuationModal('${dealId}')" class="btn-secondary btn-sm" title="AI valuation — search-fund-calibrated EV/EBITDA ranges">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z" /></svg>
+            Valuation
           </button>
           ${!['Closed - Won', 'Closed - Lost', 'Rejected'].includes(deal.stage) ? `<button onclick="openKillDealModal('${dealId}', '${escapeHtml(deal.name).replace(/'/g, "\\'")}')" class="btn-secondary btn-sm text-red-600 border-red-300 hover:bg-red-50 dark:hover:bg-red-900/10">Kill Deal</button>` : ''}
           <button onclick="deleteDeal('${dealId}')" class="btn-danger btn-sm">Delete</button>
@@ -167,6 +176,7 @@ async function switchDealTab(tabId) {
     case 'model':     container.innerHTML = await renderDealFinancialModelTab(); break;
     case 'nda':       container.innerHTML = renderDealNdaTab(currentDealId); break;
     case 'dd':        container.innerHTML = await renderDealDDTab(currentDealId); break;
+    case 'rejection': container.innerHTML = await renderDealRejectionTab(currentDealId); break;
     default:          container.innerHTML = await renderDealOverviewTab();
   }
 }
