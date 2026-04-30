@@ -623,15 +623,33 @@ async function seedDemoData(userId) {
 // Seed Demo Deal — Apex Precision Manufacturing
 // ============================================
 async function seedDemoDeal(userId) {
-  // Primary guard: Firestore flag — works across ALL devices.
+  // Guard 1 (PRIMARY): Cloud-backed Firestore flag — works across ALL devices.
   // Once the demo deal has been seeded (or cleared), demoSeeded = true in the
   // user's settings document and we never seed again, regardless of device.
   try {
     const settings = await DB.get(STORES.settings, `settings_${userId}`);
     if (settings?.demoSeeded) return;
   } catch (_) {}
-  // Legacy local flag — kept for backward compat on same-device sessions
+
+  // Guard 2: Legacy local flag — same-device backward compat
   if (localStorage.getItem('pulse_demo_cleared_' + userId)) return;
+
+  // Guard 3 (SAFETY NET): If the user already has ANY deals or contacts,
+  // never touch their data. This protects existing users whose settings don't
+  // yet have the demoSeeded flag (e.g. accounts created before this version).
+  // Also writes the Firestore flag so Guard 1 catches future logins instantly.
+  try {
+    const [existingDeals, existingContacts] = await Promise.all([
+      DB.getAll(STORES.deals).catch(() => []),
+      DB.getAll(STORES.contacts).catch(() => []),
+    ]);
+    if (existingDeals.length > 0 || existingContacts.length > 0) {
+      // User has data — stamp the flag now so Guard 1 fires next time
+      const s = await DB.get(STORES.settings, `settings_${userId}`).catch(() => null);
+      if (s) await DB.put(STORES.settings, { ...s, demoSeeded: true }).catch(() => {});
+      return;
+    }
+  } catch (_) {}
 
   // Helper: ISO date string N days from today (negative = past, positive = future)
   const fromToday = n => addDays(new Date(), n);

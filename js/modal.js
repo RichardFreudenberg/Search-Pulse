@@ -10,13 +10,29 @@ function setModalCloseGuard(guardFn) {
   _modalCloseGuard = guardFn;
 }
 
-function openModal(contentHtmlOrTitle, optionsOrContent = {}) {
-  // Support two calling conventions:
-  // openModal(html, options?)  — original
-  // openModal(title, html)     — used by deal modules (title becomes an h2 header)
+function openModal(contentHtmlOrTitle, optionsOrContent = {}, buttonsArr = null) {
+  // Support three calling conventions:
+  // openModal(html, options?)              — original (deal modules, confirm dialogs)
+  // openModal(title, html)                 — 2-arg with title header
+  // openModal(title, html, buttons[])      — 3-arg with title header + rendered footer buttons
+  //   buttons[]: [{ label, onclick, class?, id? }, ...]
   let contentHtml, options;
   if (typeof optionsOrContent === 'string') {
-    contentHtml = `<div class="px-6 pt-6 pb-2 border-b border-surface-200 dark:border-surface-800"><h2 class="text-lg font-semibold">${escapeHtml(contentHtmlOrTitle)}</h2></div>${optionsOrContent}`;
+    // 2nd arg is a string → title + body + optional footer buttons
+    const headerHtml = `<div class="px-6 pt-5 pb-3 border-b border-surface-200 dark:border-surface-800 flex items-center justify-between">
+      <h2 class="text-base font-semibold">${escapeHtml(contentHtmlOrTitle)}</h2>
+      <button onclick="closeModal()" class="p-1 rounded hover:bg-surface-100 dark:hover:bg-surface-800 text-surface-400 hover:text-surface-600 dark:hover:text-surface-300 transition-colors">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+      </button>
+    </div>`;
+    const footerHtml = (buttonsArr && buttonsArr.length > 0)
+      ? `<div class="px-6 py-4 border-t border-surface-200 dark:border-surface-800 flex justify-end gap-3 flex-shrink-0">
+          ${buttonsArr.map(b =>
+            `<button ${b.id ? `id="${b.id}"` : ''} onclick="${b.onclick}" class="${b.class || 'btn-secondary'}">${b.label}</button>`
+          ).join('')}
+        </div>`
+      : '';
+    contentHtml = headerHtml + optionsOrContent + footerHtml;
     options = {};
   } else {
     contentHtml = contentHtmlOrTitle;

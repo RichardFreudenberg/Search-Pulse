@@ -49,15 +49,26 @@ async function renderDashboard() {
   const pageContent = document.getElementById('page-content');
   pageContent.innerHTML = `<div class="p-4 lg:p-8 max-w-7xl mx-auto">${renderLoadingSkeleton(5)}</div>`;
 
+  // Track whether Firestore reads succeed so we can warn the user if they all fail
+  let _firestoreOk = true;
+  const _safeLoad = (promise) => promise.catch(err => { _firestoreOk = false; return []; });
+
   const [contacts, companies, calls, reminders, activities, layout, allDeals] = await Promise.all([
-    DB.getForUser(STORES.contacts, currentUser.id),
-    DB.getForUser(STORES.companies, currentUser.id),
-    DB.getForUser(STORES.calls, currentUser.id),
-    DB.getForUser(STORES.reminders, currentUser.id),
-    DB.getForUser(STORES.activities, currentUser.id),
+    _safeLoad(DB.getForUser(STORES.contacts, currentUser.id)),
+    _safeLoad(DB.getForUser(STORES.companies, currentUser.id)),
+    _safeLoad(DB.getForUser(STORES.calls, currentUser.id)),
+    _safeLoad(DB.getForUser(STORES.reminders, currentUser.id)),
+    _safeLoad(DB.getForUser(STORES.activities, currentUser.id)),
     getDashboardLayout(),
-    DB.getAll(STORES.deals).then(all => all.filter(d => d.userId === currentUser.id)).catch(() => []),
+    DB.getAll(STORES.deals).then(all => all.filter(d => d.userId === currentUser.id)).catch(() => { _firestoreOk = false; return []; }),
   ]);
+
+  // Show a data-load warning if Firestore failed OR all main collections are empty
+  // but the user has been set up (demoSeeded flag exists — they've had data before)
+  const _settings = await DB.get(STORES.settings, `settings_${currentUser.id}`).catch(() => null);
+  const _allEmpty = contacts.length === 0 && calls.length === 0 && allDeals.length === 0;
+  const _hadDataBefore = _settings?.demoSeeded === true;
+  const _showDataWarning = !_firestoreOk || (_allEmpty && _hadDataBefore);
 
   const activeContacts = getActiveContacts(contacts);
   const overdueFollowUps = activeContacts.filter(c => c.nextFollowUpDate && isOverdue(c.nextFollowUpDate));
@@ -548,6 +559,17 @@ async function renderDashboard() {
 
   pageContent.innerHTML = `
     <div class="p-4 lg:p-8 max-w-7xl mx-auto animate-fade-in">
+
+      ${_showDataWarning ? `
+      <div class="mb-6 flex items-start gap-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 rounded-xl px-4 py-3">
+        <svg class="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/></svg>
+        <div class="flex-1 min-w-0">
+          <p class="text-sm font-semibold text-amber-800 dark:text-amber-300">Your data may not have loaded</p>
+          <p class="text-xs text-amber-700 dark:text-amber-400 mt-0.5">This can happen if there's a connection issue. You are signed in as <strong>${escapeHtml(currentUser?.email || '')}</strong>. Try refreshing the page.</p>
+        </div>
+        <button onclick="window.location.reload()" class="text-xs font-medium text-amber-700 dark:text-amber-400 hover:text-amber-900 dark:hover:text-amber-200 whitespace-nowrap ml-2 flex-shrink-0">Refresh →</button>
+      </div>` : ''}
+
       <div class="flex items-center justify-between mb-2 flex-wrap gap-3">
         <div>
           <div class="greeting">${_greetingWord}, ${_firstName}.</div>
