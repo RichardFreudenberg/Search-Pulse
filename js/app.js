@@ -882,6 +882,9 @@ function initApp() {
       // Offer to migrate any old local IndexedDB data to Firestore
       setTimeout(() => showMigrationPromptIfNeeded().catch(() => {}), 1500);
 
+      // Refresh the To Do badge in the top bar
+      setTimeout(() => { if (typeof refreshTodoBadge === 'function') refreshTodoBadge().catch(() => {}); }, 2000);
+
     } else {
       // ── No authenticated user ─────────────────────────────────────────────
       // This fires when:

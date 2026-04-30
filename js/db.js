@@ -40,6 +40,7 @@ const STORES = {
   granolaImports:    'granolaImports',
   meetingSessions:   'meetingSessions',
   brokers:           'brokers',
+  todos:             'todos',
 };
 
 // Returns the Firestore subcollection for the current user
