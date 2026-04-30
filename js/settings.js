@@ -193,7 +193,7 @@ async function renderSettings() {
             ${_managed('rapidApiKey') ? _managedBadge : `<input type="password" id="settings-rapidapi-key" class="input-field" placeholder="Paste your RapidAPI key…" value="${settings?.rapidApiKey || ''}" />`}
           </div>
 
-          <div class="py-4 last:pb-0">
+          <div class="py-4">
             <div class="flex items-start justify-between mb-2">
               <div>
                 <p class="text-sm font-semibold">Google Places API Key <span class="text-xs font-normal text-surface-400 ml-1">Company Scout</span></p>
@@ -202,6 +202,17 @@ async function renderSettings() {
               ${!_managed('googlePlacesApiKey') && settings?.googlePlacesApiKey ? `<span class="text-xs px-2 py-0.5 rounded-full bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 font-medium flex-shrink-0 ml-3">✓ Set</span>` : ''}
             </div>
             ${_managed('googlePlacesApiKey') ? _managedBadge : `<input type="password" id="settings-google-places-key" class="input-field" placeholder="AIza…" value="${settings?.googlePlacesApiKey || ''}" />`}
+          </div>
+
+          <div class="py-4 last:pb-0">
+            <div class="flex items-start justify-between mb-2">
+              <div>
+                <p class="text-sm font-semibold">OpenCorporates API Token <span class="text-xs font-normal text-surface-400 ml-1">German Handelsregister</span></p>
+                <p class="text-xs text-surface-400">Unlocks 500 searches/month via Handelsregister search · free account at <a href="https://opencorporates.com/users/account_requests/new" target="_blank" class="text-brand-600 hover:underline">opencorporates.com</a> · without token: ~50 searches/month</p>
+              </div>
+              ${settings?.openCorporatesApiToken ? `<span class="text-xs px-2 py-0.5 rounded-full bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 font-medium flex-shrink-0 ml-3">✓ Set</span>` : ''}
+            </div>
+            <input type="password" id="settings-oc-token" class="input-field" placeholder="Paste your OpenCorporates token…" value="${escapeHtml(settings?.openCorporatesApiToken || '')}" />
           </div>
 
         </div>
@@ -659,7 +670,8 @@ async function saveSettings() {
   if (_sf('settings-tavily-key'))        settings.tavilyApiKey       = _sf('settings-tavily-key').value.trim();
   if (_sf('settings-firecrawl-key'))     settings.firecrawlApiKey    = _sf('settings-firecrawl-key').value.trim();
   if (_sf('settings-rapidapi-key'))      settings.rapidApiKey        = _sf('settings-rapidapi-key').value.trim();
-  if (_sf('settings-google-places-key')) settings.googlePlacesApiKey = _sf('settings-google-places-key').value.trim();
+  if (_sf('settings-google-places-key')) settings.googlePlacesApiKey    = _sf('settings-google-places-key').value.trim();
+  if (_sf('settings-oc-token'))          settings.openCorporatesApiToken = _sf('settings-oc-token').value.trim();
   settings.linkedInProfileUrl = document.getElementById('settings-linkedin-url').value.trim();
   settings.linkedInConnected = !!settings.linkedInProfileUrl;
 

@@ -10,7 +10,7 @@
   <!-- Auto-reload when a new version is deployed (no manual refresh needed) -->
   <script>
   (function(){
-    var RUNNING = '20260430c';
+    var RUNNING = '20260430d';
     fetch('version.json?_=' + Date.now(), { cache: 'no-store' })
       .then(function(r){ return r.ok ? r.json() : null; })
       .then(function(d){
@@ -336,7 +336,7 @@
         </div>
       </div>
     </div><!-- /sp-card-outer -->
-    <p style="text-align:center;font-size:11px;color:#c4c4d4;margin-top:12px;user-select:none;">v20260430c</p>
+    <p style="text-align:center;font-size:11px;color:#c4c4d4;margin-top:12px;user-select:none;">v20260430d</p>
   </div><!-- /auth-screen -->
 
   <!-- Main App -->
@@ -718,6 +718,7 @@
   <script src="js/weekly-digest.js?v=1"></script>
   <script src="js/first-call-script.js?v=1"></script>
   <script src="js/sourcing-analyser.js?v=1"></script>
+  <script src="js/handelsregister.js?v=1"></script>
   <script src="js/todos.js?v=1"></script>
   <script src="js/app.js?v=20260430"></script>
   <!-- EmailJS — for real email verification on signup -->

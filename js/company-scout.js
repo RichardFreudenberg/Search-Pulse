@@ -74,7 +74,11 @@ async function renderCompanyScout() {
 
   pageContent.innerHTML = `
     <div class="p-4 lg:p-8 max-w-7xl mx-auto animate-fade-in">
-      ${renderPageHeader('Company Scout', 'Click the map to pick a location, choose an industry, and discover real businesses')}
+      ${renderPageHeader('Company Scout', 'Click the map to pick a location, choose an industry, and discover real businesses',
+        `<button onclick="openHandelsregisterModal()" class="btn-secondary flex items-center gap-2">
+           <span class="text-base leading-none">🇩🇪</span>
+           <span>Handelsregister</span>
+         </button>`)}
 
       <!-- Map + Controls -->
       <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
