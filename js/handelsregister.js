@@ -320,23 +320,13 @@ async function _hrSearch() {
     state = document.getElementById('hr-state')?.value || 'de';
     if (!query) { document.getElementById('hr-query')?.focus(); return; }
   } else {
-    // Area mode: keyword optional, state from dropdown (set by map click or manually)
+    // Area mode — the jurisdiction_code handles the location filter.
+    // Do NOT append the city to the query: OC searches company *names*, not
+    // addresses, so "Sanitär München" finds companies literally called that.
     const keyword = (document.getElementById('hr-keyword-area')?.value || '').trim();
-    const city    = _hrAreaCity;
     state = document.getElementById('hr-state-area')?.value || _hrAreaState || 'de';
-    // Build query: keyword, or city name, or generic
-    if (keyword && city) {
-      query = `${keyword} ${city}`;
-    } else if (keyword) {
-      query = keyword;
-    } else if (city) {
-      query = city;
-    } else {
-      // No keyword, no city — prompt for at least something
-      const kw = document.getElementById('hr-keyword-area');
-      if (kw) { kw.focus(); kw.placeholder = 'Enter a keyword or click the map first…'; }
-      return;
-    }
+    // Default to broad search when no keyword given
+    query = keyword || 'GmbH';
   }
 
   const area   = document.getElementById('hr-results-area');
@@ -367,15 +357,19 @@ async function _hrSearch() {
     const settings = await DB.get(STORES.settings, `settings_${currentUser.id}`).catch(() => ({})) || {};
     const token    = settings.openCorporatesApiToken || '';
 
+    // ── Build params ──────────────────────────────────────────────────────────
+    // IMPORTANT: do NOT include `order=score` — it silently returns 0 results
+    // for unauthenticated requests on the free tier.
     const params = new URLSearchParams({
       q:                 query,
       jurisdiction_code: state,
       per_page:          '30',
-      order:             'score',
+      inactive:          'false',
     });
     if (token) params.set('api_token', token);
 
     const directUrl = `${_HR_OC_BASE}/companies/search?${params}`;
+    console.log('[Handelsregister] searching:', directUrl);
     let json;
 
     // ── Attempt 1: direct fetch ──────────────────────────────────────────────
@@ -385,23 +379,27 @@ async function _hrSearch() {
       if (resp.status === 429 || resp.status === 503) throw new Error('rate_limit');
       if (!resp.ok) throw new Error(`API error ${resp.status}`);
       json = await resp.json();
+      console.log('[Handelsregister] direct response:', json?.results?.total_count, 'total,', (json?.results?.companies || []).length, 'on page');
 
     } catch (directErr) {
       clearTimeout(timer1);
       if (directErr.message === 'rate_limit') throw directErr;
       if (directErr.name === 'AbortError') throw new Error('timeout');
 
-      // ── Attempt 2: CORS proxy fallback (handles browsers blocking OC CORS) ─
+      // ── Attempt 2: CORS proxy fallback ────────────────────────────────────
+      console.log('[Handelsregister] direct fetch failed, trying proxy:', directErr.message);
       const ctrl2  = new AbortController();
-      const timer2 = setTimeout(() => ctrl2.abort(), 20000);
+      const timer2 = setTimeout(() => ctrl2.abort(), 25000);
       try {
-        // allorigins returns the raw body of the proxied URL unchanged
         const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(directUrl)}`;
         const resp2 = await fetch(proxyUrl, { signal: ctrl2.signal });
         clearTimeout(timer2);
         if (resp2.status === 429 || resp2.status === 503) throw new Error('rate_limit');
         if (!resp2.ok) throw new Error(`Proxy error ${resp2.status}`);
-        json = await resp2.json();
+        const text2 = await resp2.text();
+        console.log('[Handelsregister] proxy response text (first 200):', text2.substring(0, 200));
+        json = JSON.parse(text2);
+        console.log('[Handelsregister] proxy parsed:', json?.results?.total_count, 'total,', (json?.results?.companies || []).length, 'on page');
       } catch (proxyErr) {
         clearTimeout(timer2);
         if (proxyErr.message === 'rate_limit') throw proxyErr;
@@ -410,8 +408,16 @@ async function _hrSearch() {
       }
     }
 
-    _hrResults = (json.results?.companies || []).map(c => c.company).filter(Boolean);
-    _hrRenderList(query, state);
+    // Validate response shape
+    if (!json || !json.results) {
+      console.warn('[Handelsregister] unexpected response shape:', json);
+      throw new Error('Unexpected API response format. Check browser console for details.');
+    }
+
+    const totalCount = json.results.total_count || 0;
+    _hrResults = (json.results.companies || []).map(c => c.company).filter(Boolean);
+    console.log('[Handelsregister] _hrResults length:', _hrResults.length, 'totalCount:', totalCount);
+    _hrRenderList(query, state, totalCount, token);
 
   } catch (err) {
     clearTimeout(timer1);
@@ -450,30 +456,45 @@ async function _hrSearch() {
 
 // ─── List render ──────────────────────────────────────────────────────────────
 
-function _hrRenderList(query, state) {
+function _hrRenderList(query, state, totalCount, token) {
   const area = document.getElementById('hr-results-area');
   if (!area) return;
 
   if (_hrResults.length === 0) {
     const stateName = _HR_STATES.find(s => s.code === state)?.label || state;
+    const hasToken  = !!token;
+    // Show the retry-in-all-germany button when a specific state was chosen
+    const retryBtn  = state !== 'de'
+      ? `<button onclick="_hrRetryAllGermany('${escapeHtml(query)}')"
+           class="mt-3 btn-secondary btn-sm">🇩🇪 Retry in All Germany</button>`
+      : '';
     area.innerHTML = `
       <div class="card p-10 text-center text-surface-400">
         <p class="text-sm font-medium mb-1">No companies found</p>
-        <p class="text-xs">Try a different keyword, remove city from the search, or switch to "All Germany"</p>
-        <p class="text-xs mt-1 text-surface-300">Searched: <em>${escapeHtml(query || '')}</em> in <em>${escapeHtml(stateName)}</em></p>
+        <p class="text-xs mt-1">Searched <strong>${escapeHtml(query)}</strong> in <strong>${escapeHtml(stateName)}</strong></p>
+        <p class="text-xs mt-2">Tips: try a shorter keyword · search in German (e.g. "Sanitär" not "plumbing") · broaden to All Germany</p>
+        ${!hasToken ? `
+          <div class="mt-4 px-4 py-3 rounded-lg bg-amber-50 dark:bg-amber-900/15 border border-amber-200 dark:border-amber-700 text-xs text-amber-700 dark:text-amber-300 text-left max-w-sm mx-auto">
+            <p class="font-semibold mb-1">⚠️ No API token — anonymous searches may be limited</p>
+            <p>OpenCorporates limits unauthenticated browsers to a handful of searches. Add a free token in <strong>Settings → OpenCorporates API Token</strong> to unlock 500/month.</p>
+            <a href="https://opencorporates.com/users/account_requests/new" target="_blank"
+               class="inline-block mt-1.5 text-brand-600 hover:underline font-medium">Get free token →</a>
+          </div>` : ''}
+        ${retryBtn}
       </div>`;
     return;
   }
 
   const stateName = _HR_STATES.find(s => s.code === state)?.label || state;
+  const total     = totalCount > _hrResults.length ? ` of ${totalCount.toLocaleString()} total` : '';
   area.innerHTML = `
     <div class="flex items-center justify-between mb-3 px-1">
       <p class="text-xs text-surface-500">
-        <strong>${_hrResults.length}</strong> result${_hrResults.length === 1 ? '' : 's'}
+        Showing <strong>${_hrResults.length}</strong>${total} result${_hrResults.length === 1 ? '' : 's'}
         from German commercial register
         ${state && state !== 'de' ? `· <span class="text-brand-600">${escapeHtml(stateName)}</span>` : ''}
       </p>
-      <p class="text-xs text-surface-400">Click a company to expand details & research financials</p>
+      <p class="text-xs text-surface-400">Click a company to expand details &amp; research financials</p>
     </div>
     <div class="space-y-2">
       ${_hrResults.map((c, i) => _hrCardHtml(c, i)).join('')}
@@ -646,7 +667,26 @@ function _hrToggle(idx) {
                  || document.getElementById('hr-keyword-area')?.value || '';
   const lastState = document.getElementById('hr-state')?.value
                  || document.getElementById('hr-state-area')?.value || 'de';
-  _hrRenderList(lastQuery, lastState);
+  _hrRenderList(lastQuery, lastState, 0, '');
+}
+
+// ─── Retry in All Germany ─────────────────────────────────────────────────────
+
+function _hrRetryAllGermany(query) {
+  // Set state dropdowns to 'de' and re-run search
+  const nameState = document.getElementById('hr-state');
+  const areaState = document.getElementById('hr-state-area');
+  if (nameState) nameState.value = 'de';
+  if (areaState) areaState.value = 'de';
+  _hrAreaState = 'de';
+
+  // Put the query back in whichever input is active
+  const nameQ = document.getElementById('hr-query');
+  const areaQ = document.getElementById('hr-keyword-area');
+  if (_hrSearchMode === 'name' && nameQ) nameQ.value = query;
+  if (_hrSearchMode === 'area' && areaQ) areaQ.value = query;
+
+  _hrSearch();
 }
 
 // ─── AI Analysis ──────────────────────────────────────────────────────────────
