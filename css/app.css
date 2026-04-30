@@ -476,6 +476,27 @@ select.input-field {
 #mr-drag-handle { cursor: grab; user-select: none; }
 #mr-drag-handle.mr-dragging { cursor: grabbing; }
 
+/* ── To Do's Floating Panel ──────────────────────────────────── */
+#todo-floating-panel {
+  position: fixed;
+  z-index: 9996;           /* below log-call (9997) and recorder (9998) */
+  bottom: 24px;
+  right: 24px;
+  width: 420px;
+  max-width: calc(100vw - 32px);
+  border-radius: 12px;
+  overflow: hidden;
+  flex-direction: column;
+  box-shadow: 0 24px 64px rgba(0,0,0,0.22), 0 0 0 1px rgba(0,0,0,0.07);
+  transition: box-shadow 0.2s;
+}
+.dark #todo-floating-panel {
+  box-shadow: 0 24px 64px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.09);
+}
+#todo-drag-handle { cursor: grab; user-select: none; }
+#todo-drag-handle.todo-dragging { cursor: grabbing; }
+.todo-task-text:focus { outline: none; }
+
 /* ── Log Call Floating Panel ─────────────────────────────────── */
 #cl-floating-panel {
   position: fixed;
