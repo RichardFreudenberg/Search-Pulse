@@ -359,6 +359,10 @@ async function _hrSearch() {
       <span class="text-sm">Searching Handelsregister…</span>
     </div>`;
 
+  // AbortController + manual timeout (AbortSignal.timeout not supported in all browsers)
+  const ctrl1   = new AbortController();
+  const timer1  = setTimeout(() => ctrl1.abort(), 20000);
+
   try {
     const settings = await DB.get(STORES.settings, `settings_${currentUser.id}`).catch(() => ({})) || {};
     const token    = settings.openCorporatesApiToken || '';
@@ -371,20 +375,48 @@ async function _hrSearch() {
     });
     if (token) params.set('api_token', token);
 
-    const resp = await fetch(`${_HR_OC_BASE}/companies/search?${params}`, {
-      headers: { 'Accept': 'application/json' },
-      signal: AbortSignal.timeout(20000),
-    });
+    const directUrl = `${_HR_OC_BASE}/companies/search?${params}`;
+    let json;
 
-    if (resp.status === 429 || resp.status === 503) throw new Error('rate_limit');
-    if (!resp.ok) throw new Error(`API returned ${resp.status}`);
+    // ── Attempt 1: direct fetch ──────────────────────────────────────────────
+    try {
+      const resp = await fetch(directUrl, { signal: ctrl1.signal });
+      clearTimeout(timer1);
+      if (resp.status === 429 || resp.status === 503) throw new Error('rate_limit');
+      if (!resp.ok) throw new Error(`API error ${resp.status}`);
+      json = await resp.json();
 
-    const json = await resp.json();
-    _hrResults  = (json.results?.companies || []).map(c => c.company).filter(Boolean);
+    } catch (directErr) {
+      clearTimeout(timer1);
+      if (directErr.message === 'rate_limit') throw directErr;
+      if (directErr.name === 'AbortError') throw new Error('timeout');
+
+      // ── Attempt 2: CORS proxy fallback (handles browsers blocking OC CORS) ─
+      const ctrl2  = new AbortController();
+      const timer2 = setTimeout(() => ctrl2.abort(), 20000);
+      try {
+        // allorigins returns the raw body of the proxied URL unchanged
+        const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(directUrl)}`;
+        const resp2 = await fetch(proxyUrl, { signal: ctrl2.signal });
+        clearTimeout(timer2);
+        if (resp2.status === 429 || resp2.status === 503) throw new Error('rate_limit');
+        if (!resp2.ok) throw new Error(`Proxy error ${resp2.status}`);
+        json = await resp2.json();
+      } catch (proxyErr) {
+        clearTimeout(timer2);
+        if (proxyErr.message === 'rate_limit') throw proxyErr;
+        if (proxyErr.name === 'AbortError')   throw new Error('timeout');
+        throw new Error('Could not reach OpenCorporates. Check your internet connection and try again.');
+      }
+    }
+
+    _hrResults = (json.results?.companies || []).map(c => c.company).filter(Boolean);
     _hrRenderList(query, state);
 
   } catch (err) {
-    const isRateLimit = err.message === 'rate_limit' || err.name === 'AbortError';
+    clearTimeout(timer1);
+    const isRateLimit = err.message === 'rate_limit';
+    const isTimeout   = err.message === 'timeout';
     area.innerHTML = `
       <div class="card p-5">
         <div class="flex items-start gap-3 p-4 rounded-xl bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800">
@@ -393,12 +425,14 @@ async function _hrSearch() {
           </svg>
           <div>
             <p class="text-sm font-semibold text-red-700 dark:text-red-400">
-              ${isRateLimit ? 'Monthly quota reached' : 'Search failed'}
+              ${isRateLimit ? 'Monthly quota reached' : isTimeout ? 'Request timed out' : 'Search failed'}
             </p>
             <p class="text-xs text-red-600 dark:text-red-500 mt-1">
               ${isRateLimit
                 ? 'Add a free OpenCorporates API token in <strong>Settings → Research & Data Enrichment → OpenCorporates API Token</strong> to get 500 searches/month.'
-                : escapeHtml(err.message)}
+                : isTimeout
+                  ? 'OpenCorporates took too long to respond. Try again in a moment.'
+                  : escapeHtml(err.message)}
             </p>
             ${isRateLimit ? `<a href="https://opencorporates.com/users/account_requests/new" target="_blank" class="inline-block mt-2 text-xs text-brand-600 hover:underline font-medium">Get free token at opencorporates.com →</a>` : ''}
           </div>
