@@ -144,8 +144,13 @@ async function clearDemoData() {
     } catch (_) { /* store might not exist in older DBs */ }
   }
 
-  // Prevent demo deal from re-appearing on next login
-  localStorage.setItem('pulse_demo_cleared_' + uid, '1');
+  // Prevent demo data from ever re-appearing — write to Firestore so the flag
+  // persists across all devices (not just this browser's localStorage).
+  try {
+    const settings = await DB.get(STORES.settings, `settings_${uid}`) || { id: `settings_${uid}`, userId: uid };
+    await DB.put(STORES.settings, { ...settings, demoSeeded: true });
+  } catch (_) {}
+  localStorage.setItem('pulse_demo_cleared_' + uid, '1'); // legacy local flag
 }
 
 // ── DOM management ────────────────────────────────────────────────────

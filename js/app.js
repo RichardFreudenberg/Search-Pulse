@@ -623,11 +623,15 @@ async function seedDemoData(userId) {
 // Seed Demo Deal — Apex Precision Manufacturing
 // ============================================
 async function seedDemoDeal(userId) {
-  // Don't re-seed if the user has already cleared demo data
+  // Primary guard: Firestore flag — works across ALL devices.
+  // Once the demo deal has been seeded (or cleared), demoSeeded = true in the
+  // user's settings document and we never seed again, regardless of device.
+  try {
+    const settings = await DB.get(STORES.settings, `settings_${userId}`);
+    if (settings?.demoSeeded) return;
+  } catch (_) {}
+  // Legacy local flag — kept for backward compat on same-device sessions
   if (localStorage.getItem('pulse_demo_cleared_' + userId)) return;
-  // Only seed if the user has no deals yet
-  const existing = await DB.getAll(STORES.deals).catch(() => []);
-  if (existing.some(d => d.userId === userId)) return;
 
   // Helper: ISO date string N days from today (negative = past, positive = future)
   const fromToday = n => addDays(new Date(), n);
@@ -765,6 +769,13 @@ async function seedDemoDeal(userId) {
       dueDate:  task.dueDate,
     });
   }
+
+  // Mark demo as seeded in Firestore so it never re-seeds on any device,
+  // even if the user deletes the Apex deal or logs in on a different device.
+  try {
+    const settings = await DB.get(STORES.settings, `settings_${userId}`) || { id: `settings_${userId}`, userId };
+    await DB.put(STORES.settings, { ...settings, demoSeeded: true });
+  } catch (_) {}
 }
 
 
