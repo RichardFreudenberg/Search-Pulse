@@ -2,15 +2,13 @@
    Nexus CRM — German Handelsregister Search
    (Embedded Deal Search tab panel)
    ============================================
-   Data: OpenCorporates public API (real register
-   entries, CORS-enabled, no scraping).
+   Data: Apify radeance/handelsregister-api actor
+   (scrapes Handelsregister.de directly, CORS-safe).
    Financial research: Tavily + AI + external links.
    Area search: Leaflet map → Nominatim → Bundesland.
    ============================================ */
 
-const _HR_OC_BASE = 'https://api.opencorporates.com/v0.4';
-
-// German federal states — OC jurisdiction codes
+// German federal states
 const _HR_STATES = [
   { code: 'de',    label: 'All Germany' },
   { code: 'de_bw', label: 'Baden-Württemberg' },
@@ -180,7 +178,7 @@ function renderHandelsregisterPanel() {
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
           </svg>
           <p class="text-xs text-blue-700 dark:text-blue-300">
-            Live data from the German Handelsregister via OpenCorporates — all 16 Bundesländer, real register entries.
+            Live data scraped directly from Handelsregister.de via Apify — all 16 Bundesländer, real register entries including officers, legal form, and business purpose.
             Expand any company to run AI acquisition analysis and research financials.
           </p>
         </div>
@@ -347,47 +345,35 @@ async function _hrSearch() {
 
   try {
     const settings  = await DB.get(STORES.settings, `settings_${currentUser.id}`).catch(() => ({})) || {};
-    const apifyKey  = settings.apifyApiKey             || '';
-    const ocToken   = settings.openCorporatesApiToken  || '';
-    const hasAuth   = !!(apifyKey || ocToken);
+    const apifyKey  = settings.apifyApiKey || '';
+    const hasAuth   = !!apifyKey;
 
-    let totalCount = 0;
-
-    // ── Attempt 1: Apify (real Handelsregister.de data) ───────────────────────
-    if (apifyKey) {
+    if (!apifyKey) {
       area.innerHTML = `
-        <div class="card p-12 flex items-center justify-center gap-3 text-surface-400">
-          <svg class="animate-spin w-5 h-5 text-brand-500" fill="none" viewBox="0 0 24 24">
-            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
-            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
-          </svg>
-          <span class="text-sm">Querying Handelsregister.de via Apify…</span>
+        <div class="card p-8 text-center">
+          <div class="text-3xl mb-3">🔑</div>
+          <p class="text-sm font-semibold mb-1">Apify API key required</p>
+          <p class="text-xs text-surface-400 mb-3">
+            Add your Apify key in <strong>Settings → Research &amp; Data Enrichment → Apify API Key</strong> to search Handelsregister.de directly.
+          </p>
+          <a href="https://apify.com/sign-up" target="_blank"
+             class="inline-block text-xs text-brand-600 hover:underline font-medium">Sign up at apify.com — 50 free searches/month →</a>
         </div>`;
-      try {
-        _hrResults = await _hrApifySearch(query, state, _hrAreaCity, apifyKey);
-        totalCount = _hrResults.length;
-        _hrRenderList(query, state, totalCount, hasAuth, 'apify');
-        return; // done — skip OC
-      } catch (apifyErr) {
-        console.warn('[Handelsregister] Apify failed, falling back to OC:', apifyErr.message);
-        // fall through to OC
-      }
+      return;
     }
 
-    // ── Attempt 2: OpenCorporates (via direct fetch + CORS proxy) ─────────────
     area.innerHTML = `
       <div class="card p-12 flex items-center justify-center gap-3 text-surface-400">
         <svg class="animate-spin w-5 h-5 text-brand-500" fill="none" viewBox="0 0 24 24">
           <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
           <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
         </svg>
-        <span class="text-sm">Searching via OpenCorporates…</span>
+        <span class="text-sm">Querying Handelsregister.de via Apify…</span>
       </div>`;
 
-    const ocResult = await _hrOCSearch(query, state, ocToken);
-    totalCount  = ocResult.totalCount;
-    _hrResults  = ocResult.companies;
-    _hrRenderList(query, state, totalCount, hasAuth, 'oc');
+    _hrResults = await _hrApifySearch(query, state, _hrAreaCity, apifyKey);
+    const totalCount = _hrResults.length;
+    _hrRenderList(query, state, totalCount, hasAuth, 'apify');
 
   } catch (err) {
     const isRateLimit = err.message === 'rate_limit';
@@ -400,16 +386,16 @@ async function _hrSearch() {
           </svg>
           <div>
             <p class="text-sm font-semibold text-red-700 dark:text-red-400">
-              ${isRateLimit ? 'Monthly quota reached' : isTimeout ? 'Request timed out' : 'Search failed'}
+              ${isRateLimit ? 'Apify quota reached' : isTimeout ? 'Request timed out' : 'Search failed'}
             </p>
             <p class="text-xs text-red-600 dark:text-red-500 mt-1">
               ${isRateLimit
-                ? 'Add an Apify API key in <strong>Settings → Research & Data Enrichment → Apify API Key</strong> for direct Handelsregister access.'
+                ? 'You have reached your Apify monthly quota. Upgrade your plan or wait until it resets.'
                 : isTimeout
-                  ? 'The request timed out. Try again in a moment.'
+                  ? 'The request timed out. Apify may be slow — try again in a moment.'
                   : escapeHtml(err.message)}
             </p>
-            ${isRateLimit ? `<a href="https://apify.com/sign-up" target="_blank" class="inline-block mt-2 text-xs text-brand-600 hover:underline font-medium">Sign up at apify.com →</a>` : ''}
+            ${isRateLimit ? `<a href="https://apify.com/pricing" target="_blank" class="inline-block mt-2 text-xs text-brand-600 hover:underline font-medium">View Apify pricing →</a>` : ''}
           </div>
         </div>
       </div>`;
@@ -512,72 +498,11 @@ function _hrNormalizeApify(item) {
     dissolution_date:   item.loeschungsdatum || item.dissolution_date || '',
     registered_address: { street_address: street, postal_code: zip, locality: city, region },
     jurisdiction_code:  'de',
-    opencorporates_url: '',
-    // Apify-only extras
+    // Apify extras
     _source:   'apify',
     _officers: officers,
     _court:    gericht,
     _purpose:  purpose,
-  };
-}
-
-// ─── OpenCorporates search ────────────────────────────────────────────────────
-// Wrapped into its own function so _hrSearch stays readable.
-// Returns { companies: [...], totalCount: N }
-
-async function _hrOCSearch(query, state, token) {
-  const params = new URLSearchParams({
-    q:                 query,
-    jurisdiction_code: state,
-    per_page:          '30',
-    inactive:          'false',
-  });
-  if (token) params.set('api_token', token);
-
-  const directUrl = `${_HR_OC_BASE}/companies/search?${params}`;
-  console.log('[Handelsregister] OC URL:', directUrl);
-
-  let json;
-
-  // Try direct fetch first
-  const ctrl1  = new AbortController();
-  const timer1 = setTimeout(() => ctrl1.abort(), 20000);
-  try {
-    const resp = await fetch(directUrl, { signal: ctrl1.signal });
-    clearTimeout(timer1);
-    if (resp.status === 429 || resp.status === 503) throw new Error('rate_limit');
-    if (!resp.ok) throw new Error(`OC API ${resp.status}`);
-    json = await resp.json();
-  } catch (e1) {
-    clearTimeout(timer1);
-    if (e1.message === 'rate_limit') throw e1;
-    if (e1.name === 'AbortError')   throw new Error('timeout');
-
-    // CORS proxy fallback
-    console.log('[Handelsregister] Direct OC failed, using proxy:', e1.message);
-    const ctrl2  = new AbortController();
-    const timer2 = setTimeout(() => ctrl2.abort(), 25000);
-    try {
-      const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(directUrl)}`;
-      const resp2 = await fetch(proxyUrl, { signal: ctrl2.signal });
-      clearTimeout(timer2);
-      if (resp2.status === 429 || resp2.status === 503) throw new Error('rate_limit');
-      if (!resp2.ok) throw new Error(`Proxy ${resp2.status}`);
-      json = JSON.parse(await resp2.text());
-    } catch (e2) {
-      clearTimeout(timer2);
-      if (e2.message === 'rate_limit') throw e2;
-      if (e2.name === 'AbortError')   throw new Error('timeout');
-      throw new Error('Could not reach OpenCorporates. Try adding an Apify key in Settings for direct Handelsregister access.');
-    }
-  }
-
-  if (!json?.results) throw new Error('Unexpected response from OpenCorporates. Check browser console.');
-  console.log('[Handelsregister] OC total_count:', json.results.total_count);
-
-  return {
-    companies:  (json.results.companies || []).map(c => c.company).filter(Boolean),
-    totalCount: json.results.total_count || 0,
   };
 }
 
@@ -600,8 +525,8 @@ function _hrRenderList(query, state, totalCount, hasAuth, source) {
         <p class="text-xs mt-2">Tips: search in German (e.g. "Sanitär" not "plumbing") · try a shorter keyword · broaden to All Germany</p>
         ${!hasAuth ? `
           <div class="mt-4 px-4 py-3 rounded-lg bg-amber-50 dark:bg-amber-900/15 border border-amber-200 dark:border-amber-700 text-xs text-amber-700 dark:text-amber-300 text-left max-w-sm mx-auto">
-            <p class="font-semibold mb-1">⚠️ No API key configured</p>
-            <p>Add an <strong>Apify API key</strong> in Settings for direct Handelsregister.de access (50 free searches/month), or an OpenCorporates token as a fallback.</p>
+            <p class="font-semibold mb-1">⚠️ No Apify API key configured</p>
+            <p>Add an <strong>Apify API key</strong> in Settings → Research &amp; Data Enrichment for direct Handelsregister.de access — 50 free searches/month.</p>
             <a href="https://apify.com/sign-up" target="_blank"
                class="inline-block mt-1.5 text-brand-600 hover:underline font-medium">Sign up at apify.com (free) →</a>
           </div>` : ''}
@@ -759,14 +684,6 @@ function _hrDetailHtml(company, idx, lf, age, address, active) {
           </svg>
           Add to CRM
         </button>
-        ${company.opencorporates_url ? `
-          <a href="${escapeHtml(company.opencorporates_url)}" target="_blank"
-             class="btn-secondary btn-sm flex items-center gap-1.5">
-            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25"/>
-            </svg>
-            OpenCorporates
-          </a>` : ''}
       </div>
 
       <!-- External financial source quick-links -->
