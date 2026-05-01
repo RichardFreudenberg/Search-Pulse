@@ -313,19 +313,15 @@ function _hrInitAreaMap() {
 async function _hrSearch() {
   if (_hrLoading) return;
 
-  // Gather inputs based on mode
+  // Gather inputs
   let query, state;
   if (_hrSearchMode === 'name') {
     query = (document.getElementById('hr-query')?.value || '').trim();
     state = document.getElementById('hr-state')?.value || 'de';
     if (!query) { document.getElementById('hr-query')?.focus(); return; }
   } else {
-    // Area mode — the jurisdiction_code handles the location filter.
-    // Do NOT append the city to the query: OC searches company *names*, not
-    // addresses, so "Sanitär München" finds companies literally called that.
     const keyword = (document.getElementById('hr-keyword-area')?.value || '').trim();
     state = document.getElementById('hr-state-area')?.value || _hrAreaState || 'de';
-    // Default to broad search when no keyword given
     query = keyword || 'GmbH';
   }
 
@@ -349,78 +345,51 @@ async function _hrSearch() {
       <span class="text-sm">Searching Handelsregister…</span>
     </div>`;
 
-  // AbortController + manual timeout (AbortSignal.timeout not supported in all browsers)
-  const ctrl1   = new AbortController();
-  const timer1  = setTimeout(() => ctrl1.abort(), 20000);
-
   try {
-    const settings = await DB.get(STORES.settings, `settings_${currentUser.id}`).catch(() => ({})) || {};
-    const token    = settings.openCorporatesApiToken || '';
+    const settings  = await DB.get(STORES.settings, `settings_${currentUser.id}`).catch(() => ({})) || {};
+    const apifyKey  = settings.apifyApiKey             || '';
+    const ocToken   = settings.openCorporatesApiToken  || '';
+    const hasAuth   = !!(apifyKey || ocToken);
 
-    // ── Build params ──────────────────────────────────────────────────────────
-    // IMPORTANT: do NOT include `order=score` — it silently returns 0 results
-    // for unauthenticated requests on the free tier.
-    const params = new URLSearchParams({
-      q:                 query,
-      jurisdiction_code: state,
-      per_page:          '30',
-      inactive:          'false',
-    });
-    if (token) params.set('api_token', token);
+    let totalCount = 0;
 
-    const directUrl = `${_HR_OC_BASE}/companies/search?${params}`;
-    console.log('[Handelsregister] searching:', directUrl);
-    let json;
-
-    // ── Attempt 1: direct fetch ──────────────────────────────────────────────
-    try {
-      const resp = await fetch(directUrl, { signal: ctrl1.signal });
-      clearTimeout(timer1);
-      if (resp.status === 429 || resp.status === 503) throw new Error('rate_limit');
-      if (!resp.ok) throw new Error(`API error ${resp.status}`);
-      json = await resp.json();
-      console.log('[Handelsregister] direct response:', json?.results?.total_count, 'total,', (json?.results?.companies || []).length, 'on page');
-
-    } catch (directErr) {
-      clearTimeout(timer1);
-      if (directErr.message === 'rate_limit') throw directErr;
-      if (directErr.name === 'AbortError') throw new Error('timeout');
-
-      // ── Attempt 2: CORS proxy fallback ────────────────────────────────────
-      console.log('[Handelsregister] direct fetch failed, trying proxy:', directErr.message);
-      const ctrl2  = new AbortController();
-      const timer2 = setTimeout(() => ctrl2.abort(), 25000);
+    // ── Attempt 1: Apify (real Handelsregister.de data) ───────────────────────
+    if (apifyKey) {
+      area.innerHTML = `
+        <div class="card p-12 flex items-center justify-center gap-3 text-surface-400">
+          <svg class="animate-spin w-5 h-5 text-brand-500" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+          </svg>
+          <span class="text-sm">Querying Handelsregister.de via Apify…</span>
+        </div>`;
       try {
-        const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(directUrl)}`;
-        const resp2 = await fetch(proxyUrl, { signal: ctrl2.signal });
-        clearTimeout(timer2);
-        if (resp2.status === 429 || resp2.status === 503) throw new Error('rate_limit');
-        if (!resp2.ok) throw new Error(`Proxy error ${resp2.status}`);
-        const text2 = await resp2.text();
-        console.log('[Handelsregister] proxy response text (first 200):', text2.substring(0, 200));
-        json = JSON.parse(text2);
-        console.log('[Handelsregister] proxy parsed:', json?.results?.total_count, 'total,', (json?.results?.companies || []).length, 'on page');
-      } catch (proxyErr) {
-        clearTimeout(timer2);
-        if (proxyErr.message === 'rate_limit') throw proxyErr;
-        if (proxyErr.name === 'AbortError')   throw new Error('timeout');
-        throw new Error('Could not reach OpenCorporates. Check your internet connection and try again.');
+        _hrResults = await _hrApifySearch(query, state, _hrAreaCity, apifyKey);
+        totalCount = _hrResults.length;
+        _hrRenderList(query, state, totalCount, hasAuth, 'apify');
+        return; // done — skip OC
+      } catch (apifyErr) {
+        console.warn('[Handelsregister] Apify failed, falling back to OC:', apifyErr.message);
+        // fall through to OC
       }
     }
 
-    // Validate response shape
-    if (!json || !json.results) {
-      console.warn('[Handelsregister] unexpected response shape:', json);
-      throw new Error('Unexpected API response format. Check browser console for details.');
-    }
+    // ── Attempt 2: OpenCorporates (via direct fetch + CORS proxy) ─────────────
+    area.innerHTML = `
+      <div class="card p-12 flex items-center justify-center gap-3 text-surface-400">
+        <svg class="animate-spin w-5 h-5 text-brand-500" fill="none" viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+        </svg>
+        <span class="text-sm">Searching via OpenCorporates…</span>
+      </div>`;
 
-    const totalCount = json.results.total_count || 0;
-    _hrResults = (json.results.companies || []).map(c => c.company).filter(Boolean);
-    console.log('[Handelsregister] _hrResults length:', _hrResults.length, 'totalCount:', totalCount);
-    _hrRenderList(query, state, totalCount, token);
+    const ocResult = await _hrOCSearch(query, state, ocToken);
+    totalCount  = ocResult.totalCount;
+    _hrResults  = ocResult.companies;
+    _hrRenderList(query, state, totalCount, hasAuth, 'oc');
 
   } catch (err) {
-    clearTimeout(timer1);
     const isRateLimit = err.message === 'rate_limit';
     const isTimeout   = err.message === 'timeout';
     area.innerHTML = `
@@ -435,12 +404,12 @@ async function _hrSearch() {
             </p>
             <p class="text-xs text-red-600 dark:text-red-500 mt-1">
               ${isRateLimit
-                ? 'Add a free OpenCorporates API token in <strong>Settings → Research & Data Enrichment → OpenCorporates API Token</strong> to get 500 searches/month.'
+                ? 'Add an Apify API key in <strong>Settings → Research & Data Enrichment → Apify API Key</strong> for direct Handelsregister access.'
                 : isTimeout
-                  ? 'OpenCorporates took too long to respond. Try again in a moment.'
+                  ? 'The request timed out. Try again in a moment.'
                   : escapeHtml(err.message)}
             </p>
-            ${isRateLimit ? `<a href="https://opencorporates.com/users/account_requests/new" target="_blank" class="inline-block mt-2 text-xs text-brand-600 hover:underline font-medium">Get free token at opencorporates.com →</a>` : ''}
+            ${isRateLimit ? `<a href="https://apify.com/sign-up" target="_blank" class="inline-block mt-2 text-xs text-brand-600 hover:underline font-medium">Sign up at apify.com →</a>` : ''}
           </div>
         </div>
       </div>`;
@@ -454,16 +423,172 @@ async function _hrSearch() {
   }
 }
 
+// ─── Apify search ─────────────────────────────────────────────────────────────
+// Calls the radeance/handelsregister-api actor synchronously.
+// Returns a normalised array in our internal company format.
+
+async function _hrApifySearch(query, state, city, apifyKey) {
+  const input = {
+    schlagwoerter:                  query,
+    aehnlich_lautende_schlagwoerter: true,
+  };
+  // Area search: pass city as registergericht (German court city name)
+  if (_hrSearchMode === 'area' && city) {
+    input.registergericht = city;
+  }
+
+  console.log('[Handelsregister] Apify input:', input);
+
+  const ctrl  = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 120000); // actor can take up to 2 min
+
+  const resp = await fetch(
+    'https://api.apify.com/v2/acts/radeance~handelsregister-api/run-sync-get-dataset-items',
+    {
+      method:  'POST',
+      headers: {
+        'Content-Type':  'application/json',
+        'Authorization': `Bearer ${apifyKey}`,
+      },
+      body:   JSON.stringify(input),
+      signal: ctrl.signal,
+    }
+  );
+  clearTimeout(timer);
+
+  if (resp.status === 401) throw new Error('Invalid Apify API key. Check Settings → Apify API Key.');
+  if (resp.status === 402) throw new Error('apify_quota');
+  if (resp.status === 408) throw new Error('timeout');
+  if (!resp.ok)            throw new Error(`Apify error ${resp.status}`);
+
+  const items = await resp.json();
+  console.log('[Handelsregister] Apify raw items:', items?.length, items?.[0]);
+
+  return (Array.isArray(items) ? items : [])
+    .map(_hrNormalizeApify)
+    .filter(c => c.name);
+}
+
+// Normalise an Apify Handelsregister actor result to our internal company shape.
+function _hrNormalizeApify(item) {
+  // The actor returns data scraped from handelsregister.de.
+  // Field names may vary slightly by actor version; we handle multiple possibilities.
+  const name      = item.name || item.firma || item.companyName || '';
+  const rechtsform = item.rechtsform || item.legalForm || item.legal_form || '';
+  const gericht   = item.registergericht || item.court || '';
+  const art       = item.registerart    || 'HRB';
+  const nummer    = item.registernummer || item.registerNumber || '';
+  const status    = item.status         || (item.active === false ? 'dissolved' : 'Active');
+  const purpose   = item.unternehmensgegenstand || item.businessPurpose || '';
+
+  // Address — actor may return a string or an object
+  let street = '', zip = '', city = '', region = '';
+  const addr = item.geschäftsanschrift || item.anschrift || item.address || '';
+  if (typeof addr === 'object' && addr) {
+    street = addr.street || addr.strasse || addr.street_address || '';
+    zip    = addr.zip    || addr.plz     || addr.postal_code    || '';
+    city   = addr.city   || addr.ort     || addr.locality       || gericht;
+  } else if (typeof addr === 'string' && addr) {
+    // Try to parse "Musterstraße 1, 80331 München" style strings
+    const parts = addr.split(',').map(s => s.trim());
+    street = parts[0] || '';
+    const zipCity = parts[1] || parts[0] || '';
+    const m = zipCity.match(/^(\d{5})\s+(.+)$/);
+    if (m) { zip = m[1]; city = m[2]; } else { city = zipCity || gericht; }
+  } else {
+    city = gericht; // fall back to court city
+  }
+
+  // Officers / directors
+  const officers = (item.vertretungsberechtigte || item.officers || item.directors || [])
+    .map(o => typeof o === 'string' ? o : (o.name || o.Name || JSON.stringify(o)));
+
+  return {
+    name,
+    company_type:       rechtsform,
+    company_number:     nummer ? `${art} ${nummer}` : '',
+    incorporation_date: item.datum || item.founded || item.incorporation_date || '',
+    current_status:     status,
+    dissolution_date:   item.loeschungsdatum || item.dissolution_date || '',
+    registered_address: { street_address: street, postal_code: zip, locality: city, region },
+    jurisdiction_code:  'de',
+    opencorporates_url: '',
+    // Apify-only extras
+    _source:   'apify',
+    _officers: officers,
+    _court:    gericht,
+    _purpose:  purpose,
+  };
+}
+
+// ─── OpenCorporates search ────────────────────────────────────────────────────
+// Wrapped into its own function so _hrSearch stays readable.
+// Returns { companies: [...], totalCount: N }
+
+async function _hrOCSearch(query, state, token) {
+  const params = new URLSearchParams({
+    q:                 query,
+    jurisdiction_code: state,
+    per_page:          '30',
+    inactive:          'false',
+  });
+  if (token) params.set('api_token', token);
+
+  const directUrl = `${_HR_OC_BASE}/companies/search?${params}`;
+  console.log('[Handelsregister] OC URL:', directUrl);
+
+  let json;
+
+  // Try direct fetch first
+  const ctrl1  = new AbortController();
+  const timer1 = setTimeout(() => ctrl1.abort(), 20000);
+  try {
+    const resp = await fetch(directUrl, { signal: ctrl1.signal });
+    clearTimeout(timer1);
+    if (resp.status === 429 || resp.status === 503) throw new Error('rate_limit');
+    if (!resp.ok) throw new Error(`OC API ${resp.status}`);
+    json = await resp.json();
+  } catch (e1) {
+    clearTimeout(timer1);
+    if (e1.message === 'rate_limit') throw e1;
+    if (e1.name === 'AbortError')   throw new Error('timeout');
+
+    // CORS proxy fallback
+    console.log('[Handelsregister] Direct OC failed, using proxy:', e1.message);
+    const ctrl2  = new AbortController();
+    const timer2 = setTimeout(() => ctrl2.abort(), 25000);
+    try {
+      const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(directUrl)}`;
+      const resp2 = await fetch(proxyUrl, { signal: ctrl2.signal });
+      clearTimeout(timer2);
+      if (resp2.status === 429 || resp2.status === 503) throw new Error('rate_limit');
+      if (!resp2.ok) throw new Error(`Proxy ${resp2.status}`);
+      json = JSON.parse(await resp2.text());
+    } catch (e2) {
+      clearTimeout(timer2);
+      if (e2.message === 'rate_limit') throw e2;
+      if (e2.name === 'AbortError')   throw new Error('timeout');
+      throw new Error('Could not reach OpenCorporates. Try adding an Apify key in Settings for direct Handelsregister access.');
+    }
+  }
+
+  if (!json?.results) throw new Error('Unexpected response from OpenCorporates. Check browser console.');
+  console.log('[Handelsregister] OC total_count:', json.results.total_count);
+
+  return {
+    companies:  (json.results.companies || []).map(c => c.company).filter(Boolean),
+    totalCount: json.results.total_count || 0,
+  };
+}
+
 // ─── List render ──────────────────────────────────────────────────────────────
 
-function _hrRenderList(query, state, totalCount, token) {
+function _hrRenderList(query, state, totalCount, hasAuth, source) {
   const area = document.getElementById('hr-results-area');
   if (!area) return;
 
   if (_hrResults.length === 0) {
     const stateName = _HR_STATES.find(s => s.code === state)?.label || state;
-    const hasToken  = !!token;
-    // Show the retry-in-all-germany button when a specific state was chosen
     const retryBtn  = state !== 'de'
       ? `<button onclick="_hrRetryAllGermany('${escapeHtml(query)}')"
            class="mt-3 btn-secondary btn-sm">🇩🇪 Retry in All Germany</button>`
@@ -472,29 +597,32 @@ function _hrRenderList(query, state, totalCount, token) {
       <div class="card p-10 text-center text-surface-400">
         <p class="text-sm font-medium mb-1">No companies found</p>
         <p class="text-xs mt-1">Searched <strong>${escapeHtml(query)}</strong> in <strong>${escapeHtml(stateName)}</strong></p>
-        <p class="text-xs mt-2">Tips: try a shorter keyword · search in German (e.g. "Sanitär" not "plumbing") · broaden to All Germany</p>
-        ${!hasToken ? `
+        <p class="text-xs mt-2">Tips: search in German (e.g. "Sanitär" not "plumbing") · try a shorter keyword · broaden to All Germany</p>
+        ${!hasAuth ? `
           <div class="mt-4 px-4 py-3 rounded-lg bg-amber-50 dark:bg-amber-900/15 border border-amber-200 dark:border-amber-700 text-xs text-amber-700 dark:text-amber-300 text-left max-w-sm mx-auto">
-            <p class="font-semibold mb-1">⚠️ No API token — anonymous searches may be limited</p>
-            <p>OpenCorporates limits unauthenticated browsers to a handful of searches. Add a free token in <strong>Settings → OpenCorporates API Token</strong> to unlock 500/month.</p>
-            <a href="https://opencorporates.com/users/account_requests/new" target="_blank"
-               class="inline-block mt-1.5 text-brand-600 hover:underline font-medium">Get free token →</a>
+            <p class="font-semibold mb-1">⚠️ No API key configured</p>
+            <p>Add an <strong>Apify API key</strong> in Settings for direct Handelsregister.de access (50 free searches/month), or an OpenCorporates token as a fallback.</p>
+            <a href="https://apify.com/sign-up" target="_blank"
+               class="inline-block mt-1.5 text-brand-600 hover:underline font-medium">Sign up at apify.com (free) →</a>
           </div>` : ''}
         ${retryBtn}
       </div>`;
     return;
   }
 
-  const stateName = _HR_STATES.find(s => s.code === state)?.label || state;
-  const total     = totalCount > _hrResults.length ? ` of ${totalCount.toLocaleString()} total` : '';
+  const stateName  = _HR_STATES.find(s => s.code === state)?.label || state;
+  const total      = totalCount > _hrResults.length ? ` of ${totalCount.toLocaleString()} total` : '';
+  const sourceBadge = source === 'apify'
+    ? `<span class="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400">Handelsregister.de via Apify</span>`
+    : `<span class="px-1.5 py-0.5 rounded text-[10px] font-medium bg-surface-100 dark:bg-surface-800 text-surface-500">OpenCorporates</span>`;
   area.innerHTML = `
     <div class="flex items-center justify-between mb-3 px-1">
-      <p class="text-xs text-surface-500">
+      <p class="text-xs text-surface-500 flex items-center gap-2">
         Showing <strong>${_hrResults.length}</strong>${total} result${_hrResults.length === 1 ? '' : 's'}
-        from German commercial register
-        ${state && state !== 'de' ? `· <span class="text-brand-600">${escapeHtml(stateName)}</span>` : ''}
+        ${state && state !== 'de' ? `in <span class="text-brand-600">${escapeHtml(stateName)}</span>` : ''}
+        ${sourceBadge}
       </p>
-      <p class="text-xs text-surface-400">Click a company to expand details &amp; research financials</p>
+      <p class="text-xs text-surface-400">Click to expand · research financials · add to CRM</p>
     </div>
     <div class="space-y-2">
       ${_hrResults.map((c, i) => _hrCardHtml(c, i)).join('')}
@@ -586,6 +714,24 @@ function _hrDetailHtml(company, idx, lf, age, address, active) {
         ${address ? `<div class="col-span-2"><p class="text-surface-400 font-medium mb-0.5">Registered Address</p><p class="font-semibold">${escapeHtml(address)}</p></div>` : ''}
       </div>
 
+      <!-- Officers (from Apify source) -->
+      ${company._officers?.length ? `
+        <div class="mx-3 my-2 px-3 py-2 rounded-lg bg-surface-50 dark:bg-surface-800/50 border border-surface-200 dark:border-surface-700">
+          <p class="text-[10px] font-semibold text-surface-400 uppercase tracking-wide mb-1.5">Managing Directors / Officers</p>
+          <div class="flex flex-wrap gap-1.5">
+            ${company._officers.map(o => `
+              <span class="px-2 py-0.5 rounded-full bg-white dark:bg-surface-700 border border-surface-200 dark:border-surface-600 text-xs text-surface-700 dark:text-surface-300">${escapeHtml(o)}</span>
+            `).join('')}
+          </div>
+        </div>` : ''}
+
+      <!-- Business purpose (from Apify source) -->
+      ${company._purpose ? `
+        <div class="mx-3 mb-2 px-3 py-2 rounded-lg bg-surface-50 dark:bg-surface-800/50 border border-surface-200 dark:border-surface-700">
+          <p class="text-[10px] font-semibold text-surface-400 uppercase tracking-wide mb-1">Business Purpose</p>
+          <p class="text-xs text-surface-600 dark:text-surface-400 leading-relaxed">${escapeHtml(company._purpose)}</p>
+        </div>` : ''}
+
       <!-- Legal form note -->
       ${lf ? `
         <div class="mx-3 my-2 px-3 py-2 rounded-lg bg-${lf.color}-50 dark:bg-${lf.color}-900/15 border border-${lf.color}-200 dark:border-${lf.color}-800">
@@ -667,7 +813,8 @@ function _hrToggle(idx) {
                  || document.getElementById('hr-keyword-area')?.value || '';
   const lastState = document.getElementById('hr-state')?.value
                  || document.getElementById('hr-state-area')?.value || 'de';
-  _hrRenderList(lastQuery, lastState, 0, '');
+  const src = _hrResults[0]?._source === 'apify' ? 'apify' : 'oc';
+  _hrRenderList(lastQuery, lastState, _hrResults.length, true, src);
 }
 
 // ─── Retry in All Germany ─────────────────────────────────────────────────────

@@ -204,15 +204,32 @@ async function renderSettings() {
             ${_managed('googlePlacesApiKey') ? _managedBadge : `<input type="password" id="settings-google-places-key" class="input-field" placeholder="AIza…" value="${settings?.googlePlacesApiKey || ''}" />`}
           </div>
 
-          <div class="py-4 last:pb-0">
+          <div class="py-4">
             <div class="flex items-start justify-between mb-2">
               <div>
-                <p class="text-sm font-semibold">OpenCorporates API Token <span class="text-xs font-normal text-surface-400 ml-1">German Handelsregister</span></p>
-                <p class="text-xs text-surface-400">Unlocks 500 searches/month via Handelsregister search · free account at <a href="https://opencorporates.com/users/account_requests/new" target="_blank" class="text-brand-600 hover:underline">opencorporates.com</a> · without token: ~50 searches/month</p>
+                <p class="text-sm font-semibold">OpenCorporates API Token <span class="text-xs font-normal text-surface-400 ml-1">Handelsregister fallback</span></p>
+                <p class="text-xs text-surface-400">Fallback source when Apify is not set · free account at <a href="https://opencorporates.com/users/account_requests/new" target="_blank" class="text-brand-600 hover:underline">opencorporates.com</a> · 500 searches/month with free token</p>
               </div>
               ${settings?.openCorporatesApiToken ? `<span class="text-xs px-2 py-0.5 rounded-full bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 font-medium flex-shrink-0 ml-3">✓ Set</span>` : ''}
             </div>
             <input type="password" id="settings-oc-token" class="input-field" placeholder="Paste your OpenCorporates token…" value="${escapeHtml(settings?.openCorporatesApiToken || '')}" />
+          </div>
+
+          <div class="py-4 last:pb-0">
+            <div class="flex items-start justify-between mb-2">
+              <div>
+                <p class="text-sm font-semibold">
+                  Apify API Key
+                  <span class="ml-1.5 text-xs font-normal text-green-600 dark:text-green-400">Best — real Handelsregister data</span>
+                </p>
+                <p class="text-xs text-surface-400">
+                  Scrapes Handelsregister.de directly via the <strong>radeance/handelsregister-api</strong> actor — returns officers, legal form, register number, address · 50 free runs/month ·
+                  <a href="https://apify.com/sign-up" target="_blank" class="text-brand-600 hover:underline">sign up at apify.com</a> then copy your API key from Console → Settings → Integrations
+                </p>
+              </div>
+              ${settings?.apifyApiKey ? `<span class="text-xs px-2 py-0.5 rounded-full bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 font-medium flex-shrink-0 ml-3">✓ Set</span>` : ''}
+            </div>
+            <input type="password" id="settings-apify-key" class="input-field" placeholder="apify_api_…" value="${escapeHtml(settings?.apifyApiKey || '')}" />
           </div>
 
         </div>
@@ -670,8 +687,9 @@ async function saveSettings() {
   if (_sf('settings-tavily-key'))        settings.tavilyApiKey       = _sf('settings-tavily-key').value.trim();
   if (_sf('settings-firecrawl-key'))     settings.firecrawlApiKey    = _sf('settings-firecrawl-key').value.trim();
   if (_sf('settings-rapidapi-key'))      settings.rapidApiKey        = _sf('settings-rapidapi-key').value.trim();
-  if (_sf('settings-google-places-key')) settings.googlePlacesApiKey    = _sf('settings-google-places-key').value.trim();
-  if (_sf('settings-oc-token'))          settings.openCorporatesApiToken = _sf('settings-oc-token').value.trim();
+  if (_sf('settings-google-places-key')) settings.googlePlacesApiKey     = _sf('settings-google-places-key').value.trim();
+  if (_sf('settings-oc-token'))          settings.openCorporatesApiToken  = _sf('settings-oc-token').value.trim();
+  if (_sf('settings-apify-key'))         settings.apifyApiKey             = _sf('settings-apify-key').value.trim();
   settings.linkedInProfileUrl = document.getElementById('settings-linkedin-url').value.trim();
   settings.linkedInConnected = !!settings.linkedInProfileUrl;
 
