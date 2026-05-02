@@ -503,15 +503,12 @@ async function _hrApifySearch(query, state, city, apifyKey) {
     .map(_hrNormalizeApify)
     .filter(c => c.name);
 
-  // Post-filter by state if a specific Bundesland is selected
+  // Post-filter by state if a specific Bundesland is selected.
+  // API returns 2-letter codes ("NW","BY"…); our internal codes are "de_nw","de_by"…
+  // Conversion: "de_nw" → slice(3).toUpperCase() → "NW"
   if (state && state !== 'de') {
-    const targetState = _HR_CODE_TO_STATE[state];
-    if (targetState) {
-      results = results.filter(c =>
-        c._courtState === targetState ||
-        (c._court && c._court.toLowerCase().includes(targetState.toLowerCase()))
-      );
-    }
+    const apiCode = state.startsWith('de_') ? state.slice(3).toUpperCase() : state.toUpperCase();
+    results = results.filter(c => c._courtState === apiCode);
   }
 
   return results;
@@ -526,54 +523,65 @@ function _hrSetStatus(msg) {
 }
 
 // Normalise an Apify radeance/handelsregister-api result to our internal company shape.
-// Actual output field names (English) confirmed from actor schema v0.0.11.
+// Field names verified against actual API response (REWE Markt GmbH test run).
 function _hrNormalizeApify(item) {
   const name    = item.company_name || '';
   const lf      = item.legal_form   || '';
   const art     = item.register_type || 'HRB';
   const nummer  = item.register_number || '';
-  const status  = item.status       || 'Active';
+  const status  = item.status       || 'active';
   const purpose = item.business_purpose || '';
-  const gericht     = item.court_info  || '';
-  // Strip "Amtsgericht " prefix for city fallback (e.g. "Amtsgericht München" → "München")
-  const gerichtCity = gericht.replace(/^Amtsgericht\s+/i, '');
-  const courtState  = item.court_state || '';
 
-  // Founding date may come as ISO string or dd.mm.yyyy
+  // court_info returns "District court Köln HRB 66773" — strip prefix and register number
+  const gericht     = item.court_info || item.court_name || '';
+  const gerichtCity = gericht
+    .replace(/^District court\s+/i, '')   // API English format
+    .replace(/^Amtsgericht\s+/i, '')      // German format fallback
+    .replace(/\s+HR[ABS]\s+\d+.*$/i, '') // strip trailing "HRB 12345"
+    .trim();
+
+  // court_state from API is a 2-letter code: "NW", "BY", "BW", etc.
+  const courtState = item.court_state || '';
+
+  // Founding date — ISO string or dd.mm.yyyy
   const foundingRaw = item.founding_date || '';
-  let incorporation_date = foundingRaw;
+  let incorporation_date = foundingRaw || '';
   if (foundingRaw && /^\d{2}\.\d{2}\.\d{4}$/.test(foundingRaw)) {
-    // Convert dd.mm.yyyy → yyyy-mm-dd for age calculation
     const [d, m, y] = foundingRaw.split('.');
     incorporation_date = `${y}-${m}-${d}`;
   }
 
-  // Address — actor returns an object under `address` or `headquarters`
-  let street = '', zip = '', city = '', region = '';
-  const addr = item.address || item.headquarters || null;
+  // Address — API returns object: { street, postal_code, city, country, full_address }
+  let street = '', zip = '', city = '';
+  const addr = item.address || null;
   if (addr && typeof addr === 'object') {
-    street = addr.street        || addr.street_address || addr.strasse || '';
-    zip    = addr.postal_code   || addr.zip            || addr.plz     || '';
-    city   = addr.city          || addr.locality       || addr.ort     || gerichtCity;
-    region = addr.state         || addr.region         || courtState   || '';
+    street = addr.street        || addr.street_address || '';
+    zip    = addr.postal_code   || addr.zip            || '';
+    city   = addr.city          || addr.locality       || '';
   } else if (typeof addr === 'string' && addr) {
-    // Parse "Musterstraße 1, 80331 München" style strings
     const parts = addr.split(',').map(s => s.trim());
     street = parts[0] || '';
     const zipCity = parts[1] || '';
-    const m = zipCity.match(/^(\d{5})\s+(.+)$/);
-    if (m) { zip = m[1]; city = m[2]; } else { city = zipCity || gerichtCity; }
-  } else {
-    city = gerichtCity; // fall back to court city (without "Amtsgericht " prefix)
+    const zm = zipCity.match(/^(\d{5})\s+(.+)$/);
+    if (zm) { zip = zm[1]; city = zm[2]; } else { city = zipCity; }
   }
+  // City fallback chain: registered_office → headquarters (plain string) → court city
+  if (!city) city = item.registered_office || '';
+  if (!city && typeof item.headquarters === 'string') city = item.headquarters;
+  if (!city) city = gerichtCity;
 
-  // Representatives — actor returns array of objects with name / role / birthdate
+  // Representatives — API uses `full_name` (not `name`)
   const officers = (item.representatives || []).map(r => {
     if (typeof r === 'string') return r;
     const role = r.role || r.position || '';
-    const nm   = r.name || r.Name || '';
+    const nm   = r.full_name || r.name || r.Name || '';
     return role ? `${nm} (${role})` : nm;
   }).filter(Boolean);
+
+  // Share capital — combine value + currency
+  const sc = item.share_capital != null
+    ? `${item.share_capital}${item.share_capital_currency ? ' ' + item.share_capital_currency : ''}`
+    : '';
 
   return {
     name,
@@ -582,17 +590,19 @@ function _hrNormalizeApify(item) {
     incorporation_date,
     current_status:     status,
     dissolution_date:   '',
-    registered_address: { street_address: street, postal_code: zip, locality: city, region },
+    registered_address: { street_address: street, postal_code: zip, locality: city, region: '' },
     jurisdiction_code:  'de',
     // Apify-only extras
     _source:      'apify',
     _officers:    officers,
-    _court:       gericht,
-    _courtState:  courtState,
+    _court:       gerichtCity,   // clean city name (no prefix/register number)
+    _courtFull:   gericht,       // raw court_info string
+    _courtState:  courtState,    // 2-letter code from API: "NW", "BY", etc.
     _purpose:     purpose,
-    _shareCapital: item.share_capital || '',
+    _shareCapital: sc,
     _euid:        item.euid          || '',
     _identifier:  item.identifier    || '',
+    _lastEntry:   item.last_entry_date ? item.last_entry_date.slice(0, 10) : '',
   };
 }
 
