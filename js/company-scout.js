@@ -65,6 +65,7 @@ let _scoutLocName       = '';
 let _scoutResults       = [];
 let _scoutSaved         = new Set(); // indices already saved to Companies
 let _pipelineCompanies  = [];        // companies fetched by the Bundesanzeiger pipeline
+let _scoutMode          = 'map';     // 'map' | 'pipeline'
 
 // ─── Main Render ─────────────────────────────────────────────────────────────
 
@@ -73,110 +74,180 @@ async function renderCompanyScout() {
   const settings = await DB.get(STORES.settings, `settings_${currentUser.id}`);
   const hasGoogleKey = !!(settings?.googlePlacesApiKey);
 
-  pageContent.innerHTML = `
-    <div class="p-4 lg:p-8 max-w-7xl mx-auto animate-fade-in">
-      ${renderPageHeader('Company Scout', 'Click the map to pick a location, choose an industry, and discover real businesses')}
-
-      <!-- Map + Controls -->
-      <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
-
-        <!-- Map -->
-        <div class="lg:col-span-2 card p-0 overflow-hidden">
-          <div id="scout-map" style="height:460px; width:100%; background:#e8f0fe;"></div>
-          <div class="px-4 py-2 border-t border-surface-100 dark:border-surface-800 flex items-center gap-2 text-xs text-surface-500">
-            <svg class="w-3.5 h-3.5 text-brand-500" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M5.05 4.05a7 7 0 119.9 9.9L10 18.9l-4.95-4.95a7 7 0 010-9.9zM10 11a2 2 0 100-4 2 2 0 000 4z" clip-rule="evenodd"/></svg>
-            <span id="scout-location-label">Click anywhere on the map to set your search location</span>
-          </div>
-        </div>
-
-        <!-- Controls -->
-        <div class="flex flex-col gap-4">
-          <div class="card flex-1">
-            <h3 class="text-sm font-semibold mb-4">Search Settings</h3>
-
-            <div class="space-y-4">
-              <div>
-                <label class="block text-xs font-medium text-surface-500 mb-1">Industry</label>
-                <select id="scout-industry" class="input-field text-sm">
-                  ${Object.keys(SCOUT_INDUSTRY_MAP).map(k =>
-                    `<option value="${k}">${k}</option>`).join('')}
-                </select>
-              </div>
-
-              <div>
-                <label class="block text-xs font-medium text-surface-500 mb-1">
-                  Search Radius: <span id="scout-radius-label">5 km</span>
-                </label>
-                <input type="range" id="scout-radius" min="1" max="50" value="5" step="1"
-                  oninput="scoutUpdateRadius(this.value)"
-                  class="w-full accent-brand-600" />
-                <div class="flex justify-between text-xs text-surface-400 mt-0.5">
-                  <span>1 km</span><span>50 km</span>
-                </div>
-              </div>
-
-              <div>
-                <label class="block text-xs font-medium text-surface-500 mb-2">Data Source</label>
-                <div class="flex flex-col gap-2">
-                  <label class="flex items-start gap-2 cursor-pointer">
-                    <input type="radio" name="scout-source" value="google" id="scout-src-google"
-                      class="mt-0.5 accent-brand-600" ${hasGoogleKey ? 'checked' : ''} />
-                    <div>
-                      <div class="text-sm font-medium flex items-center gap-1">
-                        <img src="https://www.google.com/favicon.ico" class="w-3.5 h-3.5" /> Google Places
-                        ${!hasGoogleKey ? '<span class="text-xs text-amber-500">(key required)</span>' : '<span class="text-xs text-green-600">✓ Ready</span>'}
-                      </div>
-                      <div class="text-xs text-surface-400">Rich data — website, phone, rating, reviews</div>
-                    </div>
-                  </label>
-                  <label class="flex items-start gap-2 cursor-pointer">
-                    <input type="radio" name="scout-source" value="osm" id="scout-src-osm"
-                      class="mt-0.5 accent-brand-600" ${!hasGoogleKey ? 'checked' : ''} />
-                    <div>
-                      <div class="text-sm font-medium flex items-center gap-1">
-                        🗺 OpenStreetMap
-                        <span class="text-xs text-green-600">Free</span>
-                      </div>
-                      <div class="text-xs text-surface-400">No API key — community-maintained data</div>
-                    </div>
-                  </label>
-                </div>
-              </div>
-
-              <button onclick="runCompanyScout()" id="scout-run-btn"
-                class="btn-primary w-full flex items-center justify-center gap-2">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"/></svg>
-                Scout Businesses
-              </button>
-
-              ${!hasGoogleKey ? `
-                <div class="text-xs text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/15 border border-amber-200 dark:border-amber-800 rounded-lg p-3">
-                  Add a <strong>Google Places API key</strong> in Settings for richer results (website, phone, rating). OpenStreetMap works without any key.
-                  <button onclick="navigate('settings')" class="block mt-1 underline">Go to Settings →</button>
-                </div>` : ''}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Results -->
-      <div id="scout-results"></div>
-
-      <!-- Pipeline Companies (fetched by Bundesanzeiger pipeline) -->
-      <div id="pipeline-companies-section" class="mt-8"></div>
-    </div>
-  `;
-
-  // Init map after DOM is ready
-  requestAnimationFrame(() => initScoutMap());
-
-  // Load pipeline companies (source === 'pipeline') into the section below
+  // Load pipeline companies count for badge
+  let pipelineCount = 0;
   try {
     const allCompanies = await DB.getForUser(STORES.companies, currentUser.id);
     _pipelineCompanies = allCompanies.filter(c => c.source === 'pipeline');
-    renderPipelineSection(_pipelineCompanies);
-  } catch (err) {
-    console.warn('[Scout] Could not load pipeline companies:', err.message);
+    pipelineCount = _pipelineCompanies.length;
+  } catch (_) {}
+
+  pageContent.innerHTML = `
+    <div class="p-4 lg:p-8 max-w-7xl mx-auto animate-fade-in">
+      ${renderPageHeader('Company Scout', 'Discover businesses on the map or browse pipeline-fetched companies')}
+
+      <!-- ── Mode toggle ───────────────────────────────────────────────────── -->
+      <div class="flex gap-1 p-1 bg-surface-100 dark:bg-surface-800 rounded-xl mb-6 w-fit">
+        <button id="scout-tab-map"
+          onclick="scoutSwitchMode('map')"
+          class="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors
+                 ${_scoutMode === 'map'
+                   ? 'bg-white dark:bg-surface-700 shadow-sm text-surface-900 dark:text-surface-100'
+                   : 'text-surface-500 dark:text-surface-400 hover:text-surface-900 dark:hover:text-surface-100'}">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+              d="M9 6.75V15m6-6v8.25m.503 3.498l4.875-2.437c.381-.19.622-.58.622-1.006V4.82c0-.836-.88-1.38-1.628-1.006l-3.869 1.934c-.317.159-.69.159-1.006 0L9.503 3.252a1.125 1.125 0 00-1.006 0L3.622 5.689C3.24 5.88 3 6.27 3 6.695V19.18c0 .836.88 1.38 1.628 1.006l3.869-1.934c.317-.159.69-.159 1.006 0l4.994 2.497z"/>
+          </svg>
+          Map Scout
+        </button>
+        <button id="scout-tab-pipeline"
+          onclick="scoutSwitchMode('pipeline')"
+          class="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors
+                 ${_scoutMode === 'pipeline'
+                   ? 'bg-white dark:bg-surface-700 shadow-sm text-surface-900 dark:text-surface-100'
+                   : 'text-surface-500 dark:text-surface-400 hover:text-surface-900 dark:hover:text-surface-100'}">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+              d="M3.75 9.776c.112-.017.227-.026.344-.026h15.812c.117 0 .232.009.344.026m-16.5 0a2.25 2.25 0 00-1.883 2.542l.857 6a2.25 2.25 0 002.227 1.932H19.05a2.25 2.25 0 002.227-1.932l.857-6a2.25 2.25 0 00-1.883-2.542m-16.5 0V6A2.25 2.25 0 016 3.75h3.879a1.5 1.5 0 011.06.44l2.122 2.12a1.5 1.5 0 001.06.44H18A2.25 2.25 0 0120.25 9v.776"/>
+          </svg>
+          Pipeline Companies
+          ${pipelineCount > 0 ? `<span class="ml-1 px-1.5 py-0.5 rounded-full text-xs font-semibold bg-brand-100 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300">${pipelineCount}</span>` : ''}
+        </button>
+      </div>
+
+      <!-- ── Map Scout panel ───────────────────────────────────────────────── -->
+      <div id="scout-map-panel" class="${_scoutMode !== 'map' ? 'hidden' : ''}">
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
+
+          <!-- Map -->
+          <div class="lg:col-span-2 card p-0 overflow-hidden">
+            <div id="scout-map" style="height:460px; width:100%; background:#e8f0fe;"></div>
+            <div class="px-4 py-2 border-t border-surface-100 dark:border-surface-800 flex items-center gap-2 text-xs text-surface-500">
+              <svg class="w-3.5 h-3.5 text-brand-500" fill="currentColor" viewBox="0 0 20 20">
+                <path fill-rule="evenodd" d="M5.05 4.05a7 7 0 119.9 9.9L10 18.9l-4.95-4.95a7 7 0 010-9.9zM10 11a2 2 0 100-4 2 2 0 000 4z" clip-rule="evenodd"/>
+              </svg>
+              <span id="scout-location-label">Click anywhere on the map to set your search location</span>
+            </div>
+          </div>
+
+          <!-- Controls -->
+          <div class="flex flex-col gap-4">
+            <div class="card flex-1">
+              <h3 class="text-sm font-semibold mb-4">Search Settings</h3>
+              <div class="space-y-4">
+                <div>
+                  <label class="block text-xs font-medium text-surface-500 mb-1">Industry</label>
+                  <select id="scout-industry" class="input-field text-sm">
+                    ${Object.keys(SCOUT_INDUSTRY_MAP).map(k =>
+                      `<option value="${k}">${k}</option>`).join('')}
+                  </select>
+                </div>
+                <div>
+                  <label class="block text-xs font-medium text-surface-500 mb-1">
+                    Search Radius: <span id="scout-radius-label">5 km</span>
+                  </label>
+                  <input type="range" id="scout-radius" min="1" max="50" value="5" step="1"
+                    oninput="scoutUpdateRadius(this.value)"
+                    class="w-full accent-brand-600" />
+                  <div class="flex justify-between text-xs text-surface-400 mt-0.5">
+                    <span>1 km</span><span>50 km</span>
+                  </div>
+                </div>
+                <div>
+                  <label class="block text-xs font-medium text-surface-500 mb-2">Data Source</label>
+                  <div class="flex flex-col gap-2">
+                    <label class="flex items-start gap-2 cursor-pointer">
+                      <input type="radio" name="scout-source" value="google" id="scout-src-google"
+                        class="mt-0.5 accent-brand-600" ${hasGoogleKey ? 'checked' : ''} />
+                      <div>
+                        <div class="text-sm font-medium flex items-center gap-1">
+                          <img src="https://www.google.com/favicon.ico" class="w-3.5 h-3.5" /> Google Places
+                          ${!hasGoogleKey ? '<span class="text-xs text-amber-500">(key required)</span>' : '<span class="text-xs text-green-600">✓ Ready</span>'}
+                        </div>
+                        <div class="text-xs text-surface-400">Rich data — website, phone, rating, reviews</div>
+                      </div>
+                    </label>
+                    <label class="flex items-start gap-2 cursor-pointer">
+                      <input type="radio" name="scout-source" value="osm" id="scout-src-osm"
+                        class="mt-0.5 accent-brand-600" ${!hasGoogleKey ? 'checked' : ''} />
+                      <div>
+                        <div class="text-sm font-medium flex items-center gap-1">
+                          🗺 OpenStreetMap
+                          <span class="text-xs text-green-600">Free</span>
+                        </div>
+                        <div class="text-xs text-surface-400">No API key — community-maintained data</div>
+                      </div>
+                    </label>
+                  </div>
+                </div>
+                <button onclick="runCompanyScout()" id="scout-run-btn"
+                  class="btn-primary w-full flex items-center justify-center gap-2">
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"/>
+                  </svg>
+                  Scout Businesses
+                </button>
+                ${!hasGoogleKey ? `
+                  <div class="text-xs text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/15 border border-amber-200 dark:border-amber-800 rounded-lg p-3">
+                    Add a <strong>Google Places API key</strong> in Settings for richer results (website, phone, rating). OpenStreetMap works without any key.
+                    <button onclick="navigate('settings')" class="block mt-1 underline">Go to Settings →</button>
+                  </div>` : ''}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Map results -->
+        <div id="scout-results"></div>
+      </div>
+
+      <!-- ── Pipeline Companies panel ──────────────────────────────────────── -->
+      <div id="scout-pipeline-panel" class="${_scoutMode !== 'pipeline' ? 'hidden' : ''}">
+        <div id="pipeline-companies-section"></div>
+      </div>
+
+    </div>
+  `;
+
+  // Init map if starting in map mode
+  if (_scoutMode === 'map') {
+    requestAnimationFrame(() => initScoutMap());
+  }
+
+  // Render pipeline panel if starting there, or pre-populate for badge accuracy
+  renderPipelineSection(_pipelineCompanies);
+}
+
+// ─── Mode switch ──────────────────────────────────────────────────────────────
+
+function scoutSwitchMode(mode) {
+  _scoutMode = mode;
+
+  const mapPanel      = document.getElementById('scout-map-panel');
+  const pipelinePanel = document.getElementById('scout-pipeline-panel');
+  const tabMap        = document.getElementById('scout-tab-map');
+  const tabPipeline   = document.getElementById('scout-tab-pipeline');
+
+  const activeClass   = 'bg-white dark:bg-surface-700 shadow-sm text-surface-900 dark:text-surface-100';
+  const inactiveClass = 'text-surface-500 dark:text-surface-400 hover:text-surface-900 dark:hover:text-surface-100';
+
+  if (mode === 'map') {
+    mapPanel?.classList.remove('hidden');
+    pipelinePanel?.classList.add('hidden');
+    tabMap?.classList.remove(...inactiveClass.split(' '));
+    tabMap?.classList.add(...activeClass.split(' '));
+    tabPipeline?.classList.remove(...activeClass.split(' '));
+    tabPipeline?.classList.add(...inactiveClass.split(' '));
+    // Init map if not yet done
+    if (!_scoutMap) requestAnimationFrame(() => initScoutMap());
+    else setTimeout(() => _scoutMap?.invalidateSize(), 50);
+  } else {
+    pipelinePanel?.classList.remove('hidden');
+    mapPanel?.classList.add('hidden');
+    tabPipeline?.classList.remove(...inactiveClass.split(' '));
+    tabPipeline?.classList.add(...activeClass.split(' '));
+    tabMap?.classList.remove(...activeClass.split(' '));
+    tabMap?.classList.add(...inactiveClass.split(' '));
   }
 }
 
@@ -680,21 +751,56 @@ function renderPipelineSection(companies) {
   if (!el) return;
 
   if (!companies.length) {
-    el.innerHTML = '';
+    el.innerHTML = `
+      <div class="card p-12 text-center text-surface-400">
+        <div class="text-4xl mb-4">🏭</div>
+        <p class="text-sm font-semibold mb-1">No pipeline companies yet</p>
+        <p class="text-xs text-surface-500 max-w-sm mx-auto mt-1">
+          Run the Python pipeline to fetch companies from Bundesanzeiger and Unternehmensregister.
+          They'll appear here automatically once synced to Firestore.
+        </p>
+        <div class="mt-4 px-4 py-3 rounded-lg bg-surface-50 dark:bg-surface-800 border border-surface-200 dark:border-surface-700 text-left text-xs text-surface-600 dark:text-surface-400 max-w-sm mx-auto font-mono">
+          python pipeline/run_simple.py --query "GmbH München" --sync
+        </div>
+      </div>`;
     return;
   }
 
+  // Group stats
+  const bySource = {};
+  companies.forEach(c => {
+    const src = (c._pipeline?.data_source || c.source || 'pipeline');
+    bySource[src] = (bySource[src] || 0) + 1;
+  });
+  const sourceChips = Object.entries(bySource).map(([src, n]) =>
+    `<span class="px-2 py-0.5 rounded-full text-xs bg-surface-100 dark:bg-surface-800 text-surface-500">${src}: ${n}</span>`
+  ).join('');
+
   el.innerHTML = `
-    <div class="border-t border-surface-200 dark:border-surface-700 pt-8">
-      <div class="flex items-center justify-between mb-4">
-        <div>
-          <h2 class="text-base font-semibold">📋 Pipeline Companies</h2>
-          <p class="text-xs text-surface-500 mt-0.5">${companies.length} companies fetched from Bundesanzeiger — click <strong>+ Pipeline</strong> to add to your deal flow</p>
+    <div>
+      <!-- Header row -->
+      <div class="flex flex-col sm:flex-row sm:items-center gap-3 mb-4">
+        <div class="flex-1">
+          <div class="flex items-center gap-2 flex-wrap">
+            <span class="text-sm font-semibold">${companies.length.toLocaleString()} companies fetched from registry</span>
+            <div class="flex gap-1.5 flex-wrap">${sourceChips}</div>
+          </div>
+          <p class="text-xs text-surface-500 mt-0.5">Click <strong>+ Pipeline</strong> to move any company into your active deal flow</p>
         </div>
-        <input type="text" id="pipeline-search-input" placeholder="Filter by name or city…"
-          oninput="filterPipelineCompanies(this.value)"
-          class="input-field text-sm w-52" />
+        <div class="flex items-center gap-2 flex-shrink-0">
+          <input type="text" id="pipeline-search-input"
+            placeholder="Filter by name, city, legal form…"
+            oninput="filterPipelineCompanies(this.value)"
+            class="input-field text-sm w-56" />
+          <select id="pipeline-source-filter" onchange="filterPipelineCompanies(document.getElementById('pipeline-search-input').value)"
+            class="input-field text-sm w-36">
+            <option value="">All sources</option>
+            ${Object.keys(bySource).map(s => `<option value="${s}">${s}</option>`).join('')}
+          </select>
+        </div>
       </div>
+
+      <!-- Cards -->
       <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4" id="pipeline-cards-grid">
         ${companies.map(c => renderPipelineCard(c)).join('')}
       </div>
@@ -703,13 +809,17 @@ function renderPipelineSection(companies) {
 }
 
 function renderPipelineCard(c) {
-  const city    = c.location || '';
-  const desc    = c.description || '';
-  const hrNum   = c.hrNumber || '';
-  const safeId  = escapeHtml(c.id || '');
+  const city   = c.location || '';
+  const desc   = c.description || '';
+  const hrNum  = c.hrNumber || '';
+  const safeId = escapeHtml(c.id || '');
+  const src    = c._pipeline?.data_source || 'pipeline';
+  const srcLabel = src === 'bundesanzeiger' ? 'BA'
+                 : src === 'unternehmensregister' ? 'UR'
+                 : 'Pipeline';
 
   return `
-    <div class="card p-4 flex flex-col gap-3">
+    <div class="card p-4 flex flex-col gap-3" id="pipeline-card-${safeId}">
       <div class="flex items-start gap-3">
         <div class="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 text-white text-xs font-bold"
           style="background:${avatarColor(c.name)}">${getInitials(c.name)}</div>
@@ -717,32 +827,79 @@ function renderPipelineCard(c) {
           <h3 class="text-sm font-semibold leading-snug">${escapeHtml(c.name)}</h3>
           ${city ? `<p class="text-xs text-surface-500">${escapeHtml(city)}</p>` : ''}
         </div>
-        <span class="text-xs px-1.5 py-0.5 rounded bg-orange-50 dark:bg-orange-900/20 text-orange-600 dark:text-orange-300 whitespace-nowrap flex-shrink-0">BA</span>
+        <span class="text-xs px-1.5 py-0.5 rounded bg-orange-50 dark:bg-orange-900/20 text-orange-600 dark:text-orange-300 whitespace-nowrap flex-shrink-0">${srcLabel}</span>
       </div>
-      ${desc   ? `<p class="text-xs text-surface-500 line-clamp-2">${escapeHtml(desc)}</p>` : ''}
-      ${hrNum  ? `<p class="text-xs text-surface-400">HR: ${escapeHtml(hrNum)}</p>` : ''}
+      ${desc  ? `<p class="text-xs text-surface-500 line-clamp-2">${escapeHtml(desc)}</p>` : ''}
+      ${hrNum ? `<p class="text-xs text-surface-400">HR: ${escapeHtml(hrNum)}</p>` : ''}
       <div class="flex gap-2 mt-auto pt-1">
-        <button onclick="pipelineAddToDeal('${safeId}')"
+        <button onclick="pipelinePromoteToCompany('${safeId}')" id="pipeline-promote-${safeId}"
+          class="btn-secondary btn-sm flex-1 text-xs">
+          + Add to Companies
+        </button>
+        <button onclick="pipelineAddToDeal('${safeId}')" id="pipeline-deal-${safeId}"
           class="btn-primary btn-sm flex-1 text-xs">
-          + Pipeline
+          + Add to Deals
         </button>
       </div>
     </div>
   `;
 }
 
+// Promote a pipeline company into the Companies tab
+// Updates source in Firestore so it passes the companies.js filter
+async function pipelinePromoteToCompany(companyId) {
+  const company = _pipelineCompanies.find(c => c.id === companyId);
+  if (!company) return;
+
+  const btn = document.getElementById(`pipeline-promote-${companyId}`);
+  if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+
+  try {
+    // Update the source field so it's no longer filtered out of Companies tab
+    await DB.put(STORES.companies, {
+      ...company,
+      source:    'scout',          // no longer 'pipeline' → now visible in Companies tab
+      updatedAt: new Date().toISOString(),
+    });
+
+    // Remove from local pipeline list so it disappears from this tab
+    _pipelineCompanies = _pipelineCompanies.filter(c => c.id !== companyId);
+    const card = document.getElementById(`pipeline-card-${companyId}`);
+    if (card) card.remove();
+
+    showToast(`"${company.name}" added to Companies ✓`, 'success');
+  } catch (err) {
+    showToast('Failed: ' + err.message, 'error');
+    if (btn) { btn.disabled = false; btn.textContent = '+ Add to Companies'; }
+  }
+}
+
 function filterPipelineCompanies(query) {
-  const q       = (query || '').toLowerCase();
-  const filtered = q
-    ? _pipelineCompanies.filter(c =>
-        (c.name     || '').toLowerCase().includes(q) ||
-        (c.location || '').toLowerCase().includes(q) ||
-        (c.description || '').toLowerCase().includes(q)
-      )
-    : _pipelineCompanies;
+  const q          = (query || '').toLowerCase();
+  const srcFilter  = document.getElementById('pipeline-source-filter')?.value || '';
+
+  const filtered = _pipelineCompanies.filter(c => {
+    if (srcFilter) {
+      const src = c._pipeline?.data_source || c.source || 'pipeline';
+      if (src !== srcFilter) return false;
+    }
+    if (q) {
+      return (
+        (c.name        || '').toLowerCase().includes(q) ||
+        (c.location    || '').toLowerCase().includes(q) ||
+        (c.description || '').toLowerCase().includes(q) ||
+        (c.hrNumber    || '').toLowerCase().includes(q)
+      );
+    }
+    return true;
+  });
 
   const grid = document.getElementById('pipeline-cards-grid');
-  if (grid) grid.innerHTML = filtered.map(c => renderPipelineCard(c)).join('');
+  if (grid) {
+    grid.innerHTML = filtered.length
+      ? filtered.map(c => renderPipelineCard(c)).join('')
+      : `<div class="col-span-3 card p-8 text-center text-surface-400 text-sm">No companies match your filter</div>`;
+  }
 }
 
 async function pipelineAddToDeal(companyId) {

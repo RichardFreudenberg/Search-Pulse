@@ -31,6 +31,21 @@ while ($listener.IsListening) {
         $ext = [System.IO.Path]::GetExtension($filePath)
         $contentType = if ($mimeTypes.ContainsKey($ext)) { $mimeTypes[$ext] } else { "application/octet-stream" }
         $response.ContentType = $contentType
+
+        # Cache policy:
+        #   HTML  → always revalidate (so version-bumped JS refs are picked up immediately)
+        #   JS/CSS with ?v= query → immutable for 1 year
+        #   everything else → no-cache
+        if ($ext -eq ".html") {
+            $response.Headers.Add("Cache-Control", "no-cache, no-store, must-revalidate")
+            $response.Headers.Add("Pragma", "no-cache")
+            $response.Headers.Add("Expires", "0")
+        } elseif (($ext -eq ".js" -or $ext -eq ".css") -and $request.Url.Query -match "v=") {
+            $response.Headers.Add("Cache-Control", "public, max-age=31536000, immutable")
+        } else {
+            $response.Headers.Add("Cache-Control", "no-cache")
+        }
+
         $bytes = [System.IO.File]::ReadAllBytes($filePath)
         $response.ContentLength64 = $bytes.Length
         $response.OutputStream.Write($bytes, 0, $bytes.Length)

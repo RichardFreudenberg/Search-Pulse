@@ -12,10 +12,13 @@ async function renderCompanies() {
   const pageContent = document.getElementById('page-content');
   pageContent.innerHTML = `<div class="p-4 lg:p-8 max-w-7xl mx-auto">${renderLoadingSkeleton(5)}</div>`;
 
-  const [companies, contacts] = await Promise.all([
+  const [allCompanies, contacts] = await Promise.all([
     DB.getForUser(STORES.companies, currentUser.id),
     DB.getForUser(STORES.contacts, currentUser.id),
   ]);
+
+  // Pipeline-fetched companies live in Company Scout, not here
+  const companies = allCompanies.filter(c => c.source !== 'pipeline');
 
   const activeContacts = getActiveContacts(contacts);
 
