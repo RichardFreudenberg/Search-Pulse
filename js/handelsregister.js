@@ -29,7 +29,7 @@ const _HR_STATES = [
   { code: 'de_th', label: 'Thüringen' },
 ];
 
-// Nominatim state name → OC jurisdiction code
+// Nominatim state name → internal jurisdiction code
 const _HR_STATE_CODES = {
   'Baden-Württemberg': 'de_bw',
   'Bayern': 'de_by',
@@ -48,6 +48,11 @@ const _HR_STATE_CODES = {
   'Schleswig-Holstein': 'de_sh',
   'Thüringen': 'de_th',
 };
+
+// Reverse map: jurisdiction code → German state name (for post-filtering Apify results)
+const _HR_CODE_TO_STATE = Object.fromEntries(
+  Object.entries(_HR_STATE_CODES).map(([name, code]) => [code, name])
+);
 
 // Legal form → acquisition assessment
 const _HR_LEGAL_FORMS = {
@@ -410,17 +415,22 @@ async function _hrSearch() {
 }
 
 // ─── Apify search ─────────────────────────────────────────────────────────────
-// Calls the radeance/handelsregister-api actor synchronously.
+// Calls the radeance/handelsregister-api actor (actId: CZBHNvjaWtrEw9O9R).
+// Input field names are English — confirmed from actor schema.
 // Returns a normalised array in our internal company format.
 
 async function _hrApifySearch(query, state, city, apifyKey) {
   const input = {
-    schlagwoerter:                  query,
-    aehnlich_lautende_schlagwoerter: true,
+    keyword:                 query,
+    include_company_details: true,   // business purpose, founding date, share capital
+    include_representatives: true,   // managing directors / officers
+    include_address:         true,   // headquarters address
+    include_documents:       false,  // skip documents to keep cost down
   };
-  // Area search: pass city as registergericht (German court city name)
+
+  // Area search: filter by specific court city (register_court)
   if (_hrSearchMode === 'area' && city) {
-    input.registergericht = city;
+    input.register_court = city;
   }
 
   console.log('[Handelsregister] Apify input:', input);
@@ -429,7 +439,7 @@ async function _hrApifySearch(query, state, city, apifyKey) {
   const timer = setTimeout(() => ctrl.abort(), 120000); // actor can take up to 2 min
 
   const resp = await fetch(
-    'https://api.apify.com/v2/acts/radeance~handelsregister-api/run-sync-get-dataset-items',
+    'https://api.apify.com/v2/acts/CZBHNvjaWtrEw9O9R/run-sync-get-dataset-items',
     {
       method:  'POST',
       headers: {
@@ -450,59 +460,91 @@ async function _hrApifySearch(query, state, city, apifyKey) {
   const items = await resp.json();
   console.log('[Handelsregister] Apify raw items:', items?.length, items?.[0]);
 
-  return (Array.isArray(items) ? items : [])
+  let results = (Array.isArray(items) ? items : [])
     .map(_hrNormalizeApify)
     .filter(c => c.name);
+
+  // Post-filter by state if a specific Bundesland is selected
+  // (actor has no server-side state filter — only register_court for city-level)
+  if (state && state !== 'de') {
+    const targetState = _HR_CODE_TO_STATE[state]; // e.g. 'de_by' → 'Bayern'
+    if (targetState) {
+      results = results.filter(c =>
+        c._courtState === targetState ||
+        (c._court && c._court.toLowerCase().includes(targetState.toLowerCase()))
+      );
+    }
+  }
+
+  return results;
 }
 
-// Normalise an Apify Handelsregister actor result to our internal company shape.
+// Normalise an Apify radeance/handelsregister-api result to our internal company shape.
+// Actual output field names (English) confirmed from actor schema v0.0.11.
 function _hrNormalizeApify(item) {
-  // The actor returns data scraped from handelsregister.de.
-  // Field names may vary slightly by actor version; we handle multiple possibilities.
-  const name      = item.name || item.firma || item.companyName || '';
-  const rechtsform = item.rechtsform || item.legalForm || item.legal_form || '';
-  const gericht   = item.registergericht || item.court || '';
-  const art       = item.registerart    || 'HRB';
-  const nummer    = item.registernummer || item.registerNumber || '';
-  const status    = item.status         || (item.active === false ? 'dissolved' : 'Active');
-  const purpose   = item.unternehmensgegenstand || item.businessPurpose || '';
+  const name    = item.company_name || '';
+  const lf      = item.legal_form   || '';
+  const art     = item.register_type || 'HRB';
+  const nummer  = item.register_number || '';
+  const status  = item.status       || 'Active';
+  const purpose = item.business_purpose || '';
+  const gericht = item.court_info   || '';
+  const courtState = item.court_state || '';
 
-  // Address — actor may return a string or an object
+  // Founding date may come as ISO string or dd.mm.yyyy
+  const foundingRaw = item.founding_date || '';
+  let incorporation_date = foundingRaw;
+  if (foundingRaw && /^\d{2}\.\d{2}\.\d{4}$/.test(foundingRaw)) {
+    // Convert dd.mm.yyyy → yyyy-mm-dd for age calculation
+    const [d, m, y] = foundingRaw.split('.');
+    incorporation_date = `${y}-${m}-${d}`;
+  }
+
+  // Address — actor returns an object under `address` or `headquarters`
   let street = '', zip = '', city = '', region = '';
-  const addr = item.geschäftsanschrift || item.anschrift || item.address || '';
-  if (typeof addr === 'object' && addr) {
-    street = addr.street || addr.strasse || addr.street_address || '';
-    zip    = addr.zip    || addr.plz     || addr.postal_code    || '';
-    city   = addr.city   || addr.ort     || addr.locality       || gericht;
+  const addr = item.address || item.headquarters || null;
+  if (addr && typeof addr === 'object') {
+    street = addr.street        || addr.street_address || addr.strasse || '';
+    zip    = addr.postal_code   || addr.zip            || addr.plz     || '';
+    city   = addr.city          || addr.locality       || addr.ort     || gericht;
+    region = addr.state         || addr.region         || courtState   || '';
   } else if (typeof addr === 'string' && addr) {
-    // Try to parse "Musterstraße 1, 80331 München" style strings
+    // Parse "Musterstraße 1, 80331 München" style strings
     const parts = addr.split(',').map(s => s.trim());
     street = parts[0] || '';
-    const zipCity = parts[1] || parts[0] || '';
+    const zipCity = parts[1] || '';
     const m = zipCity.match(/^(\d{5})\s+(.+)$/);
     if (m) { zip = m[1]; city = m[2]; } else { city = zipCity || gericht; }
   } else {
     city = gericht; // fall back to court city
   }
 
-  // Officers / directors
-  const officers = (item.vertretungsberechtigte || item.officers || item.directors || [])
-    .map(o => typeof o === 'string' ? o : (o.name || o.Name || JSON.stringify(o)));
+  // Representatives — actor returns array of objects with name / role / birthdate
+  const officers = (item.representatives || []).map(r => {
+    if (typeof r === 'string') return r;
+    const role = r.role || r.position || '';
+    const nm   = r.name || r.Name || '';
+    return role ? `${nm} (${role})` : nm;
+  }).filter(Boolean);
 
   return {
     name,
-    company_type:       rechtsform,
+    company_type:       lf,
     company_number:     nummer ? `${art} ${nummer}` : '',
-    incorporation_date: item.datum || item.founded || item.incorporation_date || '',
+    incorporation_date,
     current_status:     status,
-    dissolution_date:   item.loeschungsdatum || item.dissolution_date || '',
+    dissolution_date:   '',
     registered_address: { street_address: street, postal_code: zip, locality: city, region },
     jurisdiction_code:  'de',
-    // Apify extras
-    _source:   'apify',
-    _officers: officers,
-    _court:    gericht,
-    _purpose:  purpose,
+    // Apify-only extras
+    _source:      'apify',
+    _officers:    officers,
+    _court:       gericht,
+    _courtState:  courtState,
+    _purpose:     purpose,
+    _shareCapital: item.share_capital || '',
+    _euid:        item.euid          || '',
+    _identifier:  item.identifier    || '',
   };
 }
 
@@ -634,9 +676,12 @@ function _hrDetailHtml(company, idx, lf, age, address, active) {
         ${company.company_number    ? `<div><p class="text-surface-400 font-medium mb-0.5">Register No.</p><p class="font-semibold">${escapeHtml(company.company_number)}</p></div>` : ''}
         ${company.incorporation_date ? `<div><p class="text-surface-400 font-medium mb-0.5">Founded</p><p class="font-semibold">${escapeHtml(company.incorporation_date)}${age !== null ? ` (${age} yrs)` : ''}</p></div>` : ''}
         ${company.company_type       ? `<div><p class="text-surface-400 font-medium mb-0.5">Legal Form</p><p class="font-semibold">${escapeHtml(company.company_type)}</p></div>` : ''}
-        ${stateLabel                 ? `<div><p class="text-surface-400 font-medium mb-0.5">State</p><p class="font-semibold">${escapeHtml(stateLabel)}</p></div>` : ''}
+        ${company._courtState || stateLabel ? `<div><p class="text-surface-400 font-medium mb-0.5">State</p><p class="font-semibold">${escapeHtml(company._courtState || stateLabel)}</p></div>` : ''}
         ${company.current_status     ? `<div><p class="text-surface-400 font-medium mb-0.5">Status</p><p class="font-semibold">${escapeHtml(company.current_status)}</p></div>` : ''}
-        ${address ? `<div class="col-span-2"><p class="text-surface-400 font-medium mb-0.5">Registered Address</p><p class="font-semibold">${escapeHtml(address)}</p></div>` : ''}
+        ${company._shareCapital      ? `<div><p class="text-surface-400 font-medium mb-0.5">Share Capital</p><p class="font-semibold">${escapeHtml(company._shareCapital)}</p></div>` : ''}
+        ${company._court             ? `<div><p class="text-surface-400 font-medium mb-0.5">Register Court</p><p class="font-semibold">${escapeHtml(company._court)}</p></div>` : ''}
+        ${company._euid              ? `<div><p class="text-surface-400 font-medium mb-0.5">EUID</p><p class="font-semibold font-mono text-[10px]">${escapeHtml(company._euid)}</p></div>` : ''}
+        ${address ? `<div class="col-span-2 sm:col-span-3"><p class="text-surface-400 font-medium mb-0.5">Registered Address</p><p class="font-semibold">${escapeHtml(address)}</p></div>` : ''}
       </div>
 
       <!-- Officers (from Apify source) -->
