@@ -435,39 +435,77 @@ async function _hrApifySearch(query, state, city, apifyKey) {
 
   console.log('[Handelsregister] Apify input:', input);
 
-  const ctrl  = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 120000); // actor can take up to 2 min
+  const BASE  = 'https://api.apify.com/v2';
+  const TOKEN = `token=${encodeURIComponent(apifyKey)}`;
 
-  const resp = await fetch(
-    'https://api.apify.com/v2/acts/CZBHNvjaWtrEw9O9R/run-sync-get-dataset-items',
-    {
-      method:  'POST',
-      headers: {
-        'Content-Type':  'application/json',
-        'Authorization': `Bearer ${apifyKey}`,
-      },
-      body:   JSON.stringify(input),
-      signal: ctrl.signal,
-    }
+  // Helper: fetch with timeout
+  function _apiFetch(url, opts, timeoutMs) {
+    const ctrl  = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+    return fetch(url, { ...opts, signal: ctrl.signal })
+      .finally(() => clearTimeout(timer));
+  }
+
+  // ── Step 1: Start the actor run ─────────────────────────────────────────────
+  _hrSetStatus('Starting Handelsregister search…');
+  const startResp = await _apiFetch(
+    `${BASE}/acts/radeance~handelsregister-api/runs?${TOKEN}&maxTotalChargeUsd=5`,
+    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) },
+    30000
   );
-  clearTimeout(timer);
 
-  if (resp.status === 401) throw new Error('Invalid Apify API key. Check Settings → Apify API Key.');
-  if (resp.status === 402) throw new Error('apify_quota');
-  if (resp.status === 408) throw new Error('timeout');
-  if (!resp.ok)            throw new Error(`Apify error ${resp.status}`);
+  if (startResp.status === 401) throw new Error('Invalid Apify API key — check Settings → Apify API Key.');
+  if (!startResp.ok) {
+    const errJson = await startResp.json().catch(() => ({}));
+    throw new Error(errJson?.error?.message || `Apify start failed (${startResp.status})`);
+  }
 
-  const items = await resp.json();
-  console.log('[Handelsregister] Apify raw items:', items?.length, items?.[0]);
+  const runData   = await startResp.json();
+  const runId     = runData?.data?.id;
+  const datasetId = runData?.data?.defaultDatasetId;
+  if (!runId) throw new Error('Apify did not return a run ID — check your API key.');
+
+  // ── Step 2: Poll until the run finishes ─────────────────────────────────────
+  const DONE     = new Set(['SUCCEEDED', 'FAILED', 'ABORTED', 'TIMED-OUT']);
+  const deadline = Date.now() + 120000; // 2 min max
+  let   runStatus = runData?.data?.status || 'RUNNING';
+  let   elapsed   = 0;
+
+  while (!DONE.has(runStatus)) {
+    if (Date.now() > deadline) throw new Error('timeout');
+    await new Promise(r => setTimeout(r, 3000));
+    elapsed += 3;
+    _hrSetStatus(`Running on Handelsregister.de… (${elapsed}s)`);
+
+    const pollResp = await _apiFetch(
+      `${BASE}/actor-runs/${runId}?${TOKEN}`, {}, 10000
+    );
+    const pollData = await pollResp.json();
+    runStatus = pollData?.data?.status || runStatus;
+  }
+
+  if (runStatus !== 'SUCCEEDED') {
+    throw new Error(`Apify run ${runStatus.toLowerCase()} — check your Apify account for details.`);
+  }
+
+  // ── Step 3: Fetch dataset items ─────────────────────────────────────────────
+  _hrSetStatus('Fetching results…');
+  const itemsResp = await _apiFetch(
+    `${BASE}/datasets/${datasetId}/items?${TOKEN}&clean=true&format=json`,
+    {}, 20000
+  );
+  if (!itemsResp.ok) throw new Error(`Failed to fetch results (${itemsResp.status})`);
+
+  const items = await itemsResp.json();
+  console.log('[Handelsregister] Apify items:', items?.length, items?.[0]);
 
   let results = (Array.isArray(items) ? items : [])
     .map(_hrNormalizeApify)
     .filter(c => c.name);
 
   // Post-filter by state if a specific Bundesland is selected
-  // (actor has no server-side state filter — only register_court for city-level)
   if (state && state !== 'de') {
-    const targetState = _HR_CODE_TO_STATE[state]; // e.g. 'de_by' → 'Bayern'
+    const targetState = _HR_CODE_TO_STATE[state];
     if (targetState) {
       results = results.filter(c =>
         c._courtState === targetState ||
@@ -477,6 +515,14 @@ async function _hrApifySearch(query, state, city, apifyKey) {
   }
 
   return results;
+}
+
+// Updates the spinner message during a running search
+function _hrSetStatus(msg) {
+  const area = document.getElementById('hr-results-area');
+  if (!area) return;
+  const span = area.querySelector('span.text-sm');
+  if (span) span.textContent = msg;
 }
 
 // Normalise an Apify radeance/handelsregister-api result to our internal company shape.
