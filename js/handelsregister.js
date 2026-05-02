@@ -488,8 +488,10 @@ function _hrNormalizeApify(item) {
   const nummer  = item.register_number || '';
   const status  = item.status       || 'Active';
   const purpose = item.business_purpose || '';
-  const gericht = item.court_info   || '';
-  const courtState = item.court_state || '';
+  const gericht     = item.court_info  || '';
+  // Strip "Amtsgericht " prefix for city fallback (e.g. "Amtsgericht München" → "München")
+  const gerichtCity = gericht.replace(/^Amtsgericht\s+/i, '');
+  const courtState  = item.court_state || '';
 
   // Founding date may come as ISO string or dd.mm.yyyy
   const foundingRaw = item.founding_date || '';
@@ -506,7 +508,7 @@ function _hrNormalizeApify(item) {
   if (addr && typeof addr === 'object') {
     street = addr.street        || addr.street_address || addr.strasse || '';
     zip    = addr.postal_code   || addr.zip            || addr.plz     || '';
-    city   = addr.city          || addr.locality       || addr.ort     || gericht;
+    city   = addr.city          || addr.locality       || addr.ort     || gerichtCity;
     region = addr.state         || addr.region         || courtState   || '';
   } else if (typeof addr === 'string' && addr) {
     // Parse "Musterstraße 1, 80331 München" style strings
@@ -514,9 +516,9 @@ function _hrNormalizeApify(item) {
     street = parts[0] || '';
     const zipCity = parts[1] || '';
     const m = zipCity.match(/^(\d{5})\s+(.+)$/);
-    if (m) { zip = m[1]; city = m[2]; } else { city = zipCity || gericht; }
+    if (m) { zip = m[1]; city = m[2]; } else { city = zipCity || gerichtCity; }
   } else {
-    city = gericht; // fall back to court city
+    city = gerichtCity; // fall back to court city (without "Amtsgericht " prefix)
   }
 
   // Representatives — actor returns array of objects with name / role / birthdate
