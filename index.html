@@ -10,7 +10,7 @@
   <!-- Auto-reload when a new version is deployed (no manual refresh needed) -->
   <script>
   (function(){
-    var RUNNING = '20260501g';
+    var RUNNING = '20260501h';
     fetch('version.json?_=' + Date.now(), { cache: 'no-store' })
       .then(function(r){ return r.ok ? r.json() : null; })
       .then(function(d){

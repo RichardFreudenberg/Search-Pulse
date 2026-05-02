@@ -54,6 +54,61 @@ const _HR_CODE_TO_STATE = Object.fromEntries(
   Object.entries(_HR_STATE_CODES).map(([name, code]) => [code, name])
 );
 
+// Maps Nominatim city names → Apify actor's register_court enum value
+// Only needed where city name ≠ court name (Berlin, Frankfurt, etc.)
+const _HR_CITY_TO_COURT = {
+  'Berlin':                       'berlin (charlottenburg)',
+  'Frankfurt am Main':            'frankfurt am main',
+  'Frankfurt':                    'frankfurt am main',
+  'Frankfurt (Oder)':             'frankfurt/oder',
+  'Oldenburg':                    'oldenburg (oldenburg)',
+  'Oldenburg (Oldenburg)':        'oldenburg (oldenburg)',
+  'Ludwigshafen am Rhein':        'ludwigshafen a.rhein (ludwigshafen)',
+  'Ludwigshafen':                 'ludwigshafen a.rhein (ludwigshafen)',
+  'Bad Homburg vor der Höhe':     'bad homburg v.d.h.',
+  'Bad Homburg':                  'bad homburg v.d.h.',
+  'Kempten (Allgäu)':             'kempten (allgäu)',
+  'Kempten':                      'kempten (allgäu)',
+  'Weiden in der Oberpfalz':      'weiden i. d. opf.',
+  'Weiden':                       'weiden i. d. opf.',
+  'St. Ingbert':                  'st. ingbert (st ingbert)',
+  'Sankt Ingbert':                'st. ingbert (st ingbert)',
+  'St. Wendel':                   'st. wendel (st wendel)',
+  'Sankt Wendel':                 'st. wendel (st wendel)',
+  'Offenbach am Main':            'offenbach am main',
+  'Offenbach':                    'offenbach am main',
+  'Heilbad Heiligenstadt':        'heilbad heiligenstadt',
+  'Heiligenstadt':                'heilbad heiligenstadt',
+};
+
+// Complete set of valid register_court values accepted by the Apify actor
+const _HR_VALID_COURTS = new Set([
+  'all','aachen','altenburg','amberg','ansbach','apolda','arnsberg','arnstadt',
+  'arnstadt zweigstelle ilmenau','aschaffenburg','augsburg','aurich','bad hersfeld',
+  'bad homburg v.d.h.','bad kreuznach','bad oeynhausen','bad salzungen','bamberg',
+  'bayreuth','berlin (charlottenburg)','bielefeld','bochum','bonn','braunschweig',
+  'bremen','chemnitz','coburg','coesfeld','cottbus','darmstadt','deggendorf',
+  'dortmund','dresden','duisburg','düren','düsseldorf','eisenach','erfurt','eschwege',
+  'essen','flensburg','frankfurt am main','frankfurt/oder','freiburg','friedberg',
+  'fritzlar','fulda','fürth','gelsenkirchen','gera','gießen','gotha','göttingen',
+  'greiz','gütersloh','hagen','hamburg','hamm','hanau','hannover',
+  'heilbad heiligenstadt','hildburghausen','hildesheim','hof','homburg','ingolstadt',
+  'iserlohn','jena','kaiserslautern','kassel','kempten (allgäu)','kiel','kleve',
+  'koblenz','köln','königstein','korbach','krefeld','landau','landshut','langenfeld',
+  'lebach','leipzig','lemgo','limburg','lübeck','ludwigshafen a.rhein (ludwigshafen)',
+  'lüneburg','mainz','mannheim','marburg','meiningen','memmingen','merzig',
+  'mönchengladbach','montabaur','mühlhausen','münchen','münster','neubrandenburg',
+  'neunkirchen','neuruppin','neuss','nordhausen','nürnberg','offenbach am main',
+  'oldenburg (oldenburg)','osnabrück','ottweiler','paderborn','passau','pinneberg',
+  'pößneck','pößneck zweigstelle bad lobenstein','potsdam','recklinghausen',
+  'regensburg','rostock','rudolstadt','saarbrücken','saarlouis','schweinfurt',
+  'schwerin','siegburg','siegen','sömmerda','sondershausen','sonneberg','stadthagen',
+  'stadtroda','steinfurt','stendal','st. ingbert (st ingbert)','stralsund','straubing',
+  'stuttgart','st. wendel (st wendel)','suhl','tostedt','traunstein','ulm',
+  'völklingen','walsrode','weiden i. d. opf.','weimar','wetzlar','wiesbaden',
+  'wittlich','wuppertal','würzburg','zweibrücken',
+]);
+
 // Legal form → acquisition assessment
 const _HR_LEGAL_FORMS = {
   'Gesellschaft mit beschränkter Haftung': {
@@ -420,17 +475,27 @@ async function _hrSearch() {
 // Returns a normalised array in our internal company format.
 
 async function _hrApifySearch(query, state, city, apifyKey) {
+  // Phase 1 — cheap list search, no add-ons.
+  // Cost: $0.025/result (RESULT only) → up to ~200 results for $5.
+  // Full details (officers, address, legal form) are fetched on demand when the user expands a card.
   const input = {
     keyword:                 query,
-    include_company_details: true,   // business purpose, founding date, share capital
-    include_representatives: true,   // managing directors / officers
-    include_address:         true,   // headquarters address
-    include_documents:       false,  // skip documents to keep cost down
+    include_company_details: false,  // fetched on expand (saves $0.10/result)
+    include_representatives: false,  // fetched on expand (saves $0.025/result)
+    include_address:         false,  // fetched on expand (saves $0.025/result)
+    include_documents:       false,
   };
 
-  // Area search: filter by specific court city (register_court)
+  // Area search: register_court must be a lowercase value from the actor's enum
   if (_hrSearchMode === 'area' && city) {
-    input.register_court = city;
+    const courtVal = _HR_CITY_TO_COURT[city] || city.toLowerCase();
+    if (_HR_VALID_COURTS.has(courtVal)) {
+      input.register_court = courtVal;
+      console.log('[Handelsregister] Area court:', courtVal);
+    } else {
+      console.log('[Handelsregister] City not in valid courts, skipping court filter:', city);
+      // State-level post-filter still applies
+    }
   }
 
   console.log('[Handelsregister] Apify input:', input);
@@ -522,6 +587,107 @@ function _hrSetStatus(msg) {
   if (span) span.textContent = msg;
 }
 
+// ─── Fetch full detail for one company (Phase 2) ──────────────────────────────
+// Called when the user expands a card that only has basic list data.
+// Runs a targeted Apify search by register_number + court with all add-ons enabled.
+// Cost: ~$0.185 per expanded company.
+
+async function _hrFetchDetail(idx) {
+  const company = _hrResults[idx];
+  if (!company || company._detail) return; // already loaded
+
+  // Show loading state inside the expanded card
+  const detailZone = document.getElementById(`hr-detail-zone-${idx}`);
+  if (detailZone) {
+    detailZone.innerHTML = `
+      <div class="flex items-center gap-2 px-4 py-3 text-xs text-surface-400">
+        <svg class="animate-spin w-3.5 h-3.5 text-brand-500 flex-shrink-0" fill="none" viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+        </svg>
+        Loading full company details from Handelsregister.de…
+      </div>`;
+  }
+
+  try {
+    const settings  = await DB.get(STORES.settings, `settings_${currentUser.id}`).catch(() => ({})) || {};
+    const apifyKey  = settings.apifyApiKey || '';
+    if (!apifyKey) throw new Error('No Apify key');
+
+    const BASE  = 'https://api.apify.com/v2';
+    const TOKEN = `token=${encodeURIComponent(apifyKey)}`;
+
+    // Resolve the court name: company._court is already the clean city (e.g. "Köln")
+    const courtVal = _HR_CITY_TO_COURT[company._court] || company._court?.toLowerCase() || 'all';
+    const validCourt = _HR_VALID_COURTS.has(courtVal) ? courtVal : 'all';
+
+    const input = {
+      register_number:         company._registerNumber,
+      register_type:           company._registerType || 'HRB',
+      register_court:          validCourt,
+      include_company_details: true,
+      include_representatives: true,
+      include_address:         true,
+      include_documents:       false,
+    };
+
+    function _apiFetch(url, opts, ms) {
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), ms);
+      return fetch(url, { ...opts, signal: ctrl.signal }).finally(() => clearTimeout(t));
+    }
+
+    // Start run
+    const startResp = await _apiFetch(
+      `${BASE}/acts/radeance~handelsregister-api/runs?${TOKEN}&maxTotalChargeUsd=2`,
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) },
+      30000
+    );
+    if (!startResp.ok) throw new Error(`Detail fetch failed (${startResp.status})`);
+    const runData   = await startResp.json();
+    const runId     = runData?.data?.id;
+    const datasetId = runData?.data?.defaultDatasetId;
+    if (!runId) throw new Error('No run ID');
+
+    // Poll
+    const DONE = new Set(['SUCCEEDED','FAILED','ABORTED','TIMED-OUT']);
+    let runStatus = runData?.data?.status || 'RUNNING';
+    const deadline = Date.now() + 60000;
+    while (!DONE.has(runStatus)) {
+      if (Date.now() > deadline) throw new Error('timeout');
+      await new Promise(r => setTimeout(r, 2000));
+      const p = await _apiFetch(`${BASE}/actor-runs/${runId}?${TOKEN}`, {}, 8000);
+      runStatus = (await p.json())?.data?.status || runStatus;
+    }
+    if (runStatus !== 'SUCCEEDED') throw new Error(`Run ${runStatus}`);
+
+    // Fetch items
+    const itemsResp = await _apiFetch(`${BASE}/datasets/${datasetId}/items?${TOKEN}&clean=true&format=json`, {}, 15000);
+    const items = await itemsResp.json();
+    const detailed = (Array.isArray(items) ? items : []).map(_hrNormalizeApify).find(c => c.name);
+
+    if (detailed) {
+      // Merge detail into the existing result, preserve _detail flag
+      _hrResults[idx] = { ..._hrResults[idx], ...detailed, _detail: true };
+    } else {
+      // No detailed result found — mark as detail-attempted so we don't retry
+      _hrResults[idx]._detail = true;
+    }
+
+  } catch (err) {
+    console.warn('[Handelsregister] Detail fetch failed:', err.message);
+    // Mark as attempted so we don't retry on every click
+    _hrResults[idx]._detail = true;
+  }
+
+  // Re-render the list to show the freshly loaded detail
+  const lastQuery = document.getElementById('hr-query')?.value
+                 || document.getElementById('hr-keyword-area')?.value || '';
+  const lastState = document.getElementById('hr-state')?.value
+                 || document.getElementById('hr-state-area')?.value || 'de';
+  _hrRenderList(lastQuery, lastState, _hrResults.length, true, 'apify');
+}
+
 // Normalise an Apify radeance/handelsregister-api result to our internal company shape.
 // Field names verified against actual API response (REWE Markt GmbH test run).
 function _hrNormalizeApify(item) {
@@ -593,16 +759,19 @@ function _hrNormalizeApify(item) {
     registered_address: { street_address: street, postal_code: zip, locality: city, region: '' },
     jurisdiction_code:  'de',
     // Apify-only extras
-    _source:      'apify',
-    _officers:    officers,
-    _court:       gerichtCity,   // clean city name (no prefix/register number)
-    _courtFull:   gericht,       // raw court_info string
-    _courtState:  courtState,    // 2-letter code from API: "NW", "BY", etc.
-    _purpose:     purpose,
-    _shareCapital: sc,
-    _euid:        item.euid          || '',
-    _identifier:  item.identifier    || '',
-    _lastEntry:   item.last_entry_date ? item.last_entry_date.slice(0, 10) : '',
+    _source:        'apify',
+    _detail:        false,         // true once full detail has been fetched on expand
+    _registerType:  art,           // needed for detail fetch ("HRB", "HRA", etc.)
+    _registerNumber: nummer,       // needed for detail fetch ("66773")
+    _officers:      officers,
+    _court:         gerichtCity,   // clean city name (no prefix/register number)
+    _courtFull:     gericht,       // raw court_info string
+    _courtState:    courtState,    // 2-letter code from API: "NW", "BY", etc.
+    _purpose:       purpose,
+    _shareCapital:  sc,
+    _euid:          item.euid          || '',
+    _identifier:    item.identifier    || '',
+    _lastEntry:     item.last_entry_date ? item.last_entry_date.slice(0, 10) : '',
   };
 }
 
@@ -729,36 +898,43 @@ function _hrDetailHtml(company, idx, lf, age, address, active) {
   return `
     <div class="border-t border-surface-200 dark:border-surface-700">
 
-      <!-- Data grid -->
+      <!-- Always-visible data grid (from basic search) -->
       <div class="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-2.5 px-4 py-3 text-xs bg-surface-50 dark:bg-surface-800/30">
-        ${company.company_number    ? `<div><p class="text-surface-400 font-medium mb-0.5">Register No.</p><p class="font-semibold">${escapeHtml(company.company_number)}</p></div>` : ''}
+        ${company.company_number     ? `<div><p class="text-surface-400 font-medium mb-0.5">Register No.</p><p class="font-semibold">${escapeHtml(company.company_number)}</p></div>` : ''}
         ${company.incorporation_date ? `<div><p class="text-surface-400 font-medium mb-0.5">Founded</p><p class="font-semibold">${escapeHtml(company.incorporation_date)}${age !== null ? ` (${age} yrs)` : ''}</p></div>` : ''}
         ${company.company_type       ? `<div><p class="text-surface-400 font-medium mb-0.5">Legal Form</p><p class="font-semibold">${escapeHtml(company.company_type)}</p></div>` : ''}
-        ${company._courtState || stateLabel ? `<div><p class="text-surface-400 font-medium mb-0.5">State</p><p class="font-semibold">${escapeHtml(company._courtState || stateLabel)}</p></div>` : ''}
+        ${company._courtState        ? `<div><p class="text-surface-400 font-medium mb-0.5">State</p><p class="font-semibold">${escapeHtml(company._courtState)}</p></div>` : ''}
         ${company.current_status     ? `<div><p class="text-surface-400 font-medium mb-0.5">Status</p><p class="font-semibold">${escapeHtml(company.current_status)}</p></div>` : ''}
         ${company._shareCapital      ? `<div><p class="text-surface-400 font-medium mb-0.5">Share Capital</p><p class="font-semibold">${escapeHtml(company._shareCapital)}</p></div>` : ''}
         ${company._court             ? `<div><p class="text-surface-400 font-medium mb-0.5">Register Court</p><p class="font-semibold">${escapeHtml(company._court)}</p></div>` : ''}
         ${company._euid              ? `<div><p class="text-surface-400 font-medium mb-0.5">EUID</p><p class="font-semibold font-mono text-[10px]">${escapeHtml(company._euid)}</p></div>` : ''}
-        ${address ? `<div class="col-span-2 sm:col-span-3"><p class="text-surface-400 font-medium mb-0.5">Registered Address</p><p class="font-semibold">${escapeHtml(address)}</p></div>` : ''}
+        ${address ? `<div class="col-span-2 sm:col-span-3"><p class="text-surface-400 font-medium mb-0.5">Address</p><p class="font-semibold">${escapeHtml(address)}</p></div>` : ''}
       </div>
 
-      <!-- Officers (from Apify source) -->
-      ${company._officers?.length ? `
-        <div class="mx-3 my-2 px-3 py-2 rounded-lg bg-surface-50 dark:bg-surface-800/50 border border-surface-200 dark:border-surface-700">
-          <p class="text-[10px] font-semibold text-surface-400 uppercase tracking-wide mb-1.5">Managing Directors / Officers</p>
-          <div class="flex flex-wrap gap-1.5">
-            ${company._officers.map(o => `
-              <span class="px-2 py-0.5 rounded-full bg-white dark:bg-surface-700 border border-surface-200 dark:border-surface-600 text-xs text-surface-700 dark:text-surface-300">${escapeHtml(o)}</span>
-            `).join('')}
-          </div>
-        </div>` : ''}
-
-      <!-- Business purpose (from Apify source) -->
-      ${company._purpose ? `
-        <div class="mx-3 mb-2 px-3 py-2 rounded-lg bg-surface-50 dark:bg-surface-800/50 border border-surface-200 dark:border-surface-700">
-          <p class="text-[10px] font-semibold text-surface-400 uppercase tracking-wide mb-1">Business Purpose</p>
-          <p class="text-xs text-surface-600 dark:text-surface-400 leading-relaxed">${escapeHtml(company._purpose)}</p>
-        </div>` : ''}
+      <!-- Detail zone: populated on expand (officers, purpose, legal form note) -->
+      <div id="hr-detail-zone-${idx}">
+        ${!company._detail ? `
+          <div class="flex items-center gap-2 px-4 py-3 text-xs text-surface-400 border-t border-surface-100 dark:border-surface-800">
+            <svg class="animate-spin w-3.5 h-3.5 text-brand-500 flex-shrink-0" fill="none" viewBox="0 0 24 24">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+            </svg>
+            Loading officers, address &amp; business purpose…
+          </div>` : `
+          ${company._officers?.length ? `
+            <div class="mx-3 my-2 px-3 py-2 rounded-lg bg-surface-50 dark:bg-surface-800/50 border border-surface-200 dark:border-surface-700">
+              <p class="text-[10px] font-semibold text-surface-400 uppercase tracking-wide mb-1.5">Managing Directors / Officers</p>
+              <div class="flex flex-wrap gap-1.5">
+                ${company._officers.map(o => `<span class="px-2 py-0.5 rounded-full bg-white dark:bg-surface-700 border border-surface-200 dark:border-surface-600 text-xs text-surface-700 dark:text-surface-300">${escapeHtml(o)}</span>`).join('')}
+              </div>
+            </div>` : ''}
+          ${company._purpose ? `
+            <div class="mx-3 mb-2 px-3 py-2 rounded-lg bg-surface-50 dark:bg-surface-800/50 border border-surface-200 dark:border-surface-700">
+              <p class="text-[10px] font-semibold text-surface-400 uppercase tracking-wide mb-1">Business Purpose</p>
+              <p class="text-xs text-surface-600 dark:text-surface-400 leading-relaxed">${escapeHtml(company._purpose)}</p>
+            </div>` : ''}
+        `}
+      </div>
 
       <!-- Legal form note -->
       ${lf ? `
@@ -835,6 +1011,10 @@ function _hrToggle(idx) {
                  || document.getElementById('hr-state-area')?.value || 'de';
   const src = _hrResults[0]?._source === 'apify' ? 'apify' : 'oc';
   _hrRenderList(lastQuery, lastState, _hrResults.length, true, src);
+  // Phase 2: fetch full detail (officers, address, purpose) when expanding a card
+  if (_hrExpandedIdx === idx && _hrResults[idx] && !_hrResults[idx]._detail) {
+    _hrFetchDetail(idx);
+  }
 }
 
 // ─── Retry in All Germany ─────────────────────────────────────────────────────
