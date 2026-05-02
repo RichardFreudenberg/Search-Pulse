@@ -209,16 +209,27 @@ async function renderSettings() {
               <div>
                 <p class="text-sm font-semibold">
                   Apify API Key
-                  <span class="ml-1.5 text-xs font-normal text-green-600 dark:text-green-400">Best — real Handelsregister data</span>
+                  <span class="ml-1.5 text-xs font-normal text-green-600 dark:text-green-400">Required — real Handelsregister data</span>
                 </p>
-                <p class="text-xs text-surface-400">
-                  Scrapes Handelsregister.de directly via the <strong>radeance/handelsregister-api</strong> actor — returns officers, legal form, register number, address · 50 free runs/month ·
-                  <a href="https://apify.com/sign-up" target="_blank" class="text-brand-600 hover:underline">sign up at apify.com</a> then copy your API key from Console → Settings → Integrations
+                <p class="text-xs text-surface-400 mt-0.5">
+                  Used to scrape Handelsregister.de directly (officers, legal form, address, register number).
+                </p>
+                <p class="text-xs text-surface-400 mt-1">
+                  <strong>Where to get it:</strong>
+                  <a href="https://console.apify.com/account/integrations" target="_blank" class="text-brand-600 hover:underline font-medium">console.apify.com → Settings → Integrations</a>
+                  → copy the token under <strong>"Personal API tokens"</strong> (starts with <code class="bg-surface-100 dark:bg-surface-800 px-1 rounded">apify_api_…</code>)
                 </p>
               </div>
               ${settings?.apifyApiKey ? `<span class="text-xs px-2 py-0.5 rounded-full bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 font-medium flex-shrink-0 ml-3">✓ Set</span>` : ''}
             </div>
-            <input type="password" id="settings-apify-key" class="input-field" placeholder="apify_api_…" value="${escapeHtml(settings?.apifyApiKey || '')}" />
+            <div class="flex gap-2 items-center">
+              <input type="password" id="settings-apify-key" class="input-field flex-1" placeholder="apify_api_…" value="${escapeHtml(settings?.apifyApiKey || '')}" />
+              <button onclick="_settingsTestApify()" id="apify-test-btn"
+                class="btn-secondary text-xs px-3 py-2 flex-shrink-0 whitespace-nowrap">
+                Test Key
+              </button>
+            </div>
+            <p id="apify-test-result" class="text-xs mt-1.5 hidden"></p>
           </div>
 
         </div>
@@ -857,4 +868,48 @@ async function confirmResetWithPassword() {
   await checkReminders();
   showToast('All data has been reset', 'success');
   navigate('dashboard');
+}
+
+// ─── Apify key test ────────────────────────────────────────────────────────────
+
+async function _settingsTestApify() {
+  const input  = document.getElementById('settings-apify-key');
+  const btn    = document.getElementById('apify-test-btn');
+  const result = document.getElementById('apify-test-result');
+  if (!input || !btn || !result) return;
+
+  const key = input.value.trim();
+  if (!key) {
+    result.textContent = '⚠️ Paste your Apify API key first.';
+    result.className = 'text-xs mt-1.5 text-amber-600 dark:text-amber-400';
+    result.classList.remove('hidden');
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = 'Testing…';
+  result.classList.add('hidden');
+
+  try {
+    const resp = await fetch(`https://api.apify.com/v2/users/me?token=${encodeURIComponent(key)}`);
+    const json = await resp.json();
+
+    if (resp.ok && json?.data?.username) {
+      result.textContent = `✓ Valid key — connected as @${json.data.username} (${json.data.email || ''})`;
+      result.className = 'text-xs mt-1.5 text-green-600 dark:text-green-400';
+    } else if (resp.status === 401) {
+      result.innerHTML = `✗ Invalid key. Go to <a href="https://console.apify.com/account/integrations" target="_blank" class="underline font-medium">console.apify.com → Settings → Integrations</a> and copy the token under <strong>Personal API tokens</strong>.`;
+      result.className = 'text-xs mt-1.5 text-red-600 dark:text-red-400';
+    } else {
+      result.textContent = `✗ Unexpected response (${resp.status}) — try again.`;
+      result.className = 'text-xs mt-1.5 text-red-600 dark:text-red-400';
+    }
+  } catch (e) {
+    result.textContent = `✗ Network error — check your connection.`;
+    result.className = 'text-xs mt-1.5 text-red-600 dark:text-red-400';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Test Key';
+    result.classList.remove('hidden');
+  }
 }
