@@ -1,0 +1,193 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# German Company Data Pipeline — Master Configuration
+# ─────────────────────────────────────────────────────────────────────────────
+# All values can be overridden via environment variables using the pattern:
+#   PIPELINE__<SECTION>__<KEY>=value
+# e.g.  PIPELINE__DATABASE__URL=postgresql://...
+# ─────────────────────────────────────────────────────────────────────────────
+
+data_sources:
+
+  bundesanzeiger:
+    enabled: true
+    base_url: "https://www.bundesanzeiger.de"
+    search_path: "/pub/de/suche"
+    rate_limit_rps: 1.0          # max requests per second (be polite)
+    retry_attempts: 3
+    retry_backoff_seconds: 5
+    timeout_seconds: 30
+    user_agent: "SearchPulsePipeline/1.0 (research tool; contact: pipeline@searchpulse.io)"
+
+  unternehmensregister:
+    enabled: true
+    base_url: "https://www.unternehmensregister.de"
+    search_path: "/ureg/result.html"
+    rate_limit_rps: 0.5
+    retry_attempts: 3
+    retry_backoff_seconds: 10
+    timeout_seconds: 45
+    user_agent: "SearchPulsePipeline/1.0 (research tool; contact: pipeline@searchpulse.io)"
+
+  handelsregister:
+    enabled: true
+    base_url: "https://www.handelsregister.de"
+    rate_limit_rps: 0.3          # conservative — official government portal
+    retry_attempts: 2
+    retry_backoff_seconds: 15
+    timeout_seconds: 60
+    metadata_only: true          # NEVER bulk-scrape; point lookups only
+    user_agent: "SearchPulsePipeline/1.0 (research tool; contact: pipeline@searchpulse.io)"
+
+  # Optional: light enrichment from company websites (imprint / about pages only)
+  website_enrichment:
+    enabled: false
+    rate_limit_rps: 0.2
+    max_pages_per_domain: 3      # imprint + about + contact only
+    timeout_seconds: 20
+
+
+# ─── Ingestion queue ──────────────────────────────────────────────────────────
+
+ingestion:
+  queue_backend: "redis"         # redis | rabbitmq | sqs
+  redis_url: "${REDIS_URL:-redis://localhost:6379/0}"
+  rabbitmq_url: "${RABBITMQ_URL:-}"
+  sqs_queue_url: "${SQS_QUEUE_URL:-}"
+
+  queues:
+    high_priority: "pipeline:high"
+    default:       "pipeline:default"
+    bulk:          "pipeline:bulk"
+
+  batch_size: 50
+  deduplication_window_hours: 24
+  max_retries: 3
+  dead_letter_queue: "pipeline:dead"
+
+  schedules:
+    # Bundesanzeiger: check for new filings daily at 02:00
+    bundesanzeiger_daily:
+      cron: "0 2 * * *"
+      source: "bundesanzeiger"
+      job: "new_filings"
+      enabled: true
+
+    # Unternehmensregister: incremental sync every Sunday at 03:00
+    unternehmensregister_weekly:
+      cron: "0 3 * * 0"
+      source: "unternehmensregister"
+      job: "incremental_sync"
+      enabled: true
+
+    # Change detection sweep: every 6 hours
+    change_detection:
+      cron: "0 */6 * * *"
+      job: "detect_changes"
+      enabled: true
+
+
+# ─── Document retrieval ───────────────────────────────────────────────────────
+
+retrieval:
+  # Conditions that trigger paid document retrieval
+  trigger_rules:
+    - field: "estimated_revenue_eur"
+      operator: ">="
+      value: 5_000_000
+    - field: "industry"
+      operator: "in"
+      value: ["industrial", "manufacturing", "services", "technology",
+              "healthcare", "logistics", "food_beverage"]
+    - field: "legal_form"
+      operator: "in"
+      value: ["GmbH", "GmbH & Co. KG", "AG", "e.K."]
+    - field: "company_age_years"
+      operator: ">="
+      value: 5
+
+  max_cost_per_document_eur: 2.50
+  monthly_budget_eur: 500.0
+  cache_documents: true
+  cache_ttl_days: 90
+  document_storage_path: "${DOCUMENT_STORAGE_PATH:-./data/documents}"
+
+
+# ─── Entity resolution ────────────────────────────────────────────────────────
+
+matching:
+  fuzzy_threshold: 0.85          # minimum score (0–1) to consider a match
+  registry_number_exact: true    # registry number hit is always authoritative
+  weights:
+    name: 0.60
+    address: 0.20
+    director_overlap: 0.20
+  # Legal-form suffix variants to normalise before matching
+  legal_form_aliases:
+    "Gesellschaft mit beschränkter Haftung": "GmbH"
+    "GmbH & Co. KG": "GmbH & Co. KG"
+    "Kommanditgesellschaft": "KG"
+    "Offene Handelsgesellschaft": "OHG"
+    "Aktiengesellschaft": "AG"
+    "Unternehmergesellschaft (haftungsbeschränkt)": "UG"
+    "Eingetragener Kaufmann": "e.K."
+
+
+# ─── Enrichment ───────────────────────────────────────────────────────────────
+
+enrichment:
+  director_graph:
+    enabled: true
+    max_depth: 3               # hops in director network
+
+  ownership_tree:
+    enabled: true
+    min_stake_pct: 5.0         # only track stakes ≥ 5 %
+
+  industry_classification:
+    enabled: true
+    model: "keyword"           # keyword | tfidf | llm
+    llm_fallback: true
+
+  website_scraping:
+    enabled: false             # opt-in, disabled by default
+
+
+# ─── Database ────────────────────────────────────────────────────────────────
+
+database:
+  url: "${DATABASE_URL:-postgresql://pipeline:pipeline@localhost:5432/pipeline}"
+  pool_size: 10
+  max_overflow: 5
+  pool_timeout: 30
+  echo_sql: false
+
+
+# ─── Firebase sync ───────────────────────────────────────────────────────────
+
+firestore:
+  sync_enabled: true
+  credentials_path: "${FIREBASE_CREDENTIALS_PATH:-}"  # path to serviceAccountKey.json
+  project_id: "${FIREBASE_PROJECT_ID:-}"
+  collections:
+    companies:  "companies"
+    directors:  "directors"
+    filings:    "filings"
+  batch_size: 500
+  # Only sync companies that pass acquisition filters
+  sync_filter_enabled: true
+
+
+# ─── Monitoring & alerting ────────────────────────────────────────────────────
+
+monitoring:
+  change_detection: true
+  alert_events:
+    - "insolvency_filed"
+    - "liquidation_started"
+    - "director_added"
+    - "director_removed"
+    - "ownership_changed"
+    - "status_changed"
+  log_level: "INFO"            # DEBUG | INFO | WARNING | ERROR
+  metrics_enabled: false       # set true to enable Prometheus metrics endpoint
+  metrics_port: 9090
