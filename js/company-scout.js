@@ -56,14 +56,15 @@ const SCOUT_INDUSTRY_MAP = {
 
 // ─── Page State ───────────────────────────────────────────────────────────────
 
-let _scoutMap      = null;
-let _scoutMarker   = null;
-let _scoutCircle   = null;
-let _scoutLat      = null;
-let _scoutLng      = null;
-let _scoutLocName  = '';
-let _scoutResults  = [];
-let _scoutSaved    = new Set(); // indices already saved to Companies
+let _scoutMap           = null;
+let _scoutMarker        = null;
+let _scoutCircle        = null;
+let _scoutLat           = null;
+let _scoutLng           = null;
+let _scoutLocName       = '';
+let _scoutResults       = [];
+let _scoutSaved         = new Set(); // indices already saved to Companies
+let _pipelineCompanies  = [];        // companies fetched by the Bundesanzeiger pipeline
 
 // ─── Main Render ─────────────────────────────────────────────────────────────
 
@@ -160,11 +161,23 @@ async function renderCompanyScout() {
 
       <!-- Results -->
       <div id="scout-results"></div>
+
+      <!-- Pipeline Companies (fetched by Bundesanzeiger pipeline) -->
+      <div id="pipeline-companies-section" class="mt-8"></div>
     </div>
   `;
 
   // Init map after DOM is ready
   requestAnimationFrame(() => initScoutMap());
+
+  // Load pipeline companies (source === 'pipeline') into the section below
+  try {
+    const allCompanies = await DB.getForUser(STORES.companies, currentUser.id);
+    _pipelineCompanies = allCompanies.filter(c => c.source === 'pipeline');
+    renderPipelineSection(_pipelineCompanies);
+  } catch (err) {
+    console.warn('[Scout] Could not load pipeline companies:', err.message);
+  }
 }
 
 // ─── Map Initialisation ───────────────────────────────────────────────────────
@@ -655,6 +668,103 @@ async function scoutAddToDeal(index) {
       updatedAt:   new Date().toISOString(),
     });
     showToast(`"${company.name}" added to Deal Pipeline`, 'success');
+  } catch (err) {
+    showToast('Failed: ' + err.message, 'error');
+  }
+}
+
+// ─── Pipeline Companies Section ───────────────────────────────────────────────
+
+function renderPipelineSection(companies) {
+  const el = document.getElementById('pipeline-companies-section');
+  if (!el) return;
+
+  if (!companies.length) {
+    el.innerHTML = '';
+    return;
+  }
+
+  el.innerHTML = `
+    <div class="border-t border-surface-200 dark:border-surface-700 pt-8">
+      <div class="flex items-center justify-between mb-4">
+        <div>
+          <h2 class="text-base font-semibold">📋 Pipeline Companies</h2>
+          <p class="text-xs text-surface-500 mt-0.5">${companies.length} companies fetched from Bundesanzeiger — click <strong>+ Pipeline</strong> to add to your deal flow</p>
+        </div>
+        <input type="text" id="pipeline-search-input" placeholder="Filter by name or city…"
+          oninput="filterPipelineCompanies(this.value)"
+          class="input-field text-sm w-52" />
+      </div>
+      <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4" id="pipeline-cards-grid">
+        ${companies.map(c => renderPipelineCard(c)).join('')}
+      </div>
+    </div>
+  `;
+}
+
+function renderPipelineCard(c) {
+  const city    = c.location || '';
+  const desc    = c.description || '';
+  const hrNum   = c.hrNumber || '';
+  const safeId  = escapeHtml(c.id || '');
+
+  return `
+    <div class="card p-4 flex flex-col gap-3">
+      <div class="flex items-start gap-3">
+        <div class="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 text-white text-xs font-bold"
+          style="background:${avatarColor(c.name)}">${getInitials(c.name)}</div>
+        <div class="flex-1 min-w-0">
+          <h3 class="text-sm font-semibold leading-snug">${escapeHtml(c.name)}</h3>
+          ${city ? `<p class="text-xs text-surface-500">${escapeHtml(city)}</p>` : ''}
+        </div>
+        <span class="text-xs px-1.5 py-0.5 rounded bg-orange-50 dark:bg-orange-900/20 text-orange-600 dark:text-orange-300 whitespace-nowrap flex-shrink-0">BA</span>
+      </div>
+      ${desc   ? `<p class="text-xs text-surface-500 line-clamp-2">${escapeHtml(desc)}</p>` : ''}
+      ${hrNum  ? `<p class="text-xs text-surface-400">HR: ${escapeHtml(hrNum)}</p>` : ''}
+      <div class="flex gap-2 mt-auto pt-1">
+        <button onclick="pipelineAddToDeal('${safeId}')"
+          class="btn-primary btn-sm flex-1 text-xs">
+          + Pipeline
+        </button>
+      </div>
+    </div>
+  `;
+}
+
+function filterPipelineCompanies(query) {
+  const q       = (query || '').toLowerCase();
+  const filtered = q
+    ? _pipelineCompanies.filter(c =>
+        (c.name     || '').toLowerCase().includes(q) ||
+        (c.location || '').toLowerCase().includes(q) ||
+        (c.description || '').toLowerCase().includes(q)
+      )
+    : _pipelineCompanies;
+
+  const grid = document.getElementById('pipeline-cards-grid');
+  if (grid) grid.innerHTML = filtered.map(c => renderPipelineCard(c)).join('');
+}
+
+async function pipelineAddToDeal(companyId) {
+  const company = _pipelineCompanies.find(c => c.id === companyId);
+  if (!company) return;
+
+  try {
+    await DB.add(STORES.deals, {
+      id:          generateId(),
+      userId:      currentUser.id,
+      name:        company.name,
+      stage:       'Initial Review',
+      sector:      company.industry || '',
+      location:    company.location || '',
+      website:     company.website  || '',
+      source:      'Bundesanzeiger Pipeline',
+      description: company.description || '',
+      notes:       company.hrNumber ? `HR-Nr: ${company.hrNumber}` : '',
+      createdAt:   new Date().toISOString(),
+      updatedAt:   new Date().toISOString(),
+    });
+    showToast(`"${company.name}" added to Pipeline`, 'success');
   } catch (err) {
     showToast('Failed: ' + err.message, 'error');
   }
