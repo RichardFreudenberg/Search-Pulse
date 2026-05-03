@@ -822,7 +822,7 @@ function renderPipelineCard(c) {
   const city   = c.location || '';
   const desc   = c.description || '';
   const hrNum  = c.hrNumber || '';
-  const safeId = escapeHtml(c.id || '');
+  const safeId = (c.id || '').replace(/[^a-zA-Z0-9_-]/g, '_');
   const src    = c._pipeline?.data_source || 'pipeline';
   const srcLabel = src === 'bundesanzeiger' ? 'BA'
                  : src === 'unternehmensregister' ? 'UR'
@@ -877,28 +877,43 @@ function renderPipelineCard(c) {
     }
   }
 
+  const rawId = c.id || '';
   return `
-    <div class="card p-4 flex flex-col gap-3" id="pipeline-card-${safeId}">
-      <div class="flex items-start gap-3">
-        <div class="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 text-white text-xs font-bold"
-          style="background:${avatarColor(c.name)}">${getInitials(c.name)}</div>
-        <div class="flex-1 min-w-0">
-          <h3 class="text-sm font-semibold leading-snug">${escapeHtml(c.name)}</h3>
-          ${city ? `<p class="text-xs text-surface-500">${escapeHtml(city)}</p>` : ''}
+    <div class="card p-4 flex flex-col gap-3 hover:shadow-md transition-shadow" id="pipeline-card-${safeId}">
+      <!-- Clickable body → opens detail drawer -->
+      <div class="flex flex-col gap-2 cursor-pointer" onclick="openPipelineCompanyDetail('${safeId}')">
+        <div class="flex items-start gap-3">
+          <div class="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 text-white text-xs font-bold"
+            style="background:${avatarColor(c.name)}">${getInitials(c.name)}</div>
+          <div class="flex-1 min-w-0">
+            <h3 class="text-sm font-semibold leading-snug">${escapeHtml(c.name)}</h3>
+            ${city ? `<p class="text-xs text-surface-500">${escapeHtml(city)}</p>` : ''}
+          </div>
+          <span class="text-xs px-1.5 py-0.5 rounded bg-orange-50 dark:bg-orange-900/20 text-orange-600 dark:text-orange-300 whitespace-nowrap flex-shrink-0">${srcLabel}</span>
         </div>
-        <span class="text-xs px-1.5 py-0.5 rounded bg-orange-50 dark:bg-orange-900/20 text-orange-600 dark:text-orange-300 whitespace-nowrap flex-shrink-0">${srcLabel}</span>
+        ${desc  ? `<p class="text-xs text-surface-500 line-clamp-2">${escapeHtml(desc)}</p>` : ''}
+        ${hrNum ? `<p class="text-xs text-surface-400">HR: ${escapeHtml(hrNum)}</p>` : ''}
+        ${financialsHtml}
+        ${!fin ? `<p class="text-[11px] text-surface-400 italic">Click to view details →</p>` : ''}
       </div>
-      ${desc  ? `<p class="text-xs text-surface-500 line-clamp-2">${escapeHtml(desc)}</p>` : ''}
-      ${hrNum ? `<p class="text-xs text-surface-400">HR: ${escapeHtml(hrNum)}</p>` : ''}
-      ${financialsHtml}
-      <div class="flex gap-2 mt-auto pt-1">
-        <button onclick="pipelinePromoteToCompany('${safeId}')" id="pipeline-promote-${safeId}"
+      <!-- Action buttons — stop propagation so they don't open the drawer -->
+      <div class="flex gap-2 mt-auto pt-1 border-t border-surface-100 dark:border-surface-700/50">
+        <button onclick="event.stopPropagation(); pipelinePromoteToCompany('${safeId}')" id="pipeline-promote-${safeId}"
           class="btn-secondary btn-sm flex-1 text-xs">
-          + Add to Companies
+          + Companies
         </button>
-        <button onclick="pipelineAddToDeal('${safeId}')" id="pipeline-deal-${safeId}"
+        <button onclick="event.stopPropagation(); pipelineAddToDeal('${safeId}')" id="pipeline-deal-${safeId}"
           class="btn-primary btn-sm flex-1 text-xs">
-          + Add to Deals
+          + Deals
+        </button>
+        <button onclick="event.stopPropagation(); openPipelineCompanyDetail('${safeId}')"
+          class="btn-secondary btn-sm text-xs px-2" title="View details">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
+          </svg>
         </button>
       </div>
     </div>
@@ -984,5 +999,439 @@ async function pipelineAddToDeal(companyId) {
     showToast(`"${company.name}" added to Pipeline`, 'success');
   } catch (err) {
     showToast('Failed: ' + err.message, 'error');
+  }
+}
+
+// ─── Pipeline Company Detail Drawer ──────────────────────────────────────────
+
+let _detailEscListener = null;
+
+function openPipelineCompanyDetail(companyId) {
+  // Find company by safe id (we sanitised id to alphanum/dash/underscore in the card)
+  const company = _pipelineCompanies.find(c =>
+    c.id === companyId || (c.id || '').replace(/[^a-zA-Z0-9_-]/g, '_') === companyId
+  );
+  if (!company) return;
+
+  // Remove any existing drawer
+  document.getElementById('pipeline-detail-overlay')?.remove();
+  if (_detailEscListener) document.removeEventListener('keydown', _detailEscListener);
+
+  const overlay = document.createElement('div');
+  overlay.id = 'pipeline-detail-overlay';
+  overlay.className = 'fixed inset-0 z-50 flex justify-end';
+  overlay.style.cssText = 'animation:fadeIn .15s ease';
+  overlay.innerHTML = `
+    <style>
+      @keyframes fadeIn   { from { opacity:0 } to { opacity:1 } }
+      @keyframes slideIn  { from { transform:translateX(100%) } to { transform:translateX(0) } }
+    </style>
+    <div class="absolute inset-0 bg-black/50 backdrop-blur-sm" onclick="closePipelineDetail()"></div>
+    <div class="relative w-full max-w-lg bg-white dark:bg-surface-900 shadow-2xl flex flex-col overflow-hidden"
+         style="animation:slideIn .2s cubic-bezier(.25,.46,.45,.94); max-height:100vh">
+      ${_renderDetailContent(company)}
+    </div>`;
+
+  document.body.appendChild(overlay);
+  document.body.style.overflow = 'hidden';
+
+  _detailEscListener = (e) => { if (e.key === 'Escape') closePipelineDetail(); };
+  document.addEventListener('keydown', _detailEscListener);
+}
+
+function closePipelineDetail() {
+  document.getElementById('pipeline-detail-overlay')?.remove();
+  document.body.style.overflow = '';
+  if (_detailEscListener) {
+    document.removeEventListener('keydown', _detailEscListener);
+    _detailEscListener = null;
+  }
+}
+
+function _renderDetailContent(c) {
+  const safeId   = (c.id || '').replace(/[^a-zA-Z0-9_-]/g, '_');
+  const city     = c.location || '';
+  const desc     = c.description || '';
+  const hrNum    = c.hrNumber || '';
+  const court    = c._pipeline?.court || '';
+  const src      = c._pipeline?.data_source || 'pipeline';
+  const srcFull  = src === 'bundesanzeiger' ? 'Bundesanzeiger'
+                 : src === 'unternehmensregister' ? 'Unternehmensregister'
+                 : 'Pipeline';
+  const fin      = c._pipeline?.financials || null;
+  const synced   = (c._pipeline?.last_synced_at || '').slice(0, 10);
+  const nameEnc  = encodeURIComponent(c.name);
+  const cityEnc  = city ? encodeURIComponent(city) : '';
+  const hrSlug   = hrNum.replace(/\s+/g, '+');
+
+  return `
+    <!-- ── Sticky header ───────────────────────────────────────────────── -->
+    <div class="flex items-start justify-between p-5 border-b border-surface-200 dark:border-surface-700 flex-shrink-0">
+      <div class="flex items-start gap-3 min-w-0">
+        <div class="w-11 h-11 rounded-xl flex items-center justify-center text-white font-bold text-sm flex-shrink-0"
+          style="background:${avatarColor(c.name)}">${getInitials(c.name)}</div>
+        <div class="min-w-0">
+          <h2 class="text-base font-bold leading-snug">${escapeHtml(c.name)}</h2>
+          <div class="flex flex-wrap items-center gap-1.5 mt-1">
+            ${city ? `<span class="text-xs text-surface-500">📍 ${escapeHtml(city)}</span>` : ''}
+            <span class="text-xs px-1.5 py-0.5 rounded bg-orange-50 dark:bg-orange-900/20 text-orange-600 dark:text-orange-300">${srcFull}</span>
+            ${fin ? `<span class="text-xs px-1.5 py-0.5 rounded bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-300">📊 P&L available</span>` : ''}
+            ${c.status && c.status !== 'active' ? `<span class="text-xs px-1.5 py-0.5 rounded bg-red-50 dark:bg-red-900/20 text-red-600">${escapeHtml(c.status)}</span>` : ''}
+          </div>
+        </div>
+      </div>
+      <button onclick="closePipelineDetail()"
+        class="flex-shrink-0 ml-2 p-1.5 rounded-lg text-surface-400 hover:text-surface-700 dark:hover:text-surface-200 hover:bg-surface-100 dark:hover:bg-surface-800 transition-colors">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+        </svg>
+      </button>
+    </div>
+
+    <!-- ── Scrollable body ─────────────────────────────────────────────── -->
+    <div class="flex-1 overflow-y-auto p-5 space-y-6">
+
+      <!-- Registry Info -->
+      <section>
+        <h3 class="text-[11px] font-semibold uppercase tracking-wider text-surface-400 mb-3">Registry Information</h3>
+        <div class="grid grid-cols-2 gap-x-5 gap-y-3 text-sm">
+          ${hrNum   ? `<div><p class="text-xs text-surface-400 mb-0.5">HR Number</p><p class="font-semibold font-mono text-sm">${escapeHtml(hrNum)}</p></div>` : ''}
+          ${court   ? `<div><p class="text-xs text-surface-400 mb-0.5">Register Court</p><p class="font-semibold">${escapeHtml(court)}</p></div>` : ''}
+          ${c.type  ? `<div><p class="text-xs text-surface-400 mb-0.5">Legal Form</p><p class="font-semibold">${escapeHtml(c.type)}</p></div>` : ''}
+          ${c.status? `<div><p class="text-xs text-surface-400 mb-0.5">Status</p><p class="font-semibold capitalize">${escapeHtml(c.status)}</p></div>` : ''}
+          <div><p class="text-xs text-surface-400 mb-0.5">Source</p><p class="font-semibold">${escapeHtml(srcFull)}</p></div>
+          ${synced  ? `<div><p class="text-xs text-surface-400 mb-0.5">Last Synced</p><p class="font-semibold">${escapeHtml(synced)}</p></div>` : ''}
+        </div>
+      </section>
+
+      ${desc ? `
+      <!-- Business Description -->
+      <section>
+        <h3 class="text-[11px] font-semibold uppercase tracking-wider text-surface-400 mb-3">Business Description</h3>
+        <p class="text-sm text-surface-700 dark:text-surface-300 leading-relaxed">${escapeHtml(desc)}</p>
+      </section>` : ''}
+
+      <!-- Financials -->
+      <section>
+        <h3 class="text-[11px] font-semibold uppercase tracking-wider text-surface-400 mb-3">P&amp;L Financials</h3>
+        ${fin ? _renderDetailPL(fin) : `
+          <div class="rounded-xl bg-surface-50 dark:bg-surface-800 border border-surface-200 dark:border-surface-700 p-5 text-center">
+            <p class="text-sm text-surface-400 mb-2">No financial data yet</p>
+            <p class="text-xs text-surface-400">Run the pipeline to fetch P&amp;L from Bundesanzeiger:</p>
+            <code class="inline-block mt-2 text-xs font-mono bg-white dark:bg-surface-900 border border-surface-200 dark:border-surface-700 rounded-lg px-3 py-1.5">
+              python pipeline/run_simple.py --financials --sync
+            </code>
+          </div>`}
+      </section>
+
+      <!-- Officers & Ownership -->
+      <section>
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="text-[11px] font-semibold uppercase tracking-wider text-surface-400">Officers &amp; Ownership</h3>
+          ${hrNum ? `
+            <button onclick="pipelineFetchOfficers('${safeId}')" id="fetch-officers-btn-${safeId}"
+              class="btn-secondary btn-sm text-xs flex items-center gap-1.5">
+              <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+              </svg>
+              Fetch from Handelsregister
+            </button>` : ''}
+        </div>
+        <div id="detail-officers-${safeId}">
+          <p class="text-xs text-surface-400 italic">
+            ${hrNum
+              ? 'Click "Fetch from Handelsregister" to load managing directors and officers (requires Apify key in Settings).'
+              : 'No HR number — cannot automatically look up officers.'}
+          </p>
+        </div>
+      </section>
+
+      <!-- Research Links -->
+      <section>
+        <h3 class="text-[11px] font-semibold uppercase tracking-wider text-surface-400 mb-3">Research Sources</h3>
+        <div class="grid grid-cols-2 gap-2">
+          <a href="https://www.northdata.de/${nameEnc}${cityEnc ? ',+' + cityEnc : ''}${hrSlug ? '/' + hrSlug : ''}"
+             target="_blank" rel="noopener"
+             class="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-surface-50 dark:bg-surface-800 border border-surface-200 dark:border-surface-700 hover:border-brand-300 dark:hover:border-brand-600 transition-colors">
+            <span class="text-base leading-none">📊</span>
+            <div><p class="text-xs font-semibold">North Data</p><p class="text-[10px] text-surface-400">Revenue, owners, history</p></div>
+          </a>
+          <a href="https://www.bundesanzeiger.de/pub/de/suche?q=${nameEnc}&fts=true"
+             target="_blank" rel="noopener"
+             class="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-surface-50 dark:bg-surface-800 border border-surface-200 dark:border-surface-700 hover:border-brand-300 dark:hover:border-brand-600 transition-colors">
+            <span class="text-base leading-none">🏛</span>
+            <div><p class="text-xs font-semibold">Bundesanzeiger</p><p class="text-[10px] text-surface-400">Annual accounts</p></div>
+          </a>
+          <a href="https://www.unternehmensregister.de/ureg/result.html?fulltext=${nameEnc}"
+             target="_blank" rel="noopener"
+             class="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-surface-50 dark:bg-surface-800 border border-surface-200 dark:border-surface-700 hover:border-brand-300 dark:hover:border-brand-600 transition-colors">
+            <span class="text-base leading-none">📂</span>
+            <div><p class="text-xs font-semibold">Unternehmensregister</p><p class="text-[10px] text-surface-400">Filings &amp; disclosures</p></div>
+          </a>
+          <a href="https://www.handelsregister.de/rp_web/mask.do?Typ=n"
+             target="_blank" rel="noopener"
+             class="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-surface-50 dark:bg-surface-800 border border-surface-200 dark:border-surface-700 hover:border-brand-300 dark:hover:border-brand-600 transition-colors">
+            <span class="text-base leading-none">📋</span>
+            <div><p class="text-xs font-semibold">Handelsregister.de</p><p class="text-[10px] text-surface-400">Official register</p></div>
+          </a>
+        </div>
+      </section>
+
+    </div>
+
+    <!-- ── Sticky footer actions ────────────────────────────────────────── -->
+    <div class="flex-shrink-0 p-4 border-t border-surface-200 dark:border-surface-700 bg-surface-50 dark:bg-surface-900/80 flex gap-2">
+      <button onclick="pipelinePromoteToCompany('${safeId}'); closePipelineDetail();"
+        id="detail-promote-${safeId}"
+        class="btn-secondary flex-1 text-sm">
+        + Add to Companies
+      </button>
+      <button onclick="pipelineAddToDeal('${safeId}'); closePipelineDetail();"
+        class="btn-primary flex-1 text-sm">
+        + Add to Deals
+      </button>
+    </div>`;
+}
+
+function _renderDetailPL(fin) {
+  const year  = fin.fiscal_year ? `FY${fin.fiscal_year}` : '';
+  const qlMap = { pdf_parsed: 'PDF parsed', llm_extracted: 'LLM extracted', html_parsed: 'HTML parsed' };
+  const qlLabel = qlMap[fin.data_quality] || fin.data_quality || '';
+  const rev   = fin.revenue;
+
+  const pct = (val) => (rev && val != null) ? (val / rev * 100).toFixed(1) + '%' : null;
+
+  const rows = [
+    { label: 'Revenue',         val: fin.revenue,          pct: null,                  bold: true },
+    { label: 'Gross Profit',    val: fin.gross_profit,     pct: pct(fin.gross_profit)              },
+    { label: 'EBITDA',          val: fin.ebitda,           pct: fin.ebitda_margin_pct != null ? fin.ebitda_margin_pct.toFixed(1) + '%' : pct(fin.ebitda), accent: true },
+    { label: 'Depreciation',    val: fin.depreciation,     pct: null,                  indent: true },
+    { label: 'EBIT',            val: fin.ebit,             pct: pct(fin.ebit)                      },
+    { label: 'Interest',        val: fin.interest,         pct: null,                  indent: true },
+    { label: 'EBT',             val: fin.ebt,              pct: null                               },
+    { label: 'Taxes',           val: fin.taxes,            pct: null,                  indent: true },
+    { label: 'Net Income',      val: fin.net_income,       pct: fin.net_margin_pct != null ? fin.net_margin_pct.toFixed(1) + '%' : pct(fin.net_income), bold: true, isNetIncome: true },
+    { label: 'Personnel Costs', val: fin.personnel_costs,  pct: pct(fin.personnel_costs)            },
+    { label: 'Employees',       val: fin.employees != null ? fin.employees : null, isCount: true   },
+  ].filter(r => r.val != null);
+
+  if (!rows.length) return `<p class="text-xs text-surface-400 italic">No data extracted from filing.</p>`;
+
+  const rowsHtml = rows.map((r, i) => {
+    const display   = r.isCount ? r.val.toLocaleString() + ' employees' : _fmtEur(r.val);
+    const isNeg     = !r.isCount && r.val < 0;
+    const valClass  = r.isNetIncome && isNeg ? 'text-red-600 dark:text-red-400'
+                    : r.bold || r.accent    ? 'text-surface-900 dark:text-surface-100'
+                    :                         'text-surface-700 dark:text-surface-300';
+    const labelClass = r.indent ? 'pl-4 text-surface-400'
+                     : r.bold   ? 'font-semibold text-surface-700 dark:text-surface-200'
+                     :            'text-surface-600 dark:text-surface-400';
+    const rowBg     = r.accent ? 'bg-brand-50/60 dark:bg-brand-900/10' : (i % 2 === 0 ? '' : 'bg-surface-50/60 dark:bg-surface-800/20');
+    return `
+      <div class="flex items-center justify-between px-4 py-2 rounded-lg ${rowBg}">
+        <span class="text-xs ${labelClass}">${r.label}</span>
+        <div class="flex items-center gap-2">
+          ${r.pct ? `<span class="text-[11px] text-surface-400">${r.pct}</span>` : ''}
+          <span class="text-sm font-semibold ${valClass}">${display}</span>
+        </div>
+      </div>`;
+  }).join('');
+
+  return `
+    <div class="rounded-xl border border-surface-200 dark:border-surface-700 overflow-hidden">
+      <div class="flex items-center justify-between px-4 py-2.5 bg-surface-50 dark:bg-surface-800 border-b border-surface-200 dark:border-surface-700">
+        <span class="text-xs font-semibold">Income Statement ${year}</span>
+        <div class="flex items-center gap-3">
+          ${qlLabel ? `<span class="text-[10px] text-surface-400">${escapeHtml(qlLabel)}</span>` : ''}
+          ${fin.source_url ? `<a href="${escapeHtml(fin.source_url)}" target="_blank" rel="noopener" class="text-[10px] text-brand-600 hover:underline">View filing →</a>` : ''}
+        </div>
+      </div>
+      <div class="py-1">${rowsHtml}</div>
+    </div>`;
+}
+
+async function pipelineFetchOfficers(companyId) {
+  const company = _pipelineCompanies.find(c =>
+    c.id === companyId || (c.id || '').replace(/[^a-zA-Z0-9_-]/g, '_') === companyId
+  );
+  if (!company) return;
+
+  const officersEl = document.getElementById(`detail-officers-${companyId}`);
+  const btn        = document.getElementById(`fetch-officers-btn-${companyId}`);
+  if (!officersEl) return;
+
+  const hrNum = company.hrNumber || '';
+  const court = company._pipeline?.court || '';
+
+  // Need HR number to do lookup
+  if (!hrNum) {
+    officersEl.innerHTML = `<p class="text-xs text-surface-400 italic">No HR number — cannot fetch officers automatically.</p>`;
+    return;
+  }
+
+  // Check for Apify key
+  const settings = await DB.get(STORES.settings, `settings_${currentUser.id}`).catch(() => ({})) || {};
+  const apifyKey = settings.apifyApiKey || '';
+
+  if (!apifyKey) {
+    officersEl.innerHTML = `
+      <div class="rounded-xl bg-amber-50 dark:bg-amber-900/15 border border-amber-200 dark:border-amber-800 p-4 text-xs">
+        <p class="font-semibold text-amber-800 dark:text-amber-300 mb-1">Apify API key required</p>
+        <p class="text-amber-700 dark:text-amber-400 mb-2">
+          Add your Apify key in <strong>Settings → Research &amp; Data Enrichment</strong> to fetch managing directors from Handelsregister.de.
+        </p>
+        <div class="flex gap-2">
+          <a href="https://apify.com/sign-up" target="_blank" class="text-brand-600 hover:underline font-medium">
+            Get free Apify key →
+          </a>
+          <span class="text-amber-500">·</span>
+          <a href="https://www.northdata.de/${encodeURIComponent(company.name)}" target="_blank" class="text-brand-600 hover:underline font-medium">
+            Check North Data instead →
+          </a>
+        </div>
+      </div>`;
+    return;
+  }
+
+  // Show loading
+  if (btn) { btn.disabled = true; btn.innerHTML = `<svg class="animate-spin w-3 h-3" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg> Fetching…`; }
+  officersEl.innerHTML = `
+    <div class="flex items-center gap-2 text-xs text-surface-400 py-3">
+      <svg class="animate-spin w-3.5 h-3.5 text-brand-500 flex-shrink-0" fill="none" viewBox="0 0 24 24">
+        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+      </svg>
+      Querying Handelsregister.de via Apify — this takes ~15–30s…
+    </div>`;
+
+  try {
+    const hrMatch  = hrNum.match(/(HR[AB]|PR|VR)\s*(\d+)/i);
+    if (!hrMatch) throw new Error(`Unrecognised HR number format: ${hrNum}`);
+
+    const BASE     = 'https://api.apify.com/v2';
+    const TOKEN    = `token=${encodeURIComponent(apifyKey)}`;
+    const courtVal = (typeof _HR_CITY_TO_COURT !== 'undefined' && _HR_CITY_TO_COURT[court])
+                   || court.toLowerCase() || 'all';
+    const validCourt = (typeof _HR_VALID_COURTS !== 'undefined' && _HR_VALID_COURTS.has(courtVal))
+                     ? courtVal : 'all';
+
+    const _apiFetch = (url, opts, ms) => {
+      const ctrl = new AbortController();
+      const t    = setTimeout(() => ctrl.abort(), ms);
+      return fetch(url, { ...opts, signal: ctrl.signal }).finally(() => clearTimeout(t));
+    };
+
+    const input = {
+      register_number:         hrMatch[2],
+      register_type:           hrMatch[1].toUpperCase(),
+      register_court:          validCourt,
+      include_company_details: true,
+      include_representatives: true,
+      include_address:         true,
+      include_documents:       false,
+    };
+
+    const startResp = await _apiFetch(
+      `${BASE}/acts/radeance~handelsregister-api/runs?${TOKEN}&maxTotalChargeUsd=2`,
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) },
+      30000,
+    );
+    if (!startResp.ok) throw new Error(`Apify error (${startResp.status})`);
+
+    const runData   = await startResp.json();
+    const runId     = runData?.data?.id;
+    const datasetId = runData?.data?.defaultDatasetId;
+    if (!runId) throw new Error('No Apify run ID returned');
+
+    // Poll until done
+    const DONE     = new Set(['SUCCEEDED', 'FAILED', 'ABORTED', 'TIMED-OUT']);
+    let   status   = runData?.data?.status || 'RUNNING';
+    const deadline = Date.now() + 90_000;
+    while (!DONE.has(status)) {
+      if (Date.now() > deadline) throw new Error('Timed out after 90s');
+      await new Promise(r => setTimeout(r, 3000));
+      const p = await _apiFetch(`${BASE}/actor-runs/${runId}?${TOKEN}`, {}, 10000);
+      status  = (await p.json())?.data?.status || status;
+    }
+    if (status !== 'SUCCEEDED') throw new Error(`Apify run ${status}`);
+
+    const itemsResp = await _apiFetch(
+      `${BASE}/datasets/${datasetId}/items?${TOKEN}&clean=true&format=json`, {}, 15000
+    );
+    const items  = await itemsResp.json();
+    const result = Array.isArray(items) ? items[0] : null;
+    if (!result) throw new Error('No data returned from Handelsregister');
+
+    const officers = (result.representatives || []).map(r => {
+      if (typeof r === 'string') return { name: r, role: '' };
+      return { name: r.full_name || r.name || '', role: r.role || r.position || '' };
+    }).filter(o => o.name);
+
+    const purpose      = result.business_purpose || '';
+    const shareCapital = result.share_capital != null
+      ? `${result.share_capital}${result.share_capital_currency ? ' ' + result.share_capital_currency : ''}`
+      : '';
+    const foundingDate = result.founding_date || '';
+
+    let html = '';
+
+    // Registry details row
+    const extras = [
+      shareCapital  ? `<div><p class="text-xs text-surface-400 mb-0.5">Share Capital</p><p class="text-sm font-semibold">${escapeHtml(shareCapital)}</p></div>` : '',
+      foundingDate  ? `<div><p class="text-xs text-surface-400 mb-0.5">Founded</p><p class="text-sm font-semibold">${escapeHtml(foundingDate)}</p></div>` : '',
+      result.status ? `<div><p class="text-xs text-surface-400 mb-0.5">Status</p><p class="text-sm font-semibold capitalize">${escapeHtml(result.status)}</p></div>` : '',
+    ].filter(Boolean);
+    if (extras.length) html += `<div class="grid grid-cols-3 gap-4 mb-4">${extras.join('')}</div>`;
+
+    // Officers list
+    if (officers.length) {
+      html += `
+        <div class="mb-4">
+          <p class="text-[10px] font-semibold text-surface-400 uppercase tracking-wide mb-2">
+            Managing Directors / Officers (${officers.length})
+          </p>
+          <div class="space-y-2">
+            ${officers.map(o => `
+              <div class="flex items-center gap-3 px-3 py-2.5 rounded-xl bg-surface-50 dark:bg-surface-800 border border-surface-200 dark:border-surface-700">
+                <div class="w-8 h-8 rounded-full flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0"
+                  style="background:${avatarColor(o.name)}">
+                  ${o.name.split(/\s+/).map(n => n[0] || '').join('').slice(0, 2).toUpperCase()}
+                </div>
+                <div>
+                  <p class="text-sm font-semibold leading-snug">${escapeHtml(o.name)}</p>
+                  ${o.role ? `<p class="text-xs text-surface-400">${escapeHtml(o.role)}</p>` : ''}
+                </div>
+              </div>`).join('')}
+          </div>
+        </div>`;
+    }
+
+    // Business purpose
+    if (purpose) {
+      html += `
+        <div class="px-3 py-2.5 rounded-xl bg-surface-50 dark:bg-surface-800 border border-surface-200 dark:border-surface-700">
+          <p class="text-[10px] font-semibold text-surface-400 uppercase tracking-wide mb-1.5">Business Purpose</p>
+          <p class="text-xs text-surface-700 dark:text-surface-300 leading-relaxed">${escapeHtml(purpose)}</p>
+        </div>`;
+    }
+
+    if (!html) html = `<p class="text-xs text-surface-400 italic">No officer data found in Handelsregister for this entry.</p>`;
+
+    officersEl.innerHTML = html;
+    if (btn) btn.remove();
+
+  } catch (err) {
+    console.error('[pipelineFetchOfficers]', err);
+    officersEl.innerHTML = `
+      <div class="rounded-xl bg-red-50 dark:bg-red-900/15 border border-red-200 dark:border-red-800 px-4 py-3 text-xs">
+        <p class="font-semibold text-red-700 dark:text-red-400 mb-1">Fetch failed</p>
+        <p class="text-red-600 dark:text-red-500">${escapeHtml(err.message)}</p>
+        <a href="https://www.northdata.de/${encodeURIComponent(company.name)}" target="_blank"
+           class="inline-block mt-2 text-brand-600 hover:underline font-medium">
+          Try North Data instead →
+        </a>
+      </div>`;
+    if (btn) { btn.disabled = false; btn.innerHTML = 'Retry'; }
   }
 }
