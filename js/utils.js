@@ -262,18 +262,43 @@ function checkDuplicate(contacts, name, email) {
 }
 
 // === UNIVERSAL AI WRAPPER ===
-// Routes to Claude (if claudeApiKey set) or OpenAI (if openaiApiKey set)
+// Strategy:
+//   1. Try the Firebase Cloud Function first — uses master keys server-side,
+//      so every authenticated user gets AI features without their own key.
+//   2. If the function fails (not deployed yet, network issue, etc.),
+//      fall back to user's own client-side key in settings (legacy path).
+//
 // Usage: const text = await callAI(systemPrompt, userPrompt, maxTokens, temperature)
 async function callAI(systemPrompt, userPrompt, maxTokens = 500, temperature = 0.2) {
+  // Try Cloud Function first
+  try {
+    if (typeof firebase !== 'undefined' && firebase.functions) {
+      const callAIFn = firebase.functions().httpsCallable('callAI');
+      const { data } = await callAIFn({ systemPrompt, userPrompt, maxTokens, temperature });
+      if (data && data.text) return data.text;
+    }
+  } catch (err) {
+    // Only fall through if it's a deployment/wiring problem.
+    // For real auth/quota errors, surface them so the user knows.
+    const code = err?.code || '';
+    const fatal = ['permission-denied', 'unauthenticated', 'failed-precondition'];
+    if (fatal.includes(code)) throw new Error(err.message || code);
+    console.warn('[callAI] Cloud Function unavailable, falling back to local key:', err.message);
+  }
+
+  // Fallback: user's own client-side key (master / dev mode)
   const settings = await DB.get(STORES.settings, `settings_${currentUser.id}`);
   return _routeAI(settings, [
     { role: 'system', content: systemPrompt },
-    { role: 'user', content: userPrompt },
+    { role: 'user',   content: userPrompt   },
   ], maxTokens, temperature);
 }
 
-// Multi-turn version — pass a full messages array (same format as OpenAI)
+// Multi-turn version — same Cloud Function fallback strategy
 async function callAIMessages(messagesArr, maxTokens = 500, temperature = 0.2) {
+  // Cloud Function expects the simpler systemPrompt/userPrompt shape; for true
+  // multi-turn we still go straight to the local key path. Most callers use
+  // the single-turn callAI() above.
   const settings = await DB.get(STORES.settings, `settings_${currentUser.id}`);
   return _routeAI(settings, messagesArr, maxTokens, temperature);
 }

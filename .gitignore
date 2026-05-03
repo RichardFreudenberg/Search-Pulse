@@ -13,3 +13,19 @@ js/*.test.js
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Firebase Cloud Functions — secrets and dependencies
+functions/.env
+functions/.env.local
+functions/node_modules/
+functions/firebase-debug.log
+functions/firebase-debug.*.log
+
+# Pipeline runtime artefacts (contains service account key + scraped data)
+pipeline/config/serviceAccountKey.json
+pipeline/config/serviceAccountKey.json.json
+pipeline/data/
+pipeline/__pycache__/
+pipeline/connectors/__pycache__/
+pipeline/parsing/__pycache__/
+pipeline/db/__pycache__/

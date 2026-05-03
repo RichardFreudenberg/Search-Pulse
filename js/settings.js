@@ -6,6 +6,10 @@ async function renderSettings() {
   const settings = await DB.get(STORES.settings, `settings_${currentUser.id}`);
   const pageContent = document.getElementById('page-content');
 
+  // Detect owner — only the workspace owner sees API key fields and the Users panel.
+  // Cloud Functions handle AI for everyone else automatically.
+  const _isOwner = (typeof isOwner === 'function') ? await isOwner().catch(() => false) : false;
+
   // Detect which API keys are managed by the shared deployment config
   const _shared = window.PULSE_SHARED_CONFIG || {};
   const _managed = (key) => !!(_shared[key]);
@@ -82,8 +86,22 @@ async function renderSettings() {
         </div>
       </div>
 
+      ${!_isOwner ? `
+      <!-- ── NOTICE FOR INVITED USERS ─────────────── -->
+      <div class="card mb-4 border-l-4 border-l-brand-500">
+        <div class="flex items-start gap-3">
+          <svg class="w-5 h-5 text-brand-500 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/>
+          </svg>
+          <div>
+            <p class="text-sm font-semibold">AI features are ready to use</p>
+            <p class="text-xs text-surface-400 mt-0.5">All AI and research integrations are managed by your administrator — no setup required.</p>
+          </div>
+        </div>
+      </div>
+      ` : `
       <!-- ── AI MODELS ─────────────────────────────── -->
-      <p class="settings-section-label">AI Models</p>
+      <p class="settings-section-label">AI Models <span class="ml-2 text-xs font-normal text-surface-400">owner only</span></p>
 
       <div class="card mb-4">
         <div class="flex items-center justify-between mb-1">
@@ -234,6 +252,7 @@ async function renderSettings() {
 
         </div>
       </div>
+      `}
 
       <!-- ── DEAL PIPELINE ──────────────────────────── -->
       <p class="settings-section-label">Deal Pipeline</p>

@@ -1,0 +1,20 @@
+# SearchPulse Pipeline — minimal requirements (no Docker needed)
+# ──────────────────────────────────────────────────────────────
+# Install with:  pip install -r pipeline/requirements_simple.txt
+#
+# This is the stripped-down dependency set for run_simple.py.
+# No PostgreSQL driver, no Redis, no Celery, no Playwright required.
+
+# ── HTTP client (used by all connectors) ──────────────────────────────────────
+httpx>=0.27
+
+# ── HTML parsing (Bundesanzeiger + Unternehmensregister connectors) ────────────
+beautifulsoup4>=4.12
+lxml>=5.0
+
+# ── Retry logic (built into BaseConnector) ────────────────────────────────────
+tenacity>=8.2
+
+# ── Firebase sync (only needed if you want to push to your CRM) ───────────────
+# Leave this in — it's needed for --sync and --sync-firestore
+firebase-admin>=6.5
