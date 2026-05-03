@@ -1999,14 +1999,135 @@ function _safePipelineId(id) {
   return (id || '').replace(/[^a-zA-Z0-9_-]/g, '_');
 }
 
-// Card click handler — opens full-page detail in a new tab.
-// Resolves safeId back to the actual Firestore doc id when needed.
+// Card click handler — opens a DRAGGABLE popup on the same page so the user
+// can move it around and keep the company list visible behind it. Multiple
+// popups can be open at once (each gets a unique id and stagger position).
 function openPipelineDetailPage(safeId) {
+  return openPipelineDetailPopup(safeId);
+}
+
+let _pipelinePopupCounter = 0;
+
+function openPipelineDetailPopup(safeId) {
   const company = _pipelineCompanies.find(c =>
     c.id === safeId || _safePipelineId(c.id) === safeId
   );
-  const id = company ? company.id : safeId;
-  window.open(`#pipeline-company/${encodeURIComponent(id)}`, '_blank', 'noopener');
+  if (!company) {
+    showToast('Company not loaded yet — please wait a moment and try again', 'warning');
+    return;
+  }
+
+  _pipelinePopupCounter++;
+  const popupId    = `pipeline-popup-${_pipelinePopupCounter}`;
+  const innerSafeId = _safePipelineId(company.id);
+
+  // Stagger position so multiple popups don't completely overlap
+  const staggerStep = 30;
+  const offsetX = 60 + ((_pipelinePopupCounter - 1) % 6) * staggerStep;
+  const offsetY = 40 + ((_pipelinePopupCounter - 1) % 6) * staggerStep;
+
+  const popup = document.createElement('div');
+  popup.id = popupId;
+  popup.className = 'fixed bg-white dark:bg-surface-900 rounded-xl shadow-2xl border border-surface-200 dark:border-surface-700 flex flex-col overflow-hidden';
+  popup.style.cssText = `
+    width:min(960px, 92vw);
+    height:min(85vh, 900px);
+    top:${offsetY}px; left:${offsetX}px;
+    z-index:${100 + _pipelinePopupCounter};
+    resize:both; min-width:480px; min-height:340px;
+  `;
+
+  popup.innerHTML = `
+    <!-- Drag handle / header -->
+    <div class="popup-drag-handle flex items-center gap-3 p-3 bg-surface-50 dark:bg-surface-800 border-b border-surface-200 dark:border-surface-700 flex-shrink-0"
+         style="cursor:move;user-select:none;">
+      <div class="w-7 h-7 rounded-lg flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0"
+           style="background:${avatarColor(company.name)}">${getInitials(company.name)}</div>
+      <div class="flex-1 min-w-0">
+        <p class="text-sm font-semibold truncate">${escapeHtml(company.name)}</p>
+        <p class="text-[10px] text-surface-400">Drag to move · Esc closes · click corner to resize</p>
+      </div>
+      <button onclick="document.getElementById('${popupId}')?.remove()"
+        class="p-1.5 rounded-lg text-surface-400 hover:text-surface-700 dark:hover:text-surface-200 hover:bg-surface-100 dark:hover:bg-surface-700 transition-colors"
+        title="Close (Esc)">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+        </svg>
+      </button>
+    </div>
+    <!-- Body (scrollable) -->
+    <div class="flex-1 overflow-y-auto bg-surface-50/50 dark:bg-surface-900">
+      ${_renderPipelineDetailInnerHTML(company)}
+    </div>
+  `;
+
+  document.body.appendChild(popup);
+
+  // Make it draggable + click-to-front
+  _makePopupDraggable(popup);
+  popup.addEventListener('mousedown', () => _bringPopupToFront(popup));
+
+  // Esc closes the topmost popup
+  const escHandler = (e) => {
+    if (e.key !== 'Escape') return;
+    const all = Array.from(document.querySelectorAll('[id^="pipeline-popup-"]'));
+    if (!all.length) return;
+    const topmost = all.reduce((a, b) =>
+      parseInt(a.style.zIndex || 0) > parseInt(b.style.zIndex || 0) ? a : b
+    );
+    topmost.remove();
+    if (!document.querySelectorAll('[id^="pipeline-popup-"]').length) {
+      document.removeEventListener('keydown', escHandler);
+    }
+  };
+  document.addEventListener('keydown', escHandler);
+
+  // Auto-trigger AI snapshot if no cached analysis
+  if (!company._pipeline?.ai_analysis) {
+    setTimeout(() => generatePipelineAIAnalysis(innerSafeId), 400);
+  }
+}
+
+function _bringPopupToFront(popup) {
+  const all = document.querySelectorAll('[id^="pipeline-popup-"]');
+  let maxZ = 100;
+  all.forEach(p => { const z = parseInt(p.style.zIndex || 0); if (z > maxZ) maxZ = z; });
+  popup.style.zIndex = maxZ + 1;
+}
+
+function _makePopupDraggable(popup) {
+  const handle = popup.querySelector('.popup-drag-handle');
+  if (!handle) return;
+
+  let dragging = false;
+  let startX = 0, startY = 0, startLeft = 0, startTop = 0;
+
+  handle.addEventListener('mousedown', (e) => {
+    if (e.target.closest('button')) return;  // don't drag when clicking close button
+    dragging = true;
+    const rect = popup.getBoundingClientRect();
+    startX = e.clientX; startY = e.clientY;
+    startLeft = rect.left; startTop = rect.top;
+    e.preventDefault();
+    document.body.style.userSelect = 'none';
+  });
+
+  document.addEventListener('mousemove', (e) => {
+    if (!dragging) return;
+    const dx = e.clientX - startX;
+    const dy = e.clientY - startY;
+    const maxLeft = window.innerWidth  - 100;
+    const maxTop  = window.innerHeight - 60;
+    popup.style.left = Math.min(maxLeft, Math.max(-popup.offsetWidth + 100, startLeft + dx)) + 'px';
+    popup.style.top  = Math.min(maxTop,  Math.max(0, startTop + dy)) + 'px';
+  });
+
+  document.addEventListener('mouseup', () => {
+    if (dragging) {
+      dragging = false;
+      document.body.style.userSelect = '';
+    }
+  });
 }
 
 // Called by the SPA router when /#pipeline-company/<id> is loaded
@@ -2117,10 +2238,10 @@ function _renderPipelineDetailFull(c) {
   document.title = `${c.name} · Search Pulse`;
 
   pageContent.innerHTML = `
-    <div class="p-4 lg:p-8 max-w-5xl mx-auto animate-fade-in space-y-6 pb-24">
+    <div class="p-4 lg:p-8 max-w-5xl mx-auto animate-fade-in pb-24">
 
       <!-- Breadcrumb -->
-      <div class="flex items-center gap-2 text-xs text-surface-500">
+      <div class="flex items-center gap-2 text-xs text-surface-500 mb-4">
         <button onclick="navigate('company-scout')" class="hover:text-brand-600 hover:underline flex items-center gap-1">
           <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
@@ -2129,13 +2250,54 @@ function _renderPipelineDetailFull(c) {
         </button>
       </div>
 
-      <!-- ── Header ───────────────────────────────────────────────── -->
-      <div class="card p-6">
-        <div class="flex items-start gap-5">
-          <div class="w-16 h-16 rounded-2xl flex items-center justify-center text-white text-xl font-bold flex-shrink-0"
+      ${_renderPipelineDetailInnerHTML(c)}
+    </div>
+  `;
+}
+
+// Returns the inner body HTML for a pipeline company detail view.
+// Used by both the full-page route (#pipeline-company/<id>) and the draggable
+// popup. NO breadcrumb and NO sticky bar — those are added by the caller's
+// wrapper as appropriate.
+function _renderPipelineDetailInnerHTML(c) {
+  const safeId   = _safePipelineId(c.id);
+  const city     = c.location || '';
+  const desc     = c.description || '';
+  const hrNum    = c.hrNumber || '';
+  const court    = c._pipeline?.court || '';
+  const industry = c.industry || classifyIndustryJS(c.name) || 'Other';
+  const fin      = c._pipeline?.financials || null;
+  const interestScore   = c._pipeline?.interest_score || 0;
+  const cachedAnalysis  = c._pipeline?.ai_analysis || null;
+  const analysisGenDate = c._pipeline?.ai_analysis_generated
+    ? new Date(c._pipeline.ai_analysis_generated).toLocaleDateString('de-DE') : '';
+
+  const nameEnc = encodeURIComponent(c.name);
+  const cityEnc = city ? encodeURIComponent(city) : '';
+  const hrSlug  = hrNum.replace(/\s+/g, '+');
+  const websiteSearchUrl = `https://www.google.com/search?q=${nameEnc}${cityEnc ? '+' + cityEnc : ''}+website`;
+  const hqMapsUrl        = `https://www.google.com/maps/search/?api=1&query=${nameEnc}${cityEnc ? '+' + cityEnc : ''}`;
+
+  const src = c._pipeline?.data_source || 'pipeline';
+  const srcFull = src === 'bundesanzeiger' ? 'Bundesanzeiger'
+                : src === 'unternehmensregister' ? 'Unternehmensregister'
+                : 'Pipeline';
+
+  const revStr    = fin && fin.revenue != null ? _fmtEur(fin.revenue) : null;
+  const ebitdaStr = fin && fin.ebitda  != null ? _fmtEur(fin.ebitda)  : null;
+  const ebitdaPct = fin && fin.ebitda_margin_pct != null ? `${fin.ebitda_margin_pct.toFixed(1)}%` : null;
+  const empStr    = fin && fin.employees != null ? fin.employees.toLocaleString() : null;
+
+  return `
+    <div class="p-5 space-y-5">
+
+      <!-- Header card -->
+      <div class="card p-5">
+        <div class="flex items-start gap-4">
+          <div class="w-14 h-14 rounded-2xl flex items-center justify-center text-white text-lg font-bold flex-shrink-0"
                style="background:${avatarColor(c.name)}">${getInitials(c.name)}</div>
           <div class="flex-1 min-w-0">
-            <h1 class="text-2xl font-bold leading-tight mb-2">${escapeHtml(c.name)}</h1>
+            <h1 class="text-xl font-bold leading-tight mb-2">${escapeHtml(c.name)}</h1>
             <div class="flex flex-wrap items-center gap-2">
               <span class="text-xs px-2 py-0.5 rounded-full font-medium ${_industryBadgeClass(industry)}">${escapeHtml(industry)}</span>
               ${city ? `<span class="text-sm text-surface-500 flex items-center gap-1">📍 ${escapeHtml(city)}</span>` : ''}
@@ -2143,9 +2305,9 @@ function _renderPipelineDetailFull(c) {
               ${hrNum ? `<span class="text-xs text-surface-400 font-mono">HR: ${escapeHtml(hrNum)}</span>` : ''}
             </div>
           </div>
-          <div class="flex flex-col items-end gap-1.5 flex-shrink-0">
+          <div class="flex flex-col items-end gap-1 flex-shrink-0">
             <p class="text-[10px] uppercase tracking-wide text-surface-400">Your interest</p>
-            <span id="interest-stars-${safeId}" class="flex items-center gap-1 text-xl">
+            <span id="interest-stars-${safeId}" class="flex items-center gap-0.5 text-lg">
               ${_renderStarButtons(safeId, interestScore)}
             </span>
           </div>
@@ -2153,29 +2315,29 @@ function _renderPipelineDetailFull(c) {
         ${desc ? `<p class="text-sm text-surface-600 dark:text-surface-400 mt-4 leading-relaxed">${escapeHtml(desc)}</p>` : ''}
       </div>
 
-      <!-- ── Key Metrics ──────────────────────────────────────────── -->
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div class="card p-5">
+      <!-- Key metrics -->
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div class="card p-4">
           <p class="text-xs text-surface-400 mb-1 uppercase tracking-wide">Revenue${fin?.fiscal_year ? ' · FY' + fin.fiscal_year : ''}</p>
-          <p class="text-3xl font-bold ${revStr ? 'text-surface-900 dark:text-surface-100' : 'text-surface-400'}">${revStr || '—'}</p>
+          <p class="text-2xl font-bold ${revStr ? 'text-surface-900 dark:text-surface-100' : 'text-surface-400'}">${revStr || '—'}</p>
         </div>
-        <div class="card p-5">
+        <div class="card p-4">
           <p class="text-xs text-surface-400 mb-1 uppercase tracking-wide">EBITDA</p>
           <div class="flex items-baseline gap-2">
-            <p class="text-3xl font-bold ${ebitdaStr ? 'text-brand-600 dark:text-brand-400' : 'text-surface-400'}">${ebitdaStr || '—'}</p>
+            <p class="text-2xl font-bold ${ebitdaStr ? 'text-brand-600 dark:text-brand-400' : 'text-surface-400'}">${ebitdaStr || '—'}</p>
             ${ebitdaPct ? `<span class="text-sm font-medium text-surface-500">${ebitdaPct}</span>` : ''}
           </div>
         </div>
-        <div class="card p-5">
+        <div class="card p-4">
           <p class="text-xs text-surface-400 mb-1 uppercase tracking-wide">Employees</p>
-          <p class="text-3xl font-bold ${empStr ? 'text-surface-900 dark:text-surface-100' : 'text-surface-400'}">${empStr || '—'}</p>
+          <p class="text-2xl font-bold ${empStr ? 'text-surface-900 dark:text-surface-100' : 'text-surface-400'}">${empStr || '—'}</p>
         </div>
       </div>
 
-      <!-- ── AI Snapshot ──────────────────────────────────────────── -->
-      <div class="card p-6">
-        <div class="flex items-center justify-between mb-4">
-          <h2 class="text-base font-semibold">AI Company Snapshot</h2>
+      <!-- AI snapshot -->
+      <div class="card p-5">
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="text-sm font-semibold">AI Company Snapshot</h2>
           <button id="ai-analysis-btn-${safeId}"
             onclick="generatePipelineAIAnalysis('${safeId}')"
             class="btn-secondary btn-sm text-xs flex items-center gap-1.5">
@@ -2189,7 +2351,7 @@ function _renderPipelineDetailFull(c) {
         <div id="ai-analysis-output-${safeId}">
           ${cachedAnalysis
             ? _renderAIAnalysis(cachedAnalysis) + (analysisGenDate ? `<p class="text-[10px] text-surface-400 mt-1.5 text-right">Generated ${escapeHtml(analysisGenDate)}</p>` : '')
-            : `<div class="rounded-xl bg-surface-50 dark:bg-surface-800 border border-dashed border-surface-300 dark:border-surface-600 p-6 text-center">
+            : `<div class="rounded-xl bg-surface-50 dark:bg-surface-800 border border-dashed border-surface-300 dark:border-surface-600 p-5 text-center">
                  <div class="inline-flex items-center gap-2 text-xs text-surface-500">
                    <svg class="animate-spin w-3.5 h-3.5 text-brand-500" fill="none" viewBox="0 0 24 24">
                      <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
@@ -2201,66 +2363,66 @@ function _renderPipelineDetailFull(c) {
         </div>
       </div>
 
-      <!-- ── Quick Research Links ─────────────────────────────────── -->
-      <div class="card p-6">
-        <h2 class="text-base font-semibold mb-4">Quick Research</h2>
-        <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <!-- Quick research -->
+      <div class="card p-5">
+        <h2 class="text-sm font-semibold mb-3">Quick Research</h2>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
           <a href="${websiteSearchUrl}" target="_blank" rel="noopener"
-             class="flex items-center gap-2 px-4 py-3 rounded-xl bg-surface-50 dark:bg-surface-800 border border-surface-200 dark:border-surface-700 hover:border-brand-300 dark:hover:border-brand-600 transition-colors">
-            <span class="text-xl flex-shrink-0">🌐</span>
-            <div class="min-w-0"><p class="text-sm font-semibold">Find website</p><p class="text-[10px] text-surface-400">via Google</p></div>
+             class="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-surface-50 dark:bg-surface-800 border border-surface-200 dark:border-surface-700 hover:border-brand-300 dark:hover:border-brand-600 transition-colors">
+            <span class="text-base flex-shrink-0">🌐</span>
+            <div class="min-w-0"><p class="text-xs font-semibold truncate">Find website</p><p class="text-[10px] text-surface-400">via Google</p></div>
           </a>
           <a href="${hqMapsUrl}" target="_blank" rel="noopener"
-             class="flex items-center gap-2 px-4 py-3 rounded-xl bg-surface-50 dark:bg-surface-800 border border-surface-200 dark:border-surface-700 hover:border-brand-300 dark:hover:border-brand-600 transition-colors">
-            <span class="text-xl flex-shrink-0">📍</span>
-            <div class="min-w-0"><p class="text-sm font-semibold">Find HQ</p><p class="text-[10px] text-surface-400">on Google Maps</p></div>
+             class="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-surface-50 dark:bg-surface-800 border border-surface-200 dark:border-surface-700 hover:border-brand-300 dark:hover:border-brand-600 transition-colors">
+            <span class="text-base flex-shrink-0">📍</span>
+            <div class="min-w-0"><p class="text-xs font-semibold truncate">Find HQ</p><p class="text-[10px] text-surface-400">on Google Maps</p></div>
           </a>
           <a href="https://www.northdata.de/${nameEnc}${cityEnc ? ',+' + cityEnc : ''}${hrSlug ? '/' + hrSlug : ''}"
              target="_blank" rel="noopener"
-             class="flex items-center gap-2 px-4 py-3 rounded-xl bg-surface-50 dark:bg-surface-800 border border-surface-200 dark:border-surface-700 hover:border-brand-300 dark:hover:border-brand-600 transition-colors">
-            <span class="text-xl flex-shrink-0">📊</span>
-            <div class="min-w-0"><p class="text-sm font-semibold">North Data</p><p class="text-[10px] text-surface-400">owners, history</p></div>
+             class="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-surface-50 dark:bg-surface-800 border border-surface-200 dark:border-surface-700 hover:border-brand-300 dark:hover:border-brand-600 transition-colors">
+            <span class="text-base flex-shrink-0">📊</span>
+            <div class="min-w-0"><p class="text-xs font-semibold truncate">North Data</p><p class="text-[10px] text-surface-400">owners, history</p></div>
           </a>
           <a href="https://www.bundesanzeiger.de/pub/de/suche?q=${nameEnc}&fts=true"
              target="_blank" rel="noopener"
-             class="flex items-center gap-2 px-4 py-3 rounded-xl bg-surface-50 dark:bg-surface-800 border border-surface-200 dark:border-surface-700 hover:border-brand-300 dark:hover:border-brand-600 transition-colors">
-            <span class="text-xl flex-shrink-0">🏛</span>
-            <div class="min-w-0"><p class="text-sm font-semibold">Bundesanzeiger</p><p class="text-[10px] text-surface-400">filings &amp; accounts</p></div>
+             class="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-surface-50 dark:bg-surface-800 border border-surface-200 dark:border-surface-700 hover:border-brand-300 dark:hover:border-brand-600 transition-colors">
+            <span class="text-base flex-shrink-0">🏛</span>
+            <div class="min-w-0"><p class="text-xs font-semibold truncate">Bundesanzeiger</p><p class="text-[10px] text-surface-400">filings</p></div>
           </a>
         </div>
       </div>
 
-      <!-- ── Full P&L ─────────────────────────────────────────────── -->
-      <div class="card p-6">
-        <h2 class="text-base font-semibold mb-4">P&amp;L Income Statement</h2>
+      <!-- Full P&L -->
+      <div class="card p-5">
+        <h2 class="text-sm font-semibold mb-3">P&amp;L Income Statement</h2>
         ${fin
           ? _renderDetailPL(fin)
-          : `<p class="text-xs text-surface-400">No financial data available yet. The pipeline will fetch P&L from Bundesanzeiger when available.</p>`}
+          : `<p class="text-xs text-surface-400">No financial data available yet. The pipeline will fetch P&amp;L from Bundesanzeiger when available.</p>`}
       </div>
 
-      <!-- ── Registry ─────────────────────────────────────────────── -->
-      <div class="card p-6">
-        <h2 class="text-base font-semibold mb-4">Registry Information</h2>
-        <div class="grid grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-3 text-sm">
-          ${hrNum  ? `<div><p class="text-xs text-surface-400 mb-0.5">HR Number</p><p class="font-semibold font-mono">${escapeHtml(hrNum)}</p></div>` : ''}
-          ${court  ? `<div><p class="text-xs text-surface-400 mb-0.5">Register Court</p><p class="font-semibold">${escapeHtml(court)}</p></div>` : ''}
-          ${c.type ? `<div><p class="text-xs text-surface-400 mb-0.5">Legal Form</p><p class="font-semibold">${escapeHtml(c.type)}</p></div>` : ''}
-          ${city   ? `<div><p class="text-xs text-surface-400 mb-0.5">Location</p><p class="font-semibold">${escapeHtml(city)}</p></div>` : ''}
-          ${c.status ? `<div><p class="text-xs text-surface-400 mb-0.5">Status</p><p class="font-semibold capitalize">${escapeHtml(c.status)}</p></div>` : ''}
-          <div><p class="text-xs text-surface-400 mb-0.5">Source</p><p class="font-semibold">${escapeHtml(srcFull)}</p></div>
+      <!-- Registry -->
+      <div class="card p-5">
+        <h2 class="text-sm font-semibold mb-3">Registry Information</h2>
+        <div class="grid grid-cols-2 md:grid-cols-3 gap-x-5 gap-y-3 text-sm">
+          ${hrNum  ? `<div><p class="text-xs text-surface-400 mb-0.5">HR Number</p><p class="font-semibold font-mono text-sm">${escapeHtml(hrNum)}</p></div>` : ''}
+          ${court  ? `<div><p class="text-xs text-surface-400 mb-0.5">Register Court</p><p class="font-semibold text-sm">${escapeHtml(court)}</p></div>` : ''}
+          ${c.type ? `<div><p class="text-xs text-surface-400 mb-0.5">Legal Form</p><p class="font-semibold text-sm">${escapeHtml(c.type)}</p></div>` : ''}
+          ${city   ? `<div><p class="text-xs text-surface-400 mb-0.5">Location</p><p class="font-semibold text-sm">${escapeHtml(city)}</p></div>` : ''}
+          ${c.status ? `<div><p class="text-xs text-surface-400 mb-0.5">Status</p><p class="font-semibold text-sm capitalize">${escapeHtml(c.status)}</p></div>` : ''}
+          <div><p class="text-xs text-surface-400 mb-0.5">Source</p><p class="font-semibold text-sm">${escapeHtml(srcFull)}</p></div>
         </div>
       </div>
 
-      <!-- ── Officers ─────────────────────────────────────────────── -->
-      <div class="card p-6">
-        <div class="flex items-center justify-between mb-4">
-          <h2 class="text-base font-semibold">Officers &amp; Ownership</h2>
+      <!-- Officers -->
+      <div class="card p-5">
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="text-sm font-semibold">Officers &amp; Ownership</h2>
           ${hrNum ? `
             <button onclick="pipelineFetchOfficers('${safeId}')" id="fetch-officers-btn-${safeId}"
               class="btn-secondary btn-sm text-xs">Fetch from Handelsregister</button>` : ''}
         </div>
         <div id="detail-officers-${safeId}">
-          <p class="text-sm text-surface-400 italic">
+          <p class="text-xs text-surface-400 italic">
             ${hrNum
               ? 'Click "Fetch from Handelsregister" to load managing directors and officers.'
               : 'No HR number on file — cannot automatically look up officers.'}
@@ -2268,14 +2430,12 @@ function _renderPipelineDetailFull(c) {
         </div>
       </div>
 
-      <!-- ── Sticky action bar ────────────────────────────────────── -->
-      <div class="sticky bottom-4 z-30 flex justify-center pt-4">
-        <div class="card p-3 flex gap-2 shadow-2xl border-2 border-brand-200 dark:border-brand-800 bg-white dark:bg-surface-900">
-          <button onclick="pipelinePromoteToCompany('${safeId}')" id="pipeline-promote-${safeId}"
-            class="btn-secondary text-sm">+ Add to Companies</button>
-          <button onclick="pipelineAddToDeal('${safeId}')" id="pipeline-deal-${safeId}"
-            class="btn-primary text-sm">+ Add to Deal Pipeline</button>
-        </div>
+      <!-- Action buttons -->
+      <div class="flex gap-2 justify-end pt-1">
+        <button onclick="pipelinePromoteToCompany('${safeId}')" id="pipeline-promote-${safeId}"
+          class="btn-secondary text-sm">+ Add to Companies</button>
+        <button onclick="pipelineAddToDeal('${safeId}')" id="pipeline-deal-${safeId}"
+          class="btn-primary text-sm">+ Add to Deal Pipeline</button>
       </div>
     </div>
   `;
