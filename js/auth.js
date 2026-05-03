@@ -570,7 +570,15 @@ function setupAuthForms() {
       const result = await firebase.auth().createUserWithEmailAndPassword(email, password);
       await result.user.updateProfile({ displayName: name });
 
-      const appUser = _fbUserToAppUser({ ...result.user, displayName: name });
+      // NOTE: do NOT use { ...result.user } — Firebase stores uid as a prototype
+      // getter, so the spread loses it and downstream Firestore writes fail with
+      // "Unsupported field value: undefined in field userId".
+      const appUser = {
+        id:            result.user.uid,
+        name:          name,
+        email:         result.user.email,
+        emailVerified: result.user.emailVerified,
+      };
       setCurrentUser(appUser);
 
       // Seed data BEFORE showing the app so the tutorial has data to show
