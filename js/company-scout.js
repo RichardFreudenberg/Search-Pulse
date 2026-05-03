@@ -1225,17 +1225,27 @@ function renderPipelineCard(c) {
           </div>
           <span class="text-[10px] px-1.5 py-0.5 rounded bg-orange-50 dark:bg-orange-900/20 text-orange-600 dark:text-orange-300 whitespace-nowrap flex-shrink-0">${srcLabel}</span>
         </div>
-        <!-- Row 2: Industry badge + Interest stars -->
-        <div class="flex items-center justify-between -mt-0.5" onclick="event.stopPropagation()">
-          <span class="text-[10px] px-2 py-0.5 rounded-full font-medium ${_industryBadgeClass(industry)}">${escapeHtml(industry)}</span>
-          <span id="interest-stars-${safeId}" class="flex items-center gap-0.5">
+        <!-- Row 2: Industry + Location pills + Interest stars -->
+        <div class="flex items-center justify-between gap-2 -mt-0.5" onclick="event.stopPropagation()">
+          <div class="flex items-center gap-1.5 flex-wrap min-w-0">
+            <span class="text-[10px] px-2 py-0.5 rounded-full font-medium ${_industryBadgeClass(industry)}">${escapeHtml(industry)}</span>
+            ${city ? `<span class="text-[10px] px-2 py-0.5 rounded-full font-medium bg-surface-100 dark:bg-surface-800 text-surface-700 dark:text-surface-300 truncate max-w-[140px]" title="${escapeHtml(city)}">📍 ${escapeHtml(city)}</span>` : `<span class="text-[10px] px-2 py-0.5 rounded-full font-medium bg-surface-50 dark:bg-surface-900 text-surface-400 italic">No location</span>`}
+          </div>
+          <span id="interest-stars-${safeId}" class="flex items-center gap-0.5 flex-shrink-0">
             ${_renderStarButtons(safeId, interestScore)}
           </span>
         </div>
         ${desc  ? `<p class="text-xs text-surface-500 line-clamp-2">${escapeHtml(desc)}</p>` : ''}
         ${hrNum ? `<p class="text-xs text-surface-400">HR: ${escapeHtml(hrNum)}</p>` : ''}
         ${financialsHtml}
-        ${!fin ? `<p class="text-[11px] text-surface-400 italic">Click to open full page →</p>` : ''}
+        ${!fin ? `
+          <div class="border-t border-surface-100 dark:border-surface-700 pt-2 mt-0.5 flex items-center gap-1.5 text-[11px] text-surface-400">
+            <svg class="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+            </svg>
+            <span>No P&amp;L published — click for details</span>
+          </div>
+        ` : ''}
       </div>
       <!-- Action buttons — stop propagation so they don't open the drawer -->
       <div class="flex gap-2 mt-auto pt-1 border-t border-surface-100 dark:border-surface-700/50">
