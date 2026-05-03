@@ -900,9 +900,11 @@ function showApp() {
 
   if (currentUser) seedDemoDeal(currentUser.id).catch(() => {});
 
-  const hashPage  = location.hash.slice(1);
+  // Parse hash — supports "page" or "page/param" (e.g. pipeline-company/abc123)
+  const hashRaw   = location.hash.slice(1);
+  const hashPage  = hashRaw.split('/')[0];
   const startPage = (hashPage && typeof VALID_PAGES !== 'undefined' && VALID_PAGES.has(hashPage))
-    ? hashPage : 'dashboard';
+    ? hashRaw : 'dashboard';
   navigate(startPage);
   checkReminders();
 

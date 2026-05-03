@@ -76,7 +76,7 @@ let _pipelineFilters = {
   sizeRange:    '',    // ''|'<10'|'10-50'|'50-250'|'>250'
   hasFinancials: false,
 };
-let _pipelineSortBy = 'recent'; // 'recent'|'interest'|'revenue'|'ebitda_pct'
+let _pipelineSortBy = 'recent'; // 'recent'|'interest'|'revenue'|'ebitda_pct'|'location'
 
 // ─── JS Industry Classifier (fallback for companies without industry set) ─────
 const _JS_INDUSTRY_RULES = [
@@ -167,6 +167,10 @@ function _applyPipelineFilters(companies) {
     result.sort((a, b) =>
       (b._pipeline?.financials?.ebitda_margin_pct ?? -999) -
       (a._pipeline?.financials?.ebitda_margin_pct ?? -999)
+    );
+  } else if (_pipelineSortBy === 'location') {
+    result.sort((a, b) =>
+      (a.location || 'zzz').localeCompare(b.location || 'zzz', 'de')
     );
   }
   // 'recent' = Firestore insertion order — no re-sort
@@ -287,7 +291,7 @@ async function _setPipelineInterest(safeId, score) {
 
 function setPipelineSort(sortBy) {
   _pipelineSortBy = sortBy;
-  ['recent', 'interest', 'revenue', 'ebitda_pct'].forEach(key => {
+  ['recent', 'interest', 'revenue', 'ebitda_pct', 'location'].forEach(key => {
     const btn = document.getElementById(`sort-btn-${key}`);
     if (!btn) return;
     btn.className = `px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
@@ -1019,6 +1023,7 @@ function renderPipelineSection(companies) {
     ['interest',  '⭐ Interest'],
     ['revenue',   'Revenue ↓'],
     ['ebitda_pct','EBITDA %'],
+    ['location',  '📍 Location'],
   ];
 
   el.innerHTML = `
@@ -1208,8 +1213,8 @@ function renderPipelineCard(c) {
 
   return `
     <div class="card p-4 flex flex-col gap-3 hover:shadow-md transition-shadow" id="pipeline-card-${safeId}">
-      <!-- Clickable body → opens detail drawer -->
-      <div class="flex flex-col gap-2 cursor-pointer" onclick="openPipelineCompanyDetail('${safeId}')">
+      <!-- Clickable body → opens full detail page in new tab -->
+      <div class="flex flex-col gap-2 cursor-pointer" onclick="openPipelineDetailPage('${safeId}')">
         <!-- Row 1: Avatar + Name/City + Source badge -->
         <div class="flex items-start gap-3">
           <div class="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 text-white text-xs font-bold"
@@ -1230,7 +1235,7 @@ function renderPipelineCard(c) {
         ${desc  ? `<p class="text-xs text-surface-500 line-clamp-2">${escapeHtml(desc)}</p>` : ''}
         ${hrNum ? `<p class="text-xs text-surface-400">HR: ${escapeHtml(hrNum)}</p>` : ''}
         ${financialsHtml}
-        ${!fin ? `<p class="text-[11px] text-surface-400 italic">Click to view details →</p>` : ''}
+        ${!fin ? `<p class="text-[11px] text-surface-400 italic">Click to open full page →</p>` : ''}
       </div>
       <!-- Action buttons — stop propagation so they don't open the drawer -->
       <div class="flex gap-2 mt-auto pt-1 border-t border-surface-100 dark:border-surface-700/50">
@@ -1242,8 +1247,8 @@ function renderPipelineCard(c) {
           class="btn-primary btn-sm flex-1 text-xs">
           + Deals
         </button>
-        <button onclick="event.stopPropagation(); openPipelineCompanyDetail('${safeId}')"
-          class="btn-secondary btn-sm text-xs px-2" title="View details">
+        <button onclick="event.stopPropagation(); openPipelineDetailPage('${safeId}')"
+          class="btn-secondary btn-sm text-xs px-2" title="Open full page">
           <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
               d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
@@ -1986,4 +1991,292 @@ async function generatePipelineAIAnalysis(companyId) {
       btn.innerHTML = `<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg> Try Again`;
     }
   }
+}
+
+// ─── Full-Page Pipeline Company Detail (opens in new tab) ────────────────────
+
+function _safePipelineId(id) {
+  return (id || '').replace(/[^a-zA-Z0-9_-]/g, '_');
+}
+
+// Card click handler — opens full-page detail in a new tab.
+// Resolves safeId back to the actual Firestore doc id when needed.
+function openPipelineDetailPage(safeId) {
+  const company = _pipelineCompanies.find(c =>
+    c.id === safeId || _safePipelineId(c.id) === safeId
+  );
+  const id = company ? company.id : safeId;
+  window.open(`#pipeline-company/${encodeURIComponent(id)}`, '_blank', 'noopener');
+}
+
+// Called by the SPA router when /#pipeline-company/<id> is loaded
+async function renderPipelineCompanyDetail(rawId) {
+  const id = decodeURIComponent(rawId || '');
+  const pageContent = document.getElementById('page-content');
+  if (!pageContent) return;
+
+  // Loading state
+  pageContent.innerHTML = `
+    <div class="p-4 lg:p-8 max-w-5xl mx-auto animate-fade-in">
+      <div class="flex items-center gap-2 text-xs text-surface-500 mb-6">
+        <button onclick="navigate('company-scout')" class="hover:text-brand-600 hover:underline">
+          ← Back to Pipeline Companies
+        </button>
+      </div>
+      <div class="card p-12 text-center">
+        <div class="inline-flex items-center gap-2 text-sm text-surface-500">
+          <svg class="animate-spin w-4 h-4 text-brand-500" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+          </svg>
+          Loading company…
+        </div>
+      </div>
+    </div>`;
+
+  // Fetch the company + this user's rating in parallel
+  let company = null;
+  let userRating = 0;
+  try {
+    const db  = firebase.firestore();
+    const uid = currentUser?.id;
+    const [snap, ratingSnap] = await Promise.all([
+      db.collection('sharedPipeline').doc(id).get(),
+      uid ? db.collection('users').doc(uid).collection('pipelineRatings').doc(id).get()
+          : Promise.resolve(null),
+    ]);
+    if (snap && snap.exists) company = { id: snap.id, ...snap.data() };
+    if (ratingSnap && ratingSnap.exists) {
+      userRating = ratingSnap.data().interest_score || 0;
+    }
+  } catch (err) {
+    console.error('[detail-page] load failed:', err);
+  }
+
+  if (!company) {
+    pageContent.innerHTML = `
+      <div class="p-4 lg:p-8 max-w-5xl mx-auto">
+        <div class="card p-12 text-center text-surface-400">
+          <p class="text-sm font-semibold mb-2">Company not found</p>
+          <p class="text-xs mb-4">"${escapeHtml(id)}" could not be loaded from the shared pipeline.</p>
+          <button onclick="navigate('company-scout')" class="btn-primary btn-sm">← Back to Pipeline</button>
+        </div>
+      </div>`;
+    return;
+  }
+
+  // Layer in user's rating + register so other handlers can find it
+  if (!company._pipeline) company._pipeline = {};
+  company._pipeline.interest_score = userRating || null;
+  if (!_pipelineCompanies.some(c => c.id === company.id)) {
+    _pipelineCompanies.push(company);
+  }
+
+  _renderPipelineDetailFull(company);
+
+  // Auto-trigger AI snapshot generation if no cached analysis exists
+  if (!company._pipeline?.ai_analysis) {
+    setTimeout(() => generatePipelineAIAnalysis(_safePipelineId(company.id)), 400);
+  }
+}
+
+function _renderPipelineDetailFull(c) {
+  const pageContent = document.getElementById('page-content');
+  if (!pageContent) return;
+
+  const safeId   = _safePipelineId(c.id);
+  const city     = c.location || '';
+  const desc     = c.description || '';
+  const hrNum    = c.hrNumber || '';
+  const court    = c._pipeline?.court || '';
+  const industry = c.industry || classifyIndustryJS(c.name) || 'Other';
+  const fin      = c._pipeline?.financials || null;
+  const interestScore   = c._pipeline?.interest_score || 0;
+  const cachedAnalysis  = c._pipeline?.ai_analysis || null;
+  const analysisGenDate = c._pipeline?.ai_analysis_generated
+    ? new Date(c._pipeline.ai_analysis_generated).toLocaleDateString('de-DE') : '';
+
+  const nameEnc = encodeURIComponent(c.name);
+  const cityEnc = city ? encodeURIComponent(city) : '';
+  const hrSlug  = hrNum.replace(/\s+/g, '+');
+  const websiteSearchUrl = `https://www.google.com/search?q=${nameEnc}${cityEnc ? '+' + cityEnc : ''}+website`;
+  const hqMapsUrl        = `https://www.google.com/maps/search/?api=1&query=${nameEnc}${cityEnc ? '+' + cityEnc : ''}`;
+
+  const src = c._pipeline?.data_source || 'pipeline';
+  const srcFull = src === 'bundesanzeiger' ? 'Bundesanzeiger'
+                : src === 'unternehmensregister' ? 'Unternehmensregister'
+                : 'Pipeline';
+
+  // Big-metric values
+  const revStr    = fin && fin.revenue != null ? _fmtEur(fin.revenue) : null;
+  const ebitdaStr = fin && fin.ebitda  != null ? _fmtEur(fin.ebitda)  : null;
+  const ebitdaPct = fin && fin.ebitda_margin_pct != null ? `${fin.ebitda_margin_pct.toFixed(1)}%` : null;
+  const empStr    = fin && fin.employees != null ? fin.employees.toLocaleString() : null;
+
+  // Document title — visible in the browser tab
+  document.title = `${c.name} · Search Pulse`;
+
+  pageContent.innerHTML = `
+    <div class="p-4 lg:p-8 max-w-5xl mx-auto animate-fade-in space-y-6 pb-24">
+
+      <!-- Breadcrumb -->
+      <div class="flex items-center gap-2 text-xs text-surface-500">
+        <button onclick="navigate('company-scout')" class="hover:text-brand-600 hover:underline flex items-center gap-1">
+          <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
+          </svg>
+          Back to Pipeline Companies
+        </button>
+      </div>
+
+      <!-- ── Header ───────────────────────────────────────────────── -->
+      <div class="card p-6">
+        <div class="flex items-start gap-5">
+          <div class="w-16 h-16 rounded-2xl flex items-center justify-center text-white text-xl font-bold flex-shrink-0"
+               style="background:${avatarColor(c.name)}">${getInitials(c.name)}</div>
+          <div class="flex-1 min-w-0">
+            <h1 class="text-2xl font-bold leading-tight mb-2">${escapeHtml(c.name)}</h1>
+            <div class="flex flex-wrap items-center gap-2">
+              <span class="text-xs px-2 py-0.5 rounded-full font-medium ${_industryBadgeClass(industry)}">${escapeHtml(industry)}</span>
+              ${city ? `<span class="text-sm text-surface-500 flex items-center gap-1">📍 ${escapeHtml(city)}</span>` : ''}
+              <span class="text-xs px-1.5 py-0.5 rounded bg-orange-50 dark:bg-orange-900/20 text-orange-600 dark:text-orange-300">${srcFull}</span>
+              ${hrNum ? `<span class="text-xs text-surface-400 font-mono">HR: ${escapeHtml(hrNum)}</span>` : ''}
+            </div>
+          </div>
+          <div class="flex flex-col items-end gap-1.5 flex-shrink-0">
+            <p class="text-[10px] uppercase tracking-wide text-surface-400">Your interest</p>
+            <span id="interest-stars-${safeId}" class="flex items-center gap-1 text-xl">
+              ${_renderStarButtons(safeId, interestScore)}
+            </span>
+          </div>
+        </div>
+        ${desc ? `<p class="text-sm text-surface-600 dark:text-surface-400 mt-4 leading-relaxed">${escapeHtml(desc)}</p>` : ''}
+      </div>
+
+      <!-- ── Key Metrics ──────────────────────────────────────────── -->
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div class="card p-5">
+          <p class="text-xs text-surface-400 mb-1 uppercase tracking-wide">Revenue${fin?.fiscal_year ? ' · FY' + fin.fiscal_year : ''}</p>
+          <p class="text-3xl font-bold ${revStr ? 'text-surface-900 dark:text-surface-100' : 'text-surface-400'}">${revStr || '—'}</p>
+        </div>
+        <div class="card p-5">
+          <p class="text-xs text-surface-400 mb-1 uppercase tracking-wide">EBITDA</p>
+          <div class="flex items-baseline gap-2">
+            <p class="text-3xl font-bold ${ebitdaStr ? 'text-brand-600 dark:text-brand-400' : 'text-surface-400'}">${ebitdaStr || '—'}</p>
+            ${ebitdaPct ? `<span class="text-sm font-medium text-surface-500">${ebitdaPct}</span>` : ''}
+          </div>
+        </div>
+        <div class="card p-5">
+          <p class="text-xs text-surface-400 mb-1 uppercase tracking-wide">Employees</p>
+          <p class="text-3xl font-bold ${empStr ? 'text-surface-900 dark:text-surface-100' : 'text-surface-400'}">${empStr || '—'}</p>
+        </div>
+      </div>
+
+      <!-- ── AI Snapshot ──────────────────────────────────────────── -->
+      <div class="card p-6">
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="text-base font-semibold">AI Company Snapshot</h2>
+          <button id="ai-analysis-btn-${safeId}"
+            onclick="generatePipelineAIAnalysis('${safeId}')"
+            class="btn-secondary btn-sm text-xs flex items-center gap-1.5">
+            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M13 10V3L4 14h7v7l9-11h-7z"/>
+            </svg>
+            ${cachedAnalysis ? '↻ Regenerate' : 'Generate Snapshot'}
+          </button>
+        </div>
+        <div id="ai-analysis-output-${safeId}">
+          ${cachedAnalysis
+            ? _renderAIAnalysis(cachedAnalysis) + (analysisGenDate ? `<p class="text-[10px] text-surface-400 mt-1.5 text-right">Generated ${escapeHtml(analysisGenDate)}</p>` : '')
+            : `<div class="rounded-xl bg-surface-50 dark:bg-surface-800 border border-dashed border-surface-300 dark:border-surface-600 p-6 text-center">
+                 <div class="inline-flex items-center gap-2 text-xs text-surface-500">
+                   <svg class="animate-spin w-3.5 h-3.5 text-brand-500" fill="none" viewBox="0 0 24 24">
+                     <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+                     <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                   </svg>
+                   Generating snapshot automatically — ~10 seconds…
+                 </div>
+               </div>`}
+        </div>
+      </div>
+
+      <!-- ── Quick Research Links ─────────────────────────────────── -->
+      <div class="card p-6">
+        <h2 class="text-base font-semibold mb-4">Quick Research</h2>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <a href="${websiteSearchUrl}" target="_blank" rel="noopener"
+             class="flex items-center gap-2 px-4 py-3 rounded-xl bg-surface-50 dark:bg-surface-800 border border-surface-200 dark:border-surface-700 hover:border-brand-300 dark:hover:border-brand-600 transition-colors">
+            <span class="text-xl flex-shrink-0">🌐</span>
+            <div class="min-w-0"><p class="text-sm font-semibold">Find website</p><p class="text-[10px] text-surface-400">via Google</p></div>
+          </a>
+          <a href="${hqMapsUrl}" target="_blank" rel="noopener"
+             class="flex items-center gap-2 px-4 py-3 rounded-xl bg-surface-50 dark:bg-surface-800 border border-surface-200 dark:border-surface-700 hover:border-brand-300 dark:hover:border-brand-600 transition-colors">
+            <span class="text-xl flex-shrink-0">📍</span>
+            <div class="min-w-0"><p class="text-sm font-semibold">Find HQ</p><p class="text-[10px] text-surface-400">on Google Maps</p></div>
+          </a>
+          <a href="https://www.northdata.de/${nameEnc}${cityEnc ? ',+' + cityEnc : ''}${hrSlug ? '/' + hrSlug : ''}"
+             target="_blank" rel="noopener"
+             class="flex items-center gap-2 px-4 py-3 rounded-xl bg-surface-50 dark:bg-surface-800 border border-surface-200 dark:border-surface-700 hover:border-brand-300 dark:hover:border-brand-600 transition-colors">
+            <span class="text-xl flex-shrink-0">📊</span>
+            <div class="min-w-0"><p class="text-sm font-semibold">North Data</p><p class="text-[10px] text-surface-400">owners, history</p></div>
+          </a>
+          <a href="https://www.bundesanzeiger.de/pub/de/suche?q=${nameEnc}&fts=true"
+             target="_blank" rel="noopener"
+             class="flex items-center gap-2 px-4 py-3 rounded-xl bg-surface-50 dark:bg-surface-800 border border-surface-200 dark:border-surface-700 hover:border-brand-300 dark:hover:border-brand-600 transition-colors">
+            <span class="text-xl flex-shrink-0">🏛</span>
+            <div class="min-w-0"><p class="text-sm font-semibold">Bundesanzeiger</p><p class="text-[10px] text-surface-400">filings &amp; accounts</p></div>
+          </a>
+        </div>
+      </div>
+
+      <!-- ── Full P&L ─────────────────────────────────────────────── -->
+      <div class="card p-6">
+        <h2 class="text-base font-semibold mb-4">P&amp;L Income Statement</h2>
+        ${fin
+          ? _renderDetailPL(fin)
+          : `<p class="text-xs text-surface-400">No financial data available yet. The pipeline will fetch P&L from Bundesanzeiger when available.</p>`}
+      </div>
+
+      <!-- ── Registry ─────────────────────────────────────────────── -->
+      <div class="card p-6">
+        <h2 class="text-base font-semibold mb-4">Registry Information</h2>
+        <div class="grid grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-3 text-sm">
+          ${hrNum  ? `<div><p class="text-xs text-surface-400 mb-0.5">HR Number</p><p class="font-semibold font-mono">${escapeHtml(hrNum)}</p></div>` : ''}
+          ${court  ? `<div><p class="text-xs text-surface-400 mb-0.5">Register Court</p><p class="font-semibold">${escapeHtml(court)}</p></div>` : ''}
+          ${c.type ? `<div><p class="text-xs text-surface-400 mb-0.5">Legal Form</p><p class="font-semibold">${escapeHtml(c.type)}</p></div>` : ''}
+          ${city   ? `<div><p class="text-xs text-surface-400 mb-0.5">Location</p><p class="font-semibold">${escapeHtml(city)}</p></div>` : ''}
+          ${c.status ? `<div><p class="text-xs text-surface-400 mb-0.5">Status</p><p class="font-semibold capitalize">${escapeHtml(c.status)}</p></div>` : ''}
+          <div><p class="text-xs text-surface-400 mb-0.5">Source</p><p class="font-semibold">${escapeHtml(srcFull)}</p></div>
+        </div>
+      </div>
+
+      <!-- ── Officers ─────────────────────────────────────────────── -->
+      <div class="card p-6">
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="text-base font-semibold">Officers &amp; Ownership</h2>
+          ${hrNum ? `
+            <button onclick="pipelineFetchOfficers('${safeId}')" id="fetch-officers-btn-${safeId}"
+              class="btn-secondary btn-sm text-xs">Fetch from Handelsregister</button>` : ''}
+        </div>
+        <div id="detail-officers-${safeId}">
+          <p class="text-sm text-surface-400 italic">
+            ${hrNum
+              ? 'Click "Fetch from Handelsregister" to load managing directors and officers.'
+              : 'No HR number on file — cannot automatically look up officers.'}
+          </p>
+        </div>
+      </div>
+
+      <!-- ── Sticky action bar ────────────────────────────────────── -->
+      <div class="sticky bottom-4 z-30 flex justify-center pt-4">
+        <div class="card p-3 flex gap-2 shadow-2xl border-2 border-brand-200 dark:border-brand-800 bg-white dark:bg-surface-900">
+          <button onclick="pipelinePromoteToCompany('${safeId}')" id="pipeline-promote-${safeId}"
+            class="btn-secondary text-sm">+ Add to Companies</button>
+          <button onclick="pipelineAddToDeal('${safeId}')" id="pipeline-deal-${safeId}"
+            class="btn-primary text-sm">+ Add to Deal Pipeline</button>
+        </div>
+      </div>
+    </div>
+  `;
 }

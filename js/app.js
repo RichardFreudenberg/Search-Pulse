@@ -10,10 +10,11 @@ const VALID_PAGES = new Set([
   'suggestions','news','resources','deals','deal-search',
   'company-scout','sourcing','settings','shared-dashboard',
   'email-templates','brokers',
+  'pipeline-company',  // /#pipeline-company/<id> — full-page detail view
 ]);
 
 // Nav tab switcher
-const DEALS_PAGES = new Set(['deals','deal-search','company-scout','sourcing','shared-dashboard','email-templates','brokers']);
+const DEALS_PAGES = new Set(['deals','deal-search','company-scout','sourcing','shared-dashboard','email-templates','brokers','pipeline-company']);
 
 function switchNavTab(tab) {
   const relPanel  = document.getElementById('nav-panel-relationships');
@@ -35,22 +36,29 @@ function switchNavTab(tab) {
   }
 }
 
-// Navigation
-function navigate(page, { pushState = true } = {}) {
-  if (!VALID_PAGES.has(page)) page = 'dashboard';
-  currentPage = page;
+// Navigation — supports parameterised routes via "page/param" hash format
+// Example: navigate('pipeline-company/abc123') opens /#pipeline-company/abc123
+function navigate(pageInput, { pushState = true } = {}) {
+  pageInput = String(pageInput || '');
+  const slashIdx = pageInput.indexOf('/');
+  const page  = slashIdx >= 0 ? pageInput.slice(0, slashIdx) : pageInput;
+  const param = slashIdx >= 0 ? pageInput.slice(slashIdx + 1) : null;
+
+  const validPage = VALID_PAGES.has(page) ? page : 'dashboard';
+  currentPage = validPage;
 
   // Update URL hash so refresh / back-button work
   if (pushState) {
-    history.pushState({ page }, '', '#' + page);
+    const hash = param ? `${validPage}/${param}` : validPage;
+    history.pushState({ page: validPage, param }, '', '#' + hash);
   }
 
   // Switch sidebar tab to match the page
-  switchNavTab(DEALS_PAGES.has(page) ? 'deals' : 'relationships');
+  switchNavTab(DEALS_PAGES.has(validPage) ? 'deals' : 'relationships');
 
   // Update nav active states
   document.querySelectorAll('.nav-item[data-page]').forEach(el => {
-    el.classList.toggle('active', el.dataset.page === page);
+    el.classList.toggle('active', el.dataset.page === validPage);
   });
 
   // Close mobile sidebar
@@ -60,7 +68,7 @@ function navigate(page, { pushState = true } = {}) {
   overlay.classList.add('hidden');
 
   // Render page
-  switch (page) {
+  switch (validPage) {
     case 'dashboard': renderDashboard(); break;
     case 'contacts': renderContacts(); break;
     case 'companies': renderCompanies(); break;
@@ -77,6 +85,13 @@ function navigate(page, { pushState = true } = {}) {
     case 'shared-dashboard': renderSharedDashboardPage(); break;
     case 'email-templates': renderEmailTemplates(); break;
     case 'brokers': renderBrokers(); break;
+    case 'pipeline-company':
+      if (typeof renderPipelineCompanyDetail === 'function') {
+        renderPipelineCompanyDetail(param);
+      } else {
+        renderDashboard();
+      }
+      break;
     default: renderDashboard();
   }
 }
@@ -84,8 +99,10 @@ function navigate(page, { pushState = true } = {}) {
 // Back / forward button support
 window.addEventListener('popstate', (e) => {
   if (!currentUser) return; // ignore if not logged in
-  const page = (e.state?.page) || (location.hash.slice(1)) || 'dashboard';
-  navigate(page, { pushState: false });
+  let target = e.state?.page;
+  if (target && e.state?.param) target = `${target}/${e.state.param}`;
+  if (!target) target = location.hash.slice(1) || 'dashboard';
+  navigate(target, { pushState: false });
 });
 
 function toggleSidebar() {
