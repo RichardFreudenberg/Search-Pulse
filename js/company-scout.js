@@ -1364,25 +1364,37 @@ function _renderDetailContent(c) {
     <!-- ── Scrollable body ─────────────────────────────────────────────── -->
     <div class="flex-1 overflow-y-auto p-5 space-y-6">
 
-      <!-- AI Acquisition Analysis -->
+      <!-- Company Snapshot (AI) -->
       <section>
         <div class="flex items-center justify-between mb-3">
-          <h3 class="text-[11px] font-semibold uppercase tracking-wider text-surface-400">AI Acquisition Analysis</h3>
-          <button id="ai-analysis-btn-${safeId}"
-            onclick="generatePipelineAIAnalysis('${safeId}')"
-            class="btn-secondary btn-sm text-xs flex items-center gap-1.5">
-            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                d="M13 10V3L4 14h7v7l9-11h-7z"/>
-            </svg>
-            ${cachedAnalysis ? '↻ Regenerate' : 'Generate Analysis'}
-          </button>
+          <h3 class="text-[11px] font-semibold uppercase tracking-wider text-surface-400">Company Snapshot</h3>
+          <div class="flex items-center gap-2">
+            <a href="https://www.google.com/search?q=${nameEnc}${cityEnc ? '+' + cityEnc : ''}+website"
+               target="_blank" rel="noopener"
+               class="text-xs text-brand-600 dark:text-brand-400 hover:underline flex items-center gap-1">
+              <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9"/>
+              </svg>
+              Find website
+            </a>
+            <button id="ai-analysis-btn-${safeId}"
+              onclick="generatePipelineAIAnalysis('${safeId}')"
+              class="btn-secondary btn-sm text-xs flex items-center gap-1.5">
+              <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M13 10V3L4 14h7v7l9-11h-7z"/>
+              </svg>
+              ${cachedAnalysis ? '↻ Regenerate' : 'Generate Snapshot'}
+            </button>
+          </div>
         </div>
         <div id="ai-analysis-output-${safeId}">
           ${cachedAnalysis
             ? _renderAIAnalysis(cachedAnalysis) + (analysisGenDate ? `<p class="text-[10px] text-surface-400 mt-1.5 text-right">Generated ${escapeHtml(analysisGenDate)}</p>` : '')
             : `<div class="rounded-xl bg-surface-50 dark:bg-surface-800 border border-dashed border-surface-300 dark:border-surface-600 p-4 text-center">
-                 <p class="text-xs text-surface-400">Click "Generate Analysis" for an AI-powered acquisition assessment.</p>
+                 <p class="text-xs text-surface-400 mb-1">Click <strong>Generate Snapshot</strong> for an AI overview of this company.</p>
+                 <p class="text-[10px] text-surface-400">Covers: what they do · business model · key facts · financials · acquisition take</p>
                </div>`}
         </div>
       </section>
@@ -1735,62 +1747,73 @@ async function pipelineFetchOfficers(companyId) {
 // ─── AI Acquisition Analysis ──────────────────────────────────────────────────
 
 function _buildAcquisitionSystemPrompt() {
-  return `You are a search fund acquisition analyst. Assess whether a German SME is a potentially interesting acquisition target.
+  return `You are a business analyst helping a search fund investor quickly understand a German SME.
 
-Evaluate based on:
-1. Business quality (recurring revenue, defensible niche, market position, owner-operated)
-2. Financial health (revenue size, profitability, EBITDA margins relative to industry norms)
-3. Acquisition fit for a search fund (ideal: €0.5M–€5M EBITDA, founder-owned, succession opportunity)
-4. Risk factors (customer concentration, cyclicality, technology risk, competition)
-5. Growth potential (organic levers, add-on acquisition opportunities)
+Your goal is a clear, plain-English company snapshot. The investor may know nothing about this company — your job is to give them a complete picture in 30 seconds of reading.
 
-Respond with exactly these sections:
-**Summary** (2–3 sentences overview)
-**Investment Highlights** (3–5 bullet points starting with -)
-**Risk Factors** (2–4 bullet points starting with -)
-**Verdict**: Interesting / Needs More Info / Not a Fit — one sentence rationale
+Respond with exactly these sections (use the bold headers as written):
 
-Be concise and practical. Focus on what matters for a search fund acquisition.`;
+**What They Do**
+2–3 sentences. Explain the business in plain English: what product or service, who are their customers, what problem do they solve. Avoid jargon.
+
+**Business Model**
+1–2 sentences: B2B or B2C? Project-based or recurring revenue? How do they make money?
+
+**Key Facts**
+3–5 bullet points covering location, market position, company size, notable traits, how long they have been in business (estimate from HR number / legal form if possible).
+
+**Financials**
+If financial data is provided: 3–4 bullet points summarising revenue scale, profitability, margins, employee productivity. If no data: one bullet noting financials are not publicly available and suggesting next steps.
+
+**Acquisition Take**
+2–3 sentences: Is this interesting for a search fund (target: €0.5M–€5M EBITDA, founder-owned, succession opportunity)? What would need to be true to proceed? Any obvious red flags?
+
+**Verdict**: Interesting / Needs More Info / Not a Fit — one sentence rationale.
+
+Prioritise clarity. The "What They Do" section is the most important — make it crystal clear.`;
 }
 
 function _buildAcquisitionUserPrompt(company, fin) {
   const parts = [
-    `**Company:** ${company.name}`,
+    `**Company name:** ${company.name}`,
     `**Location:** ${company.location || 'Germany'}`,
     `**Industry:** ${company.industry || classifyIndustryJS(company.name)}`,
     `**Legal form:** ${company.type || 'GmbH'}`,
   ];
-  if (company.hrNumber)    parts.push(`**HR Number:** ${company.hrNumber}`);
-  if (company.description) parts.push(`**Business description:** ${company.description}`);
+  if (company.website)     parts.push(`**Website:** ${company.website}`);
+  if (company.hrNumber)    parts.push(`**HR / Register number:** ${company.hrNumber}`);
+  if (company.description) parts.push(`**Business purpose (official registry text):** ${company.description}`);
+
   if (fin) {
-    parts.push(`\n**Financial data (FY${fin.fiscal_year || '?'}):**`);
+    parts.push(`\n**Financial data (FY${fin.fiscal_year || '?'}, from Bundesanzeiger):**`);
     const M = v => `€${(v / 1_000_000).toFixed(2)}M`;
-    if (fin.revenue     != null) parts.push(`- Revenue: ${M(fin.revenue)}`);
-    if (fin.ebitda      != null) parts.push(`- EBITDA: ${M(fin.ebitda)}${fin.ebitda_margin_pct != null ? ` (${fin.ebitda_margin_pct.toFixed(1)}% margin)` : ''}`);
-    if (fin.ebit        != null) parts.push(`- EBIT: ${M(fin.ebit)}`);
-    if (fin.net_income  != null) parts.push(`- Net Income: ${M(fin.net_income)}${fin.net_margin_pct != null ? ` (${fin.net_margin_pct.toFixed(1)}%)` : ''}`);
-    if (fin.gross_profit!= null) parts.push(`- Gross Profit: ${M(fin.gross_profit)}`);
-    if (fin.employees   != null) parts.push(`- Employees: ${fin.employees}`);
+    if (fin.revenue      != null) parts.push(`- Revenue: ${M(fin.revenue)}`);
+    if (fin.gross_profit != null) parts.push(`- Gross Profit: ${M(fin.gross_profit)}`);
+    if (fin.ebitda       != null) parts.push(`- EBITDA: ${M(fin.ebitda)}${fin.ebitda_margin_pct != null ? ` (${fin.ebitda_margin_pct.toFixed(1)}% margin)` : ''}`);
+    if (fin.ebit         != null) parts.push(`- EBIT: ${M(fin.ebit)}`);
+    if (fin.net_income   != null) parts.push(`- Net Income: ${M(fin.net_income)}${fin.net_margin_pct != null ? ` (${fin.net_margin_pct.toFixed(1)}%)` : ''}`);
+    if (fin.employees    != null) parts.push(`- Employees: ${fin.employees}`);
   } else {
-    parts.push(`\n**Financial data:** Not available`);
+    parts.push(`\n**Financial data:** Not available from Bundesanzeiger`);
   }
-  parts.push('\nProvide your acquisition analysis.');
+
+  parts.push('\nGenerate the company snapshot.');
   return parts.join('\n');
 }
 
 function _renderAIAnalysis(text) {
   if (!text) return '';
 
-  // Extract verdict keyword
+  // Extract verdict keyword (matches "**Verdict**: ..." anywhere in the text)
   const vMatch = text.match(/\*\*Verdict\*\*[:\s]*([^\n]+)/i);
   const vText  = (vMatch ? vMatch[1] : '').toLowerCase();
   const verdict = vText.includes('not a fit')   ? 'Not a Fit'
                 : vText.includes('interesting')  ? 'Interesting'
                 : vText.includes('needs')        ? 'Needs More Info'
                 : null;
-  const verdictClass = verdict === 'Interesting'   ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300'
-                     : verdict === 'Not a Fit'     ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300'
-                     : verdict                     ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300'
+  const verdictClass = verdict === 'Interesting' ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300'
+                     : verdict === 'Not a Fit'   ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300'
+                     : verdict                   ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300'
                      : '';
 
   // Convert simple markdown to HTML line by line
