@@ -140,52 +140,60 @@ def _record_to_company(record) -> dict:
 
 # ─── Firestore sync ───────────────────────────────────────────────────────────
 
-def _sync_to_firestore(companies: list[dict]) -> int:
+def _shared_pipeline_collection():
     """
-    Write a list of company dicts (from simple_store.get_unsynced()) to
-    Firestore.  Uses the same collection layout as the existing CRM so
-    companies appear immediately in the frontend.
+    Returns the Firestore collection where pipeline companies live.
+    Path: /sharedPipeline/companies/{docId}
 
-    Returns the number of documents successfully written.
+    Shared across ALL users — every authenticated active user sees the same
+    companies. Per-user data (interest scores, "promoted to my deals") lives
+    elsewhere under /users/{uid}/.
     """
     creds_path = os.environ.get(
         "FIREBASE_CREDENTIALS_PATH",
         "./config/serviceAccountKey.json",
     )
     project_id = os.environ.get("FIREBASE_PROJECT_ID", "")
-    user_id    = os.environ.get("FIREBASE_USER_ID", "")
 
     if not project_id:
         logger.warning("FIREBASE_PROJECT_ID not set — skipping Firestore sync.")
-        return 0
-    if not user_id:
-        logger.warning("FIREBASE_USER_ID not set — skipping Firestore sync.\n"
-                       "  Set it with: $env:FIREBASE_USER_ID = 'your-uid'")
-        return 0
+        return None
 
     try:
         import firebase_admin
         from firebase_admin import credentials, firestore as fs
     except ImportError:
         logger.error("firebase-admin not installed. Run: pip install firebase-admin")
-        return 0
+        return None
 
-    # Initialise Firebase app (idempotent)
     if not firebase_admin._apps:
         key_path = Path(creds_path)
         if not key_path.exists():
             logger.error("Service account key not found at %s", key_path)
-            return 0
+            return None
         cred = credentials.Certificate(str(key_path))
         firebase_admin.initialize_app(cred, {"projectId": project_id})
-        logger.info("[firestore] Connected to project %r as user %s", project_id, user_id)
+        logger.info("[firestore] Connected to project %r (shared pipeline)", project_id)
 
-    db    = fs.client()
-    # ── Write to the exact same path the CRM uses ─────────────────────────────
-    # Path: /users/{uid}/companies/{docId}  (matches db.js _col() function)
-    user_companies = db.collection("users").document(user_id).collection("companies")
+    db = fs.client()
+    # Top-level collection — every doc is a company, no per-user scoping.
+    # Path: /sharedPipeline/{companyId}
+    return db.collection("sharedPipeline")
+
+
+def _sync_to_firestore(companies: list[dict]) -> int:
+    """
+    Write a list of company dicts (from simple_store.get_unsynced()) to
+    Firestore's SHARED pipeline collection. Every authenticated user sees
+    them immediately — no per-user duplication.
+
+    Returns the number of documents successfully written.
+    """
+    coll = _shared_pipeline_collection()
+    if coll is None:
+        return 0
+
     count = 0
-
     for company in companies:
         cid = company.get("id")
         if not cid:
@@ -194,28 +202,29 @@ def _sync_to_firestore(companies: list[dict]) -> int:
         if not name:
             continue
         try:
-            # Field names must match exactly what companies.js renders
+            # Field names must match exactly what company-scout.js renders
             doc = {
+                "id":          cid,
                 "name":        name,
-                "type":        "Prospect",          # shows in company type badge
+                "type":        "Prospect",
                 "industry":    company.get("industry", ""),
                 "description": _build_company_description(company),
                 "location":    _fmt_location(company),
                 "website":     "",
-                "size":        "",                  # employees — added by financials later
+                "size":        "",
                 "hrNumber":    company.get("registry_number", ""),
                 "status":      company.get("status", "active"),
                 "source":      "pipeline",
                 "createdAt":   datetime.now(timezone.utc).isoformat(),
                 "updatedAt":   datetime.now(timezone.utc).isoformat(),
-                # Pipeline metadata — never breaks existing CRM fields
+                # Pipeline metadata — shared across all users
                 "_pipeline": {
                     "court":          company.get("court", ""),
                     "data_source":    company.get("source", ""),
                     "last_synced_at": datetime.now(timezone.utc).isoformat(),
                 },
             }
-            user_companies.document(cid).set(doc, merge=True)
+            coll.document(cid).set(doc, merge=True)
             mark_synced(cid)
             count += 1
             logger.info("[firestore] + %s", name)
@@ -227,46 +236,19 @@ def _sync_to_firestore(companies: list[dict]) -> int:
 
 def _sync_financials_to_firestore(financials_map: dict[str, dict]) -> int:
     """
-    Merge financials into existing Firestore company documents under
-    _pipeline.financials.  Only updates companies that already exist.
-    Returns the number of documents updated.
+    Merge financials into existing shared-pipeline documents under
+    _pipeline.financials. Returns the number of documents updated.
     """
-    creds_path = os.environ.get(
-        "FIREBASE_CREDENTIALS_PATH",
-        "./config/serviceAccountKey.json",
-    )
-    project_id = os.environ.get("FIREBASE_PROJECT_ID", "")
-    user_id    = os.environ.get("FIREBASE_USER_ID", "")
-
-    if not project_id or not user_id:
-        logger.warning("FIREBASE_PROJECT_ID / FIREBASE_USER_ID not set — skipping financials sync.")
+    coll = _shared_pipeline_collection()
+    if coll is None:
         return 0
 
-    try:
-        import firebase_admin
-        from firebase_admin import credentials, firestore as fs
-    except ImportError:
-        logger.error("firebase-admin not installed.")
-        return 0
-
-    if not firebase_admin._apps:
-        key_path = Path(creds_path)
-        if not key_path.exists():
-            logger.error("Service account key not found at %s", key_path)
-            return 0
-        cred = credentials.Certificate(str(key_path))
-        firebase_admin.initialize_app(cred, {"projectId": project_id})
-
-    db             = fs.client()
-    user_companies = db.collection("users").document(user_id).collection("companies")
-    count          = 0
-
+    count = 0
     for company_id, fin in financials_map.items():
         try:
-            # Strip internal-only keys before writing
             clean = {k: v for k, v in fin.items()
                      if k not in ("company_id", "fetched_at") and v is not None}
-            user_companies.document(company_id).set(
+            coll.document(company_id).set(
                 {"_pipeline": {"financials": clean,
                                "financials_fetched_at": fin.get("fetched_at", "")}},
                 merge=True,

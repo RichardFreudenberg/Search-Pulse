@@ -218,6 +218,56 @@ def cmd_wipe_user(email: str) -> int:
     return 0
 
 
+# ─── migrate-pipeline ────────────────────────────────────────────────────────
+
+def cmd_migrate_pipeline() -> int:
+    """
+    Copy every pipeline-sourced company from the master account
+    (/users/{MASTER_UID}/companies where source='pipeline') to the new
+    SHARED collection (/sharedPipeline/{id}). Idempotent — safe to re-run.
+    The originals are LEFT IN PLACE so the master account never loses data.
+    """
+    db = _db()
+    src = db.collection("users").document(MASTER_UID).collection("companies")
+    dst = db.collection("sharedPipeline")
+
+    print(f"  Reading from /users/{MASTER_UID}/companies …")
+    docs = list(src.where("source", "==", "pipeline").stream())
+    print(f"  Found {len(docs)} pipeline companies")
+
+    if not docs:
+        print("  Nothing to migrate.")
+        return 0
+
+    confirm = input(f"  Copy {len(docs)} companies to /sharedPipeline/? (Y/n): ").strip().lower()
+    if confirm and confirm != "y":
+        print("  Aborted.")
+        return 0
+
+    copied = 0
+    skipped = 0
+    for d in docs:
+        data = d.to_dict() or {}
+        cid  = d.id
+        # Strip per-user-only fields (interest_score, ai_analysis stay because
+        # they're objectively useful for everyone — but if you'd rather wipe,
+        # remove them here)
+        try:
+            dst.document(cid).set(data, merge=True)
+            copied += 1
+            if copied % 10 == 0:
+                print(f"  … {copied}/{len(docs)}")
+        except Exception as e:
+            print(f"  ❌ {cid}: {e}")
+            skipped += 1
+
+    print(f"\n✅ Migrated {copied} companies to /sharedPipeline/")
+    if skipped:
+        print(f"   ({skipped} failed)")
+    print(f"   Originals at /users/{MASTER_UID}/companies are untouched.")
+    return 0
+
+
 # ─── list-users ──────────────────────────────────────────────────────────────
 
 def cmd_list_users() -> int:
@@ -257,13 +307,16 @@ def main():
     p_wipe.add_argument("email")
 
     sub.add_parser("list-users", help="List all Firebase Auth users")
+    sub.add_parser("migrate-pipeline",
+                   help="Copy master's pipeline companies to /sharedPipeline (one-time)")
 
     args = ap.parse_args()
     _init_firebase()
 
-    if args.cmd == "verify-owner": return cmd_verify_owner(args.email)
-    if args.cmd == "wipe-user":    return cmd_wipe_user(args.email)
-    if args.cmd == "list-users":   return cmd_list_users()
+    if args.cmd == "verify-owner":     return cmd_verify_owner(args.email)
+    if args.cmd == "wipe-user":        return cmd_wipe_user(args.email)
+    if args.cmd == "list-users":       return cmd_list_users()
+    if args.cmd == "migrate-pipeline": return cmd_migrate_pipeline()
     return 1
 
 

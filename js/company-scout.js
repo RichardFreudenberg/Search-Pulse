@@ -174,6 +174,45 @@ function _applyPipelineFilters(companies) {
   return result;
 }
 
+// ─── Shared pipeline data access ──────────────────────────────────────────────
+// Pipeline companies live in /sharedPipeline/{id} (shared across all users).
+// Per-user ratings live in /users/{uid}/pipelineRatings/{id} and are merged
+// onto each company's _pipeline.interest_score on load.
+
+async function loadSharedPipelineCompanies() {
+  if (typeof firebase === 'undefined' || !firebase.firestore) return [];
+  const db  = firebase.firestore();
+  const uid = currentUser?.id;
+
+  // Parallel: shared companies + this user's ratings
+  const [snap, ratingsSnap] = await Promise.all([
+    db.collection('sharedPipeline').get(),
+    uid ? db.collection('users').doc(uid).collection('pipelineRatings').get()
+        : Promise.resolve({ docs: [] }),
+  ]);
+
+  // Build a map of {companyId → score}
+  const ratings = {};
+  ratingsSnap.docs.forEach(d => {
+    const data = d.data() || {};
+    if (typeof data.interest_score === 'number') ratings[d.id] = data.interest_score;
+  });
+
+  // Map shared docs into the shape the UI expects, layering in personal rating
+  return snap.docs.map(d => {
+    const data = d.data() || {};
+    const score = ratings[d.id] || 0;
+    return {
+      ...data,
+      id:        d.id,
+      _pipeline: {
+        ...(data._pipeline || {}),
+        interest_score: score || null,
+      },
+    };
+  });
+}
+
 // ─── Pipeline UI helpers ──────────────────────────────────────────────────────
 
 function _hasActiveFilters() {
@@ -227,12 +266,20 @@ async function _setPipelineInterest(safeId, score) {
   const starsEl = document.getElementById(`interest-stars-${safeId}`);
   if (starsEl) starsEl.innerHTML = _renderStarButtons(safeId, newScore);
 
+  // Per-user ratings live at /users/{uid}/pipelineRatings/{companyId}
   try {
-    await DB.put(STORES.companies, {
-      ...company,
-      _pipeline: { ...(company._pipeline || {}), interest_score: newScore || null },
-      updatedAt:  new Date().toISOString(),
-    });
+    const db  = firebase.firestore();
+    const uid = currentUser.id;
+    const ref = db.collection('users').doc(uid).collection('pipelineRatings').doc(company.id);
+    if (newScore) {
+      await ref.set({
+        interest_score: newScore,
+        updatedAt:      new Date().toISOString(),
+      }, { merge: true });
+    } else {
+      // Score of 0 = clear → delete the document so it doesn't clutter
+      await ref.delete().catch(() => {});
+    }
   } catch (err) {
     showToast('Rating save failed: ' + err.message, 'error');
   }
@@ -258,13 +305,22 @@ async function renderCompanyScout() {
   const settings = await DB.get(STORES.settings, `settings_${currentUser.id}`);
   const hasGoogleKey = !!(settings?.googlePlacesApiKey);
 
-  // Load pipeline companies count for badge
+  // Load pipeline companies from the SHARED collection (every user sees the
+  // same data — pipeline writes here daily). Per-user ratings are merged in
+  // from /users/{uid}/pipelineRatings/{id} so each user keeps their own ★.
   let pipelineCount = 0;
   try {
-    const allCompanies = await DB.getForUser(STORES.companies, currentUser.id);
-    _pipelineCompanies = allCompanies.filter(c => c.source === 'pipeline');
+    _pipelineCompanies = await loadSharedPipelineCompanies();
     pipelineCount = _pipelineCompanies.length;
-  } catch (_) {}
+  } catch (err) {
+    console.warn('[pipeline] Failed to load shared collection:', err);
+    // Fallback: legacy per-user data (only useful for the master while migrating)
+    try {
+      const allCompanies = await DB.getForUser(STORES.companies, currentUser.id);
+      _pipelineCompanies = allCompanies.filter(c => c.source === 'pipeline');
+      pipelineCount = _pipelineCompanies.length;
+    } catch (_) {}
+  }
 
   pageContent.innerHTML = `
     <div class="p-4 lg:p-8 max-w-7xl mx-auto animate-fade-in">
@@ -1210,22 +1266,27 @@ async function pipelinePromoteToCompany(companyId) {
   if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
 
   try {
-    // Update the source field so it's no longer filtered out of Companies tab
-    await DB.put(STORES.companies, {
+    // Copy from the SHARED pipeline collection into THIS user's personal
+    // /users/{uid}/companies/{id}. Each user can promote independently —
+    // the shared row stays for everyone else.
+    await DB.add(STORES.companies, {
       ...company,
-      source:    'scout',          // no longer 'pipeline' → now visible in Companies tab
+      userId:    currentUser.id,
+      source:    'scout',         // appears in their Companies tab
+      promotedFromPipeline: true,
+      promotedAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });
 
-    // Remove from local pipeline list so it disappears from this tab
-    _pipelineCompanies = _pipelineCompanies.filter(c => c.id !== companyId);
-    const card = document.getElementById(`pipeline-card-${companyId}`);
-    if (card) card.remove();
-
-    showToast(`"${company.name}" added to Companies ✓`, 'success');
+    showToast(`"${company.name}" added to your Companies ✓`, 'success');
+    if (btn) {
+      btn.textContent = '✓ In Companies';
+      btn.disabled = true;
+      btn.className = 'btn-sm flex-1 text-xs bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 rounded-lg px-2 py-1';
+    }
   } catch (err) {
     showToast('Failed: ' + err.message, 'error');
-    if (btn) { btn.disabled = false; btn.textContent = '+ Add to Companies'; }
+    if (btn) { btn.disabled = false; btn.textContent = '+ Companies'; }
   }
 }
 
@@ -1887,22 +1948,25 @@ async function generatePipelineAIAnalysis(companyId) {
     outputEl.innerHTML = _renderAIAnalysis(text) +
       `<p class="text-[10px] text-surface-400 mt-1.5 text-right">Generated ${escapeHtml(genDate)}</p>`;
 
-    // Cache in memory + persist to Firestore
+    // Cache in memory + persist to the SHARED pipeline doc so every user
+    // benefits from this AI snapshot (one user generates → all see it).
     if (!company._pipeline) company._pipeline = {};
     company._pipeline.ai_analysis           = text;
     company._pipeline.ai_analysis_generated = new Date().toISOString();
 
     try {
-      await DB.put(STORES.companies, {
-        ...company,
+      const db = firebase.firestore();
+      await db.collection('sharedPipeline').doc(company.id).set({
         _pipeline: {
-          ...(company._pipeline),
           ai_analysis:           text,
           ai_analysis_generated: company._pipeline.ai_analysis_generated,
+          ai_analysis_by:        currentUser.id,
         },
         updatedAt: new Date().toISOString(),
-      });
-    } catch (_) {}
+      }, { merge: true });
+    } catch (e) {
+      console.warn('[generatePipelineAIAnalysis] persist failed:', e);
+    }
 
     if (btn) {
       btn.disabled  = false;
