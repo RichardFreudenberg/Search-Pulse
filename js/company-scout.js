@@ -2086,6 +2086,10 @@ function openPipelineDetailPopup(safeId) {
   if (!company._pipeline?.ai_analysis) {
     setTimeout(() => generatePipelineAIAnalysis(innerSafeId), 400);
   }
+  // Auto-trigger web research enrichment if not yet cached
+  if (!company._pipeline?.enrichment) {
+    setTimeout(() => enrichPipelineCompany(innerSafeId), 800);
+  }
 }
 
 function _bringPopupToFront(popup) {
@@ -2196,8 +2200,12 @@ async function renderPipelineCompanyDetail(rawId) {
   _renderPipelineDetailFull(company);
 
   // Auto-trigger AI snapshot generation if no cached analysis exists
+  const sid = _safePipelineId(company.id);
   if (!company._pipeline?.ai_analysis) {
-    setTimeout(() => generatePipelineAIAnalysis(_safePipelineId(company.id)), 400);
+    setTimeout(() => generatePipelineAIAnalysis(sid), 400);
+  }
+  if (!company._pipeline?.enrichment) {
+    setTimeout(() => enrichPipelineCompany(sid), 800);
   }
 }
 
@@ -2334,6 +2342,35 @@ function _renderPipelineDetailInnerHTML(c) {
         </div>
       </div>
 
+      <!-- Web research enrichment (auto-populated via AI + Tavily) -->
+      <div class="card p-5">
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="text-sm font-semibold">Company Research</h2>
+          <button id="enrich-btn-${safeId}"
+            onclick="enrichPipelineCompany('${safeId}')"
+            class="btn-secondary btn-sm text-xs flex items-center gap-1.5">
+            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"/>
+            </svg>
+            ${c._pipeline?.enrichment ? '↻ Refresh' : 'Research'}
+          </button>
+        </div>
+        <div id="enrich-output-${safeId}">
+          ${c._pipeline?.enrichment
+            ? _renderEnrichment(c._pipeline.enrichment, c._pipeline.enrichment_sources || [])
+            : `<div class="rounded-xl bg-surface-50 dark:bg-surface-800 border border-dashed border-surface-300 dark:border-surface-600 p-5 text-center">
+                 <div class="inline-flex items-center gap-2 text-xs text-surface-500">
+                   <svg class="animate-spin w-3.5 h-3.5 text-brand-500" fill="none" viewBox="0 0 24 24">
+                     <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+                     <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                   </svg>
+                   Researching company on the web — ~15 seconds…
+                 </div>
+               </div>`}
+        </div>
+      </div>
+
       <!-- AI snapshot -->
       <div class="card p-5">
         <div class="flex items-center justify-between mb-3">
@@ -2439,4 +2476,229 @@ function _renderPipelineDetailInnerHTML(c) {
       </div>
     </div>
   `;
+}
+
+// ─── Web Research Enrichment ──────────────────────────────────────────────────
+// Calls the Cloud Function `researchCompany` which uses Tavily + OpenAI
+// to find website, HQ address, key people, products, and recent news.
+// Result is cached on the shared pipeline doc — every user benefits.
+
+async function enrichPipelineCompany(safeId) {
+  const company = _pipelineCompanies.find(c =>
+    c.id === safeId || _safePipelineId(c.id) === safeId
+  );
+  if (!company) return;
+
+  const outputEl = document.getElementById(`enrich-output-${safeId}`);
+  const btn      = document.getElementById(`enrich-btn-${safeId}`);
+  if (!outputEl) return;
+
+  // Spinner
+  outputEl.innerHTML = `
+    <div class="rounded-xl bg-surface-50 dark:bg-surface-800 border border-dashed border-surface-300 dark:border-surface-600 p-5 text-center">
+      <div class="inline-flex items-center gap-2 text-xs text-surface-500">
+        <svg class="animate-spin w-3.5 h-3.5 text-brand-500" fill="none" viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+        </svg>
+        Researching company on the web — ~15 seconds…
+      </div>
+    </div>`;
+  if (btn) {
+    btn.disabled  = true;
+    btn.innerHTML = `<svg class="animate-spin w-3 h-3" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg> Researching…`;
+  }
+
+  try {
+    const fn = firebase.functions().httpsCallable('researchCompany');
+    const { data } = await fn({
+      name:     company.name,
+      city:     company.location || '',
+      hrNumber: company.hrNumber || '',
+      industry: company.industry || classifyIndustryJS(company.name),
+    });
+
+    const enrichment = data?.enrichment || {};
+    const sources    = data?.sources    || [];
+
+    outputEl.innerHTML = _renderEnrichment(enrichment, sources);
+
+    // Cache in memory + persist to shared doc so all users benefit
+    if (!company._pipeline) company._pipeline = {};
+    company._pipeline.enrichment         = enrichment;
+    company._pipeline.enrichment_sources = sources;
+    company._pipeline.enrichment_at      = new Date().toISOString();
+
+    try {
+      await firebase.firestore().collection('sharedPipeline').doc(company.id).set({
+        _pipeline: {
+          enrichment,
+          enrichment_sources: sources,
+          enrichment_at:      company._pipeline.enrichment_at,
+          enrichment_by:      currentUser.id,
+        },
+        updatedAt: new Date().toISOString(),
+      }, { merge: true });
+    } catch (e) {
+      console.warn('[enrichPipelineCompany] persist failed:', e);
+    }
+
+    if (btn) {
+      btn.disabled  = false;
+      btn.innerHTML = `<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg> Refresh`;
+    }
+  } catch (err) {
+    console.error('[enrichPipelineCompany]', err);
+    outputEl.innerHTML = `
+      <div class="rounded-lg bg-red-50 dark:bg-red-900/15 border border-red-200 dark:border-red-800 px-3 py-2 text-xs text-red-600 dark:text-red-400">
+        Research failed: ${escapeHtml(err.message)}
+      </div>`;
+    if (btn) {
+      btn.disabled  = false;
+      btn.innerHTML = `Try Again`;
+    }
+  }
+}
+
+function _renderEnrichment(e, sources = []) {
+  if (!e || typeof e !== 'object') return '';
+
+  const rows = [];
+
+  // Website (special — full row with prominent link)
+  if (e.website) {
+    let domain = e.website;
+    try { domain = new URL(e.website).hostname.replace(/^www\./, ''); } catch (_) {}
+    rows.push(`
+      <div class="flex items-start gap-3 py-2 border-b border-surface-100 dark:border-surface-700/50">
+        <span class="text-base flex-shrink-0">🌐</span>
+        <div class="flex-1 min-w-0">
+          <p class="text-[10px] text-surface-400 uppercase tracking-wide">Website</p>
+          <a href="${escapeHtml(e.website)}" target="_blank" rel="noopener"
+             class="text-sm font-semibold text-brand-600 hover:underline block truncate">
+            ${escapeHtml(domain)}
+          </a>
+        </div>
+      </div>`);
+  }
+
+  // HQ
+  if (e.hq_address) {
+    const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(e.hq_address)}`;
+    rows.push(`
+      <div class="flex items-start gap-3 py-2 border-b border-surface-100 dark:border-surface-700/50">
+        <span class="text-base flex-shrink-0">📍</span>
+        <div class="flex-1 min-w-0">
+          <p class="text-[10px] text-surface-400 uppercase tracking-wide">Headquarters</p>
+          <p class="text-sm font-semibold">${escapeHtml(e.hq_address)}</p>
+          <a href="${mapsUrl}" target="_blank" rel="noopener"
+             class="text-[11px] text-brand-600 hover:underline">View on Google Maps →</a>
+        </div>
+      </div>`);
+  }
+
+  // Founded year
+  if (e.founded_year) {
+    rows.push(`
+      <div class="flex items-start gap-3 py-2 border-b border-surface-100 dark:border-surface-700/50">
+        <span class="text-base flex-shrink-0">📅</span>
+        <div class="flex-1 min-w-0">
+          <p class="text-[10px] text-surface-400 uppercase tracking-wide">Founded</p>
+          <p class="text-sm font-semibold">${escapeHtml(String(e.founded_year))}</p>
+        </div>
+      </div>`);
+  }
+
+  // Ownership
+  if (e.ownership_type && e.ownership_type.toLowerCase() !== 'unknown') {
+    rows.push(`
+      <div class="flex items-start gap-3 py-2 border-b border-surface-100 dark:border-surface-700/50">
+        <span class="text-base flex-shrink-0">💼</span>
+        <div class="flex-1 min-w-0">
+          <p class="text-[10px] text-surface-400 uppercase tracking-wide">Ownership</p>
+          <p class="text-sm font-semibold">${escapeHtml(e.ownership_type)}</p>
+        </div>
+      </div>`);
+  }
+
+  // Products / Services
+  if (e.products_services) {
+    rows.push(`
+      <div class="flex items-start gap-3 py-2 border-b border-surface-100 dark:border-surface-700/50">
+        <span class="text-base flex-shrink-0">📦</span>
+        <div class="flex-1 min-w-0">
+          <p class="text-[10px] text-surface-400 uppercase tracking-wide">Products &amp; Services</p>
+          <p class="text-sm">${escapeHtml(e.products_services)}</p>
+        </div>
+      </div>`);
+  }
+
+  // Customers
+  if (e.main_customers) {
+    rows.push(`
+      <div class="flex items-start gap-3 py-2 border-b border-surface-100 dark:border-surface-700/50">
+        <span class="text-base flex-shrink-0">🎯</span>
+        <div class="flex-1 min-w-0">
+          <p class="text-[10px] text-surface-400 uppercase tracking-wide">Customers &amp; Markets</p>
+          <p class="text-sm">${escapeHtml(e.main_customers)}</p>
+        </div>
+      </div>`);
+  }
+
+  // Key executives
+  if (Array.isArray(e.key_executives) && e.key_executives.length > 0) {
+    const peopleHtml = e.key_executives.slice(0, 4).map(p => {
+      const name = p?.name || '';
+      const role = p?.role || '';
+      if (!name) return '';
+      return `<p class="text-sm"><strong>${escapeHtml(name)}</strong>${role ? ` <span class="text-surface-400">— ${escapeHtml(role)}</span>` : ''}</p>`;
+    }).filter(Boolean).join('');
+    if (peopleHtml) {
+      rows.push(`
+        <div class="flex items-start gap-3 py-2 border-b border-surface-100 dark:border-surface-700/50">
+          <span class="text-base flex-shrink-0">👥</span>
+          <div class="flex-1 min-w-0">
+            <p class="text-[10px] text-surface-400 uppercase tracking-wide">Key People</p>
+            <div class="space-y-0.5">${peopleHtml}</div>
+          </div>
+        </div>`);
+    }
+  }
+
+  // Recent news
+  if (Array.isArray(e.recent_news) && e.recent_news.length > 0) {
+    const newsHtml = e.recent_news.slice(0, 3)
+      .map(n => `<li class="text-xs text-surface-700 dark:text-surface-300">${escapeHtml(String(n))}</li>`)
+      .join('');
+    rows.push(`
+      <div class="flex items-start gap-3 py-2 border-b border-surface-100 dark:border-surface-700/50">
+        <span class="text-base flex-shrink-0">📰</span>
+        <div class="flex-1 min-w-0">
+          <p class="text-[10px] text-surface-400 uppercase tracking-wide">Recent News</p>
+          <ul class="space-y-0.5 list-disc list-inside">${newsHtml}</ul>
+        </div>
+      </div>`);
+  }
+
+  // Sources footer
+  let sourcesHtml = '';
+  if (sources && sources.length > 0) {
+    sourcesHtml = `
+      <div class="pt-3 mt-2">
+        <p class="text-[10px] text-surface-400 uppercase tracking-wide mb-1.5">Sources</p>
+        <div class="space-y-0.5">
+          ${sources.slice(0, 5).map(s => `
+            <a href="${escapeHtml(s.url || '#')}" target="_blank" rel="noopener"
+               class="block text-[11px] text-brand-600 hover:underline truncate">
+              ${escapeHtml(s.title || s.url || 'source')}
+            </a>`).join('')}
+        </div>
+      </div>`;
+  }
+
+  if (rows.length === 0) {
+    return `<p class="text-xs text-surface-400 italic py-2">No public information found for this company.</p>${sourcesHtml}`;
+  }
+
+  return `<div class="space-y-0">${rows.join('')}</div>${sourcesHtml}`;
 }
