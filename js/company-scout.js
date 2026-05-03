@@ -808,6 +808,16 @@ function renderPipelineSection(companies) {
   `;
 }
 
+// Format EUR values: ≥1M → "€1.2M", ≥1k → "€123k", else "€999"
+function _fmtEur(val) {
+  if (val == null) return null;
+  const abs = Math.abs(val);
+  const sign = val < 0 ? '−' : '';
+  if (abs >= 1_000_000) return `${sign}€${(abs / 1_000_000).toFixed(1)}M`;
+  if (abs >= 1_000)     return `${sign}€${Math.round(abs / 1_000)}k`;
+  return `${sign}€${Math.round(abs)}`;
+}
+
 function renderPipelineCard(c) {
   const city   = c.location || '';
   const desc   = c.description || '';
@@ -817,6 +827,55 @@ function renderPipelineCard(c) {
   const srcLabel = src === 'bundesanzeiger' ? 'BA'
                  : src === 'unternehmensregister' ? 'UR'
                  : 'Pipeline';
+
+  // Financial data — stored under _pipeline.financials in Firestore
+  const fin = c._pipeline?.financials || null;
+
+  let financialsHtml = '';
+  if (fin) {
+    const year        = fin.fiscal_year ? `FY${fin.fiscal_year}` : '';
+    const quality     = fin.data_quality || '';
+    const qualityColor = quality === 'pdf_parsed'    ? 'text-green-600 dark:text-green-400'
+                       : quality === 'llm_extracted' ? 'text-amber-600 dark:text-amber-400'
+                       :                               'text-surface-400';
+    const qualityLabel = quality === 'pdf_parsed'    ? 'PDF'
+                       : quality === 'llm_extracted' ? 'LLM'
+                       : quality === 'html_parsed'   ? 'HTML'
+                       : quality;
+
+    const rows = [
+      { label: 'Revenue',    val: _fmtEur(fin.revenue),    bold: true  },
+      { label: 'Gross Profit', val: _fmtEur(fin.gross_profit) },
+      { label: 'EBITDA',     val: _fmtEur(fin.ebitda),
+        extra: fin.ebitda_margin_pct != null ? `(${fin.ebitda_margin_pct.toFixed(1)}%)` : '' },
+      { label: 'EBIT',       val: _fmtEur(fin.ebit) },
+      { label: 'Net Income', val: _fmtEur(fin.net_income),
+        extra: fin.net_margin_pct != null ? `(${fin.net_margin_pct.toFixed(1)}%)` : '',
+        highlight: fin.net_income != null && fin.net_income < 0 },
+      { label: 'Employees',  val: fin.employees != null ? fin.employees.toLocaleString() : null },
+    ].filter(r => r.val != null);
+
+    if (rows.length) {
+      financialsHtml = `
+        <div class="border-t border-surface-100 dark:border-surface-700 pt-2.5 mt-0.5">
+          <div class="flex items-center justify-between mb-1.5">
+            <span class="text-xs font-semibold text-surface-600 dark:text-surface-300">
+              P&amp;L ${year}
+            </span>
+            ${qualityLabel ? `<span class="text-[10px] ${qualityColor}">${qualityLabel}</span>` : ''}
+          </div>
+          <div class="grid grid-cols-2 gap-x-3 gap-y-0.5">
+            ${rows.map(r => `
+              <span class="text-[11px] text-surface-500">${r.label}</span>
+              <span class="text-[11px] text-right font-medium
+                ${r.bold ? 'text-surface-800 dark:text-surface-200' : ''}
+                ${r.highlight ? 'text-red-600 dark:text-red-400' : 'text-surface-700 dark:text-surface-300'}">
+                ${r.val}${r.extra ? `<span class="ml-1 font-normal text-surface-400">${r.extra}</span>` : ''}
+              </span>`).join('')}
+          </div>
+        </div>`;
+    }
+  }
 
   return `
     <div class="card p-4 flex flex-col gap-3" id="pipeline-card-${safeId}">
@@ -831,6 +890,7 @@ function renderPipelineCard(c) {
       </div>
       ${desc  ? `<p class="text-xs text-surface-500 line-clamp-2">${escapeHtml(desc)}</p>` : ''}
       ${hrNum ? `<p class="text-xs text-surface-400">HR: ${escapeHtml(hrNum)}</p>` : ''}
+      ${financialsHtml}
       <div class="flex gap-2 mt-auto pt-1">
         <button onclick="pipelinePromoteToCompany('${safeId}')" id="pipeline-promote-${safeId}"
           class="btn-secondary btn-sm flex-1 text-xs">
