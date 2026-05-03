@@ -65,9 +65,11 @@ from pipeline.simple_store import (
     get_all_companies,
     upsert_financials,
     get_financials,
+    get_all_financials,
 )
 from pipeline.connectors.bundesanzeiger import BundesanzeigerConnector
 from pipeline.connectors.unternehmensregister import UnternehmensregisterConnector
+from pipeline.connectors.industry_classifier import classify_industry
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -127,7 +129,10 @@ def _record_to_company(record) -> dict:
         "city":            (addr.get("city", "") or rd.get("city", "") or "").strip(),
         "postal_code":     (addr.get("postal_code", "") or rd.get("postal_code", "") or "").strip(),
         "status":          (rd.get("status", "unknown") or "unknown").strip(),
-        "industry":        "",
+        "industry":        classify_industry(
+                               (rd.get("company_name", "") or "").strip(),
+                               (rd.get("business_purpose", "") or rd.get("purpose", "") or "").strip(),
+                           ),
         "source":          record.source,
         "raw":             rd,
     }
@@ -761,6 +766,11 @@ environment variables (set once, then just run --sync or --sync-firestore):
         help="Print the N most recently added companies and exit",
     )
     p.add_argument(
+        "--sync-financials",
+        action="store_true",
+        help="Push all financials already in SQLite to Firestore (no new fetch)",
+    )
+    p.add_argument(
         "--financials",
         action="store_true",
         help=(
@@ -794,6 +804,18 @@ def main() -> None:
     # ── List only ─────────────────────────────────────────────────────────────
     if args.list:
         _show_list(args.list)
+        return
+
+    # ── Push existing financials to Firestore ─────────────────────────────────
+    if args.sync_financials:
+        all_fin = get_all_financials()
+        if not all_fin:
+            print("\n  No financials in DB — run --financials first.\n")
+            return
+        fin_map = {row["company_id"]: row for row in all_fin}
+        print(f"\n  Syncing {len(fin_map)} company financials to Firestore…")
+        written = _sync_financials_to_firestore(fin_map)
+        print(f"  Done — {written} documents updated.\n")
         return
 
     # ── Financial enrichment ─────────────────────────────────────────────────

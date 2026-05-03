@@ -16,23 +16,41 @@ $env:FIREBASE_PROJECT_ID        = "search-pulse"
 $env:FIREBASE_CREDENTIALS_PATH  = "$ProjectRoot\pipeline\config\serviceAccountKey.json"
 # Set this once — your Firebase Auth UID (find it in Firebase Console → Authentication)
 if (-not $env:FIREBASE_USER_ID) {
-    $env:FIREBASE_USER_ID = "YOUR_FIREBASE_USER_ID_HERE"
+    $env:FIREBASE_USER_ID = "TisrYqOVZFfNV8bFjYgVTlO4EAd2"
 }
 
 # ── Searches to run each day ──────────────────────────────────────────────────
 # Edit these to match your target sectors / geographies
 $Queries = @(
-    "GmbH München",
-    "GmbH Hamburg",
-    "GmbH Berlin",
-    "GmbH Frankfurt",
-    "Maschinenbau GmbH",
-    "Software GmbH",
-    "Technologie GmbH",
-    "Handel GmbH"
+    # Manufacturing / Industrial
+    "Maschinenbau GmbH Bayern",
+    "Maschinenbau GmbH Nordrhein-Westfalen",
+    "Anlagenbau GmbH",
+    "Metallbau GmbH",
+    # Technology
+    "Software GmbH München",
+    "Software GmbH Hamburg",
+    "Technologie GmbH Berlin",
+    "IT-Dienstleistungen GmbH",
+    # Construction / Trades
+    "Bau GmbH Stuttgart",
+    "Elektrotechnik GmbH",
+    "Sanitär GmbH Bayern",
+    "Gebäudetechnik GmbH",
+    # Distribution / Logistics
+    "Logistik GmbH Frankfurt",
+    "Großhandel GmbH Köln",
+    "Transport GmbH",
+    # Services
+    "Dienstleistung GmbH Hamburg",
+    "Reinigung GmbH",
+    "Steuerberatung GmbH",
+    # Healthcare / Food
+    "Pflege GmbH Bayern",
+    "Gastronomie GmbH"
 )
 
-$PagesPerQuery = 3   # ~30 companies per query
+$PagesPerQuery = 4   # ~40-50 net-new companies per day across all queries
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 function Log($msg) {

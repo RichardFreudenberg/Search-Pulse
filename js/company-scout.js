@@ -63,9 +63,193 @@ let _scoutLat           = null;
 let _scoutLng           = null;
 let _scoutLocName       = '';
 let _scoutResults       = [];
-let _scoutSaved         = new Set(); // indices already saved to Companies
-let _pipelineCompanies  = [];        // companies fetched by the Bundesanzeiger pipeline
-let _scoutMode          = 'map';     // 'map' | 'pipeline'
+let _scoutSaved         = new Set();
+let _pipelineCompanies  = [];
+let _scoutMode          = 'map';
+
+// Pipeline filter + sort state
+let _pipelineFilters = {
+  query:        '',
+  industry:     '',
+  city:         '',
+  revenueRange: '',    // ''|'<500k'|'500k-2m'|'2m-10m'|'>10m'
+  sizeRange:    '',    // ''|'<10'|'10-50'|'50-250'|'>250'
+  hasFinancials: false,
+};
+let _pipelineSortBy = 'recent'; // 'recent'|'interest'|'revenue'|'ebitda_pct'
+
+// ─── JS Industry Classifier (fallback for companies without industry set) ─────
+const _JS_INDUSTRY_RULES = [
+  ['Technology',            ['software','it-dienst','informatik','edv','digital','cyber','cloud','automatisierung','technologie']],
+  ['Industrial',            ['maschinenbau','maschinen','metallbau','anlagenbau','apparatebau','werkzeugbau','fertigung','industrietechnik']],
+  ['Construction / Trades', ['bauunternehmen','bautechnik','tiefbau','hochbau','sanitär','elektrotechnik','heizungsbau','dachdeckerei','zimmerei','sanierung']],
+  ['Distribution',          ['logistik','spedition','großhandel','fulfillment','distribution','kurierdienst','lagerlogistik']],
+  ['Healthcare Services',   ['medizintechnik','arztpraxis','pflegedienst','physiotherapie','krankenhaus','pflegeheim','apotheke','sanitätshaus']],
+  ['Food & Beverage',       ['bäckerei','metzgerei','gastronomie','catering','lebensmittel','getränke','brauerei','konditorei']],
+  ['Financial Services',    ['steuerberatung','wirtschaftsprüfung','buchführung','versicherungsmakler','kapitalverwaltung','vermögensverwaltung']],
+  ['Real Estate',           ['immobilien','hausverwaltung','grundstücksverwaltung','wohnbaugesellschaft']],
+  ['Business Services',     ['unternehmensberatung','personalberatung','zeitarbeit','werbeagentur','reinigungsunternehmen','sicherheitsdienst']],
+  ['Education',             ['privatschule','fahrschule','sprachschule','bildungszentrum','weiterbildung','kindergarten']],
+  ['Consumer',              ['einzelhandel','modeboutique','textilhandel','möbelhaus','kosmetikstudio','friseursalon']],
+  ['Energy & Environment',  ['energietechnik','solaranlagen','entsorgungsbetrieb','recycling','photovoltaik']],
+  ['Media & Printing',      ['druckhaus','verlagshaus','filmproduktion','grafikdesign','medienagentur']],
+];
+
+function classifyIndustryJS(name) {
+  if (!name) return 'Other';
+  const text = (' ' + name + ' ').toLowerCase();
+  for (const [industry, kws] of _JS_INDUSTRY_RULES) {
+    if (kws.some(kw => text.includes(kw))) return industry;
+  }
+  if (/\bhandel\b/.test(text))    return 'Distribution';
+  if (/\bbau\b/.test(text))       return 'Construction / Trades';
+  if (/\bmedizin\b/.test(text))   return 'Healthcare Services';
+  if (/\bpflege\b/.test(text))    return 'Healthcare Services';
+  if (/\benergie\b/.test(text))   return 'Energy & Environment';
+  if (/\bimmobilien\b/.test(text))return 'Real Estate';
+  return 'Other';
+}
+
+// ─── Filter helpers ───────────────────────────────────────────────────────────
+function _matchRevenueBucket(c, bucket) {
+  const rev = c._pipeline?.financials?.revenue;
+  if (rev == null) return bucket === '';
+  if (bucket === '<500k')  return rev < 500_000;
+  if (bucket === '500k-2m')return rev >= 500_000 && rev < 2_000_000;
+  if (bucket === '2m-10m') return rev >= 2_000_000 && rev < 10_000_000;
+  if (bucket === '>10m')   return rev >= 10_000_000;
+  return true;
+}
+
+function _matchSizeBucket(c, bucket) {
+  const emp = c._pipeline?.financials?.employees;
+  if (emp == null) return bucket === '';
+  if (bucket === '<10')   return emp < 10;
+  if (bucket === '10-50') return emp >= 10 && emp < 50;
+  if (bucket === '50-250')return emp >= 50 && emp < 250;
+  if (bucket === '>250')  return emp >= 250;
+  return true;
+}
+
+function _applyPipelineFilters(companies) {
+  let result = [...companies];
+  const f = _pipelineFilters;
+
+  if (f.query) {
+    const q = f.query.toLowerCase();
+    result = result.filter(c =>
+      (c.name || '').toLowerCase().includes(q) ||
+      (c.location || '').toLowerCase().includes(q) ||
+      (c.hrNumber || '').toLowerCase().includes(q) ||
+      (c.description || '').toLowerCase().includes(q)
+    );
+  }
+  if (f.industry) {
+    result = result.filter(c => {
+      const ind = c.industry || classifyIndustryJS(c.name);
+      return ind === f.industry;
+    });
+  }
+  if (f.city) {
+    const city = f.city.toLowerCase();
+    result = result.filter(c => (c.location || '').toLowerCase().includes(city));
+  }
+  if (f.revenueRange) result = result.filter(c => _matchRevenueBucket(c, f.revenueRange));
+  if (f.sizeRange)    result = result.filter(c => _matchSizeBucket(c, f.sizeRange));
+  if (f.hasFinancials) result = result.filter(c => !!c._pipeline?.financials);
+
+  // Sort
+  if (_pipelineSortBy === 'interest') {
+    result.sort((a, b) => (b._pipeline?.interest_score || 0) - (a._pipeline?.interest_score || 0));
+  } else if (_pipelineSortBy === 'revenue') {
+    result.sort((a, b) => (b._pipeline?.financials?.revenue || 0) - (a._pipeline?.financials?.revenue || 0));
+  } else if (_pipelineSortBy === 'ebitda_pct') {
+    result.sort((a, b) =>
+      (b._pipeline?.financials?.ebitda_margin_pct ?? -999) -
+      (a._pipeline?.financials?.ebitda_margin_pct ?? -999)
+    );
+  }
+  // 'recent' = Firestore insertion order — no re-sort
+
+  return result;
+}
+
+// ─── Pipeline UI helpers ──────────────────────────────────────────────────────
+
+function _hasActiveFilters() {
+  const f = _pipelineFilters;
+  return !!(f.query || f.industry || f.city || f.revenueRange || f.sizeRange || f.hasFinancials);
+}
+
+function _clearPipelineFilters() {
+  _pipelineFilters = { query: '', industry: '', city: '', revenueRange: '', sizeRange: '', hasFinancials: false };
+  renderPipelineSection(_pipelineCompanies);
+}
+
+function _industryBadgeClass(industry) {
+  const map = {
+    'Technology':            'bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300',
+    'Industrial':            'bg-slate-100 dark:bg-slate-900/30 text-slate-700 dark:text-slate-300',
+    'Construction / Trades': 'bg-yellow-50 dark:bg-yellow-900/20 text-yellow-700 dark:text-yellow-300',
+    'Distribution':          'bg-purple-50 dark:bg-purple-900/20 text-purple-700 dark:text-purple-300',
+    'Healthcare Services':   'bg-pink-50 dark:bg-pink-900/20 text-pink-700 dark:text-pink-300',
+    'Food & Beverage':       'bg-orange-50 dark:bg-orange-900/20 text-orange-700 dark:text-orange-300',
+    'Financial Services':    'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300',
+    'Real Estate':           'bg-teal-50 dark:bg-teal-900/20 text-teal-700 dark:text-teal-300',
+    'Business Services':     'bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-300',
+    'Education':             'bg-cyan-50 dark:bg-cyan-900/20 text-cyan-700 dark:text-cyan-300',
+    'Consumer':              'bg-rose-50 dark:bg-rose-900/20 text-rose-700 dark:text-rose-300',
+    'Energy & Environment':  'bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-300',
+    'Media & Printing':      'bg-violet-50 dark:bg-violet-900/20 text-violet-700 dark:text-violet-300',
+  };
+  return map[industry] || 'bg-surface-100 dark:bg-surface-800 text-surface-600 dark:text-surface-400';
+}
+
+function _renderStarButtons(safeId, currentScore) {
+  return [1, 2, 3, 4, 5].map(i =>
+    `<button onclick="event.stopPropagation();_setPipelineInterest('${safeId}',${i})"
+      class="text-base leading-none transition-colors ${i <= (currentScore || 0) ? 'text-yellow-400' : 'text-surface-300 dark:text-surface-600 hover:text-yellow-300'}"
+      title="Rate ${i} star${i > 1 ? 's' : ''}">★</button>`
+  ).join('');
+}
+
+async function _setPipelineInterest(safeId, score) {
+  const company = _pipelineCompanies.find(c =>
+    c.id === safeId || (c.id || '').replace(/[^a-zA-Z0-9_-]/g, '_') === safeId
+  );
+  if (!company) return;
+
+  const prev     = company._pipeline?.interest_score || 0;
+  const newScore = (prev === score) ? 0 : score;  // clicking same star clears it
+  if (!company._pipeline) company._pipeline = {};
+  company._pipeline.interest_score = newScore || null;
+
+  const starsEl = document.getElementById(`interest-stars-${safeId}`);
+  if (starsEl) starsEl.innerHTML = _renderStarButtons(safeId, newScore);
+
+  try {
+    await DB.put(STORES.companies, {
+      ...company,
+      _pipeline: { ...(company._pipeline || {}), interest_score: newScore || null },
+      updatedAt:  new Date().toISOString(),
+    });
+  } catch (err) {
+    showToast('Rating save failed: ' + err.message, 'error');
+  }
+}
+
+function setPipelineSort(sortBy) {
+  _pipelineSortBy = sortBy;
+  ['recent', 'interest', 'revenue', 'ebitda_pct'].forEach(key => {
+    const btn = document.getElementById(`sort-btn-${key}`);
+    if (!btn) return;
+    btn.className = `px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+      key === sortBy
+        ? 'bg-white dark:bg-surface-700 shadow-sm text-surface-900 dark:text-surface-100'
+        : 'text-surface-500 dark:text-surface-400 hover:text-surface-900 dark:hover:text-surface-100'}`;
+  });
+  filterPipelineCompanies();
+}
 
 // ─── Main Render ─────────────────────────────────────────────────────────────
 
@@ -766,43 +950,125 @@ function renderPipelineSection(companies) {
     return;
   }
 
-  // Group stats
-  const bySource = {};
-  companies.forEach(c => {
-    const src = (c._pipeline?.data_source || c.source || 'pipeline');
-    bySource[src] = (bySource[src] || 0) + 1;
-  });
-  const sourceChips = Object.entries(bySource).map(([src, n]) =>
-    `<span class="px-2 py-0.5 rounded-full text-xs bg-surface-100 dark:bg-surface-800 text-surface-500">${src}: ${n}</span>`
-  ).join('');
+  // Collect unique industries for the filter dropdown
+  const industrySet = new Set();
+  companies.forEach(c => industrySet.add(c.industry || classifyIndustryJS(c.name)));
+  const industries = [...industrySet].filter(Boolean).sort();
+
+  const withFin  = companies.filter(c => c._pipeline?.financials).length;
+  const filtered = _applyPipelineFilters(companies);
+
+  const sortLabels = [
+    ['recent',    'Recently Added'],
+    ['interest',  '⭐ Interest'],
+    ['revenue',   'Revenue ↓'],
+    ['ebitda_pct','EBITDA %'],
+  ];
 
   el.innerHTML = `
     <div>
-      <!-- Header row -->
-      <div class="flex flex-col sm:flex-row sm:items-center gap-3 mb-4">
-        <div class="flex-1">
-          <div class="flex items-center gap-2 flex-wrap">
-            <span class="text-sm font-semibold">${companies.length.toLocaleString()} companies fetched from registry</span>
-            <div class="flex gap-1.5 flex-wrap">${sourceChips}</div>
+      <!-- Stats bar -->
+      <div class="flex flex-wrap items-center gap-x-4 gap-y-1 mb-4 text-sm">
+        <span class="text-surface-700 dark:text-surface-300 font-semibold">${companies.length.toLocaleString()} companies</span>
+        ${withFin > 0 ? `<span class="text-xs text-green-700 dark:text-green-400"><strong>${withFin}</strong> with P&amp;L data</span>` : ''}
+        <span class="text-xs text-surface-400">· Fetched daily from German registries</span>
+      </div>
+
+      <!-- Filter card -->
+      <div class="card p-4 mb-4">
+        <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+          <!-- Search -->
+          <div class="col-span-2">
+            <label class="block text-[10px] font-semibold text-surface-400 uppercase tracking-wide mb-1">Search</label>
+            <input type="text" id="pipeline-filter-query"
+              placeholder="Name, city, HR number…"
+              value="${escapeHtml(_pipelineFilters.query)}"
+              oninput="_pipelineFilters.query=this.value; filterPipelineCompanies()"
+              class="input-field text-sm w-full" />
           </div>
-          <p class="text-xs text-surface-500 mt-0.5">Click <strong>+ Pipeline</strong> to move any company into your active deal flow</p>
+          <!-- Industry -->
+          <div>
+            <label class="block text-[10px] font-semibold text-surface-400 uppercase tracking-wide mb-1">Industry</label>
+            <select id="pipeline-filter-industry"
+              onchange="_pipelineFilters.industry=this.value; filterPipelineCompanies()"
+              class="input-field text-sm w-full">
+              <option value="">All industries</option>
+              ${industries.map(ind => `<option value="${escapeHtml(ind)}" ${_pipelineFilters.industry === ind ? 'selected' : ''}>${escapeHtml(ind)}</option>`).join('')}
+            </select>
+          </div>
+          <!-- City -->
+          <div>
+            <label class="block text-[10px] font-semibold text-surface-400 uppercase tracking-wide mb-1">City</label>
+            <input type="text" id="pipeline-filter-city"
+              placeholder="München, Berlin…"
+              value="${escapeHtml(_pipelineFilters.city)}"
+              oninput="_pipelineFilters.city=this.value; filterPipelineCompanies()"
+              class="input-field text-sm w-full" />
+          </div>
+          <!-- Revenue -->
+          <div>
+            <label class="block text-[10px] font-semibold text-surface-400 uppercase tracking-wide mb-1">Revenue</label>
+            <select id="pipeline-filter-revenue"
+              onchange="_pipelineFilters.revenueRange=this.value; filterPipelineCompanies()"
+              class="input-field text-sm w-full">
+              <option value="">Any size</option>
+              <option value="<500k"   ${_pipelineFilters.revenueRange === '<500k'   ? 'selected' : ''}>&lt; €500k</option>
+              <option value="500k-2m" ${_pipelineFilters.revenueRange === '500k-2m' ? 'selected' : ''}>€500k – €2M</option>
+              <option value="2m-10m"  ${_pipelineFilters.revenueRange === '2m-10m'  ? 'selected' : ''}>€2M – €10M</option>
+              <option value=">10m"    ${_pipelineFilters.revenueRange === '>10m'    ? 'selected' : ''}>&gt; €10M</option>
+            </select>
+          </div>
+          <!-- Employees -->
+          <div>
+            <label class="block text-[10px] font-semibold text-surface-400 uppercase tracking-wide mb-1">Employees</label>
+            <select id="pipeline-filter-size"
+              onchange="_pipelineFilters.sizeRange=this.value; filterPipelineCompanies()"
+              class="input-field text-sm w-full">
+              <option value="">Any size</option>
+              <option value="<10"    ${_pipelineFilters.sizeRange === '<10'    ? 'selected' : ''}>&lt; 10</option>
+              <option value="10-50"  ${_pipelineFilters.sizeRange === '10-50'  ? 'selected' : ''}>10 – 50</option>
+              <option value="50-250" ${_pipelineFilters.sizeRange === '50-250' ? 'selected' : ''}>50 – 250</option>
+              <option value=">250"   ${_pipelineFilters.sizeRange === '>250'   ? 'selected' : ''}>&gt; 250</option>
+            </select>
+          </div>
         </div>
-        <div class="flex items-center gap-2 flex-shrink-0">
-          <input type="text" id="pipeline-search-input"
-            placeholder="Filter by name, city, legal form…"
-            oninput="filterPipelineCompanies(this.value)"
-            class="input-field text-sm w-56" />
-          <select id="pipeline-source-filter" onchange="filterPipelineCompanies(document.getElementById('pipeline-search-input').value)"
-            class="input-field text-sm w-36">
-            <option value="">All sources</option>
-            ${Object.keys(bySource).map(s => `<option value="${s}">${s}</option>`).join('')}
-          </select>
+        <!-- Financials toggle + clear -->
+        <div class="flex items-center justify-between mt-3 pt-3 border-t border-surface-100 dark:border-surface-700/60">
+          <label class="flex items-center gap-2 cursor-pointer">
+            <input type="checkbox" id="pipeline-filter-fin"
+              ${_pipelineFilters.hasFinancials ? 'checked' : ''}
+              onchange="_pipelineFilters.hasFinancials=this.checked; filterPipelineCompanies()"
+              class="accent-brand-600 w-3.5 h-3.5 rounded" />
+            <span class="text-xs text-surface-600 dark:text-surface-400">Only show companies with financial data</span>
+          </label>
+          ${_hasActiveFilters() ? `<button onclick="_clearPipelineFilters()" class="text-xs text-brand-500 hover:text-brand-700 dark:hover:text-brand-300 hover:underline">Clear all filters</button>` : ''}
         </div>
       </div>
 
-      <!-- Cards -->
+      <!-- Sort bar + result count -->
+      <div class="flex items-center justify-between mb-4">
+        <div class="flex gap-1 p-1 bg-surface-100 dark:bg-surface-800 rounded-xl w-fit">
+          ${sortLabels.map(([key, label]) => `
+            <button id="sort-btn-${key}" onclick="setPipelineSort('${key}')"
+              class="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors
+                     ${_pipelineSortBy === key
+                       ? 'bg-white dark:bg-surface-700 shadow-sm text-surface-900 dark:text-surface-100'
+                       : 'text-surface-500 dark:text-surface-400 hover:text-surface-900 dark:hover:text-surface-100'}">
+              ${label}
+            </button>`).join('')}
+        </div>
+        <p id="pipeline-results-header" class="text-xs text-surface-500">
+          ${filtered.length < companies.length
+            ? `Showing <strong>${filtered.length}</strong> of ${companies.length}`
+            : `<strong>${filtered.length}</strong> companies`}
+        </p>
+      </div>
+
+      <!-- Cards grid -->
       <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4" id="pipeline-cards-grid">
-        ${companies.map(c => renderPipelineCard(c)).join('')}
+        ${filtered.length
+          ? filtered.map(c => renderPipelineCard(c)).join('')
+          : `<div class="col-span-3 card p-8 text-center text-surface-400 text-sm">No companies match your filters</div>`}
       </div>
     </div>
   `;
@@ -819,69 +1085,76 @@ function _fmtEur(val) {
 }
 
 function renderPipelineCard(c) {
-  const city   = c.location || '';
-  const desc   = c.description || '';
-  const hrNum  = c.hrNumber || '';
-  const safeId = (c.id || '').replace(/[^a-zA-Z0-9_-]/g, '_');
-  const src    = c._pipeline?.data_source || 'pipeline';
-  const srcLabel = src === 'bundesanzeiger' ? 'BA'
-                 : src === 'unternehmensregister' ? 'UR'
-                 : 'Pipeline';
+  const city          = c.location || '';
+  const desc          = c.description || '';
+  const hrNum         = c.hrNumber || '';
+  const safeId        = (c.id || '').replace(/[^a-zA-Z0-9_-]/g, '_');
+  const src           = c._pipeline?.data_source || 'pipeline';
+  const srcLabel      = src === 'bundesanzeiger' ? 'BA'
+                      : src === 'unternehmensregister' ? 'UR'
+                      : 'Pipeline';
+  const industry      = c.industry || classifyIndustryJS(c.name) || 'Other';
+  const interestScore = c._pipeline?.interest_score || 0;
 
   // Financial data — stored under _pipeline.financials in Firestore
   const fin = c._pipeline?.financials || null;
 
   let financialsHtml = '';
   if (fin) {
-    const year        = fin.fiscal_year ? `FY${fin.fiscal_year}` : '';
-    const quality     = fin.data_quality || '';
+    const year         = fin.fiscal_year ? `FY${fin.fiscal_year}` : '';
+    const quality      = fin.data_quality || '';
     const qualityColor = quality === 'pdf_parsed'    ? 'text-green-600 dark:text-green-400'
                        : quality === 'llm_extracted' ? 'text-amber-600 dark:text-amber-400'
                        :                               'text-surface-400';
-    const qualityLabel = quality === 'pdf_parsed'    ? 'PDF'
+    const qualityLabel = quality === 'pdf_parsed'  ? 'PDF'
                        : quality === 'llm_extracted' ? 'LLM'
-                       : quality === 'html_parsed'   ? 'HTML'
+                       : quality === 'html_parsed'  ? 'HTML'
                        : quality;
 
+    // Key metrics row (revenue + EBITDA margin)
+    const revStr    = _fmtEur(fin.revenue);
+    const ebitdaStr = _fmtEur(fin.ebitda);
+    const pctStr    = fin.ebitda_margin_pct != null ? `${fin.ebitda_margin_pct.toFixed(1)}%` : null;
+
+    const metricsHtml = (revStr || ebitdaStr) ? `
+      <div class="flex items-center gap-3 mb-2">
+        ${revStr    ? `<div><p class="text-[10px] text-surface-400">Revenue</p><p class="text-sm font-bold text-surface-800 dark:text-surface-200">${revStr}</p></div>` : ''}
+        ${ebitdaStr ? `<div><p class="text-[10px] text-surface-400">EBITDA</p><p class="text-sm font-bold text-brand-600 dark:text-brand-400">${ebitdaStr}${pctStr ? `<span class="text-xs font-normal text-surface-400 ml-1">${pctStr}</span>` : ''}</p></div>` : ''}
+        ${fin.employees != null ? `<div class="ml-auto"><p class="text-[10px] text-surface-400">Employees</p><p class="text-sm font-semibold text-surface-700 dark:text-surface-300">${fin.employees.toLocaleString()}</p></div>` : ''}
+      </div>` : '';
+
     const rows = [
-      { label: 'Revenue',    val: _fmtEur(fin.revenue),    bold: true  },
       { label: 'Gross Profit', val: _fmtEur(fin.gross_profit) },
-      { label: 'EBITDA',     val: _fmtEur(fin.ebitda),
-        extra: fin.ebitda_margin_pct != null ? `(${fin.ebitda_margin_pct.toFixed(1)}%)` : '' },
-      { label: 'EBIT',       val: _fmtEur(fin.ebit) },
-      { label: 'Net Income', val: _fmtEur(fin.net_income),
+      { label: 'EBIT',         val: _fmtEur(fin.ebit) },
+      { label: 'Net Income',   val: _fmtEur(fin.net_income),
         extra: fin.net_margin_pct != null ? `(${fin.net_margin_pct.toFixed(1)}%)` : '',
         highlight: fin.net_income != null && fin.net_income < 0 },
-      { label: 'Employees',  val: fin.employees != null ? fin.employees.toLocaleString() : null },
     ].filter(r => r.val != null);
 
-    if (rows.length) {
-      financialsHtml = `
-        <div class="border-t border-surface-100 dark:border-surface-700 pt-2.5 mt-0.5">
-          <div class="flex items-center justify-between mb-1.5">
-            <span class="text-xs font-semibold text-surface-600 dark:text-surface-300">
-              P&amp;L ${year}
-            </span>
-            ${qualityLabel ? `<span class="text-[10px] ${qualityColor}">${qualityLabel}</span>` : ''}
-          </div>
-          <div class="grid grid-cols-2 gap-x-3 gap-y-0.5">
-            ${rows.map(r => `
-              <span class="text-[11px] text-surface-500">${r.label}</span>
-              <span class="text-[11px] text-right font-medium
-                ${r.bold ? 'text-surface-800 dark:text-surface-200' : ''}
-                ${r.highlight ? 'text-red-600 dark:text-red-400' : 'text-surface-700 dark:text-surface-300'}">
-                ${r.val}${r.extra ? `<span class="ml-1 font-normal text-surface-400">${r.extra}</span>` : ''}
-              </span>`).join('')}
-          </div>
-        </div>`;
-    }
+    financialsHtml = `
+      <div class="border-t border-surface-100 dark:border-surface-700 pt-2.5 mt-0.5">
+        <div class="flex items-center justify-between mb-2">
+          <span class="text-xs font-semibold text-surface-600 dark:text-surface-300">P&amp;L ${year}</span>
+          ${qualityLabel ? `<span class="text-[10px] ${qualityColor}">${qualityLabel}</span>` : ''}
+        </div>
+        ${metricsHtml}
+        ${rows.length ? `
+        <div class="grid grid-cols-2 gap-x-3 gap-y-0.5">
+          ${rows.map(r => `
+            <span class="text-[11px] text-surface-500">${r.label}</span>
+            <span class="text-[11px] text-right font-medium
+              ${r.highlight ? 'text-red-600 dark:text-red-400' : 'text-surface-700 dark:text-surface-300'}">
+              ${r.val}${r.extra ? `<span class="ml-1 font-normal text-surface-400">${r.extra}</span>` : ''}
+            </span>`).join('')}
+        </div>` : ''}
+      </div>`;
   }
 
-  const rawId = c.id || '';
   return `
     <div class="card p-4 flex flex-col gap-3 hover:shadow-md transition-shadow" id="pipeline-card-${safeId}">
       <!-- Clickable body → opens detail drawer -->
       <div class="flex flex-col gap-2 cursor-pointer" onclick="openPipelineCompanyDetail('${safeId}')">
+        <!-- Row 1: Avatar + Name/City + Source badge -->
         <div class="flex items-start gap-3">
           <div class="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 text-white text-xs font-bold"
             style="background:${avatarColor(c.name)}">${getInitials(c.name)}</div>
@@ -889,7 +1162,14 @@ function renderPipelineCard(c) {
             <h3 class="text-sm font-semibold leading-snug">${escapeHtml(c.name)}</h3>
             ${city ? `<p class="text-xs text-surface-500">${escapeHtml(city)}</p>` : ''}
           </div>
-          <span class="text-xs px-1.5 py-0.5 rounded bg-orange-50 dark:bg-orange-900/20 text-orange-600 dark:text-orange-300 whitespace-nowrap flex-shrink-0">${srcLabel}</span>
+          <span class="text-[10px] px-1.5 py-0.5 rounded bg-orange-50 dark:bg-orange-900/20 text-orange-600 dark:text-orange-300 whitespace-nowrap flex-shrink-0">${srcLabel}</span>
+        </div>
+        <!-- Row 2: Industry badge + Interest stars -->
+        <div class="flex items-center justify-between -mt-0.5" onclick="event.stopPropagation()">
+          <span class="text-[10px] px-2 py-0.5 rounded-full font-medium ${_industryBadgeClass(industry)}">${escapeHtml(industry)}</span>
+          <span id="interest-stars-${safeId}" class="flex items-center gap-0.5">
+            ${_renderStarButtons(safeId, interestScore)}
+          </span>
         </div>
         ${desc  ? `<p class="text-xs text-surface-500 line-clamp-2">${escapeHtml(desc)}</p>` : ''}
         ${hrNum ? `<p class="text-xs text-surface-400">HR: ${escapeHtml(hrNum)}</p>` : ''}
@@ -949,31 +1229,21 @@ async function pipelinePromoteToCompany(companyId) {
   }
 }
 
-function filterPipelineCompanies(query) {
-  const q          = (query || '').toLowerCase();
-  const srcFilter  = document.getElementById('pipeline-source-filter')?.value || '';
+function filterPipelineCompanies() {
+  const filtered = _applyPipelineFilters(_pipelineCompanies);
 
-  const filtered = _pipelineCompanies.filter(c => {
-    if (srcFilter) {
-      const src = c._pipeline?.data_source || c.source || 'pipeline';
-      if (src !== srcFilter) return false;
-    }
-    if (q) {
-      return (
-        (c.name        || '').toLowerCase().includes(q) ||
-        (c.location    || '').toLowerCase().includes(q) ||
-        (c.description || '').toLowerCase().includes(q) ||
-        (c.hrNumber    || '').toLowerCase().includes(q)
-      );
-    }
-    return true;
-  });
+  const header = document.getElementById('pipeline-results-header');
+  if (header) {
+    header.innerHTML = filtered.length < _pipelineCompanies.length
+      ? `Showing <strong>${filtered.length}</strong> of ${_pipelineCompanies.length}`
+      : `<strong>${filtered.length}</strong> companies`;
+  }
 
   const grid = document.getElementById('pipeline-cards-grid');
   if (grid) {
     grid.innerHTML = filtered.length
       ? filtered.map(c => renderPipelineCard(c)).join('')
-      : `<div class="col-span-3 card p-8 text-center text-surface-400 text-sm">No companies match your filter</div>`;
+      : `<div class="col-span-3 card p-8 text-center text-surface-400 text-sm">No companies match your filters</div>`;
   }
 }
 
@@ -1058,8 +1328,11 @@ function _renderDetailContent(c) {
   const srcFull  = src === 'bundesanzeiger' ? 'Bundesanzeiger'
                  : src === 'unternehmensregister' ? 'Unternehmensregister'
                  : 'Pipeline';
-  const fin      = c._pipeline?.financials || null;
-  const synced   = (c._pipeline?.last_synced_at || '').slice(0, 10);
+  const fin             = c._pipeline?.financials || null;
+  const synced          = (c._pipeline?.last_synced_at || '').slice(0, 10);
+  const cachedAnalysis  = c._pipeline?.ai_analysis || null;
+  const analysisGenDate = c._pipeline?.ai_analysis_generated
+    ? new Date(c._pipeline.ai_analysis_generated).toLocaleDateString('de-DE') : '';
   const nameEnc  = encodeURIComponent(c.name);
   const cityEnc  = city ? encodeURIComponent(city) : '';
   const hrSlug   = hrNum.replace(/\s+/g, '+');
@@ -1090,6 +1363,29 @@ function _renderDetailContent(c) {
 
     <!-- ── Scrollable body ─────────────────────────────────────────────── -->
     <div class="flex-1 overflow-y-auto p-5 space-y-6">
+
+      <!-- AI Acquisition Analysis -->
+      <section>
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="text-[11px] font-semibold uppercase tracking-wider text-surface-400">AI Acquisition Analysis</h3>
+          <button id="ai-analysis-btn-${safeId}"
+            onclick="generatePipelineAIAnalysis('${safeId}')"
+            class="btn-secondary btn-sm text-xs flex items-center gap-1.5">
+            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M13 10V3L4 14h7v7l9-11h-7z"/>
+            </svg>
+            ${cachedAnalysis ? '↻ Regenerate' : 'Generate Analysis'}
+          </button>
+        </div>
+        <div id="ai-analysis-output-${safeId}">
+          ${cachedAnalysis
+            ? _renderAIAnalysis(cachedAnalysis) + (analysisGenDate ? `<p class="text-[10px] text-surface-400 mt-1.5 text-right">Generated ${escapeHtml(analysisGenDate)}</p>` : '')
+            : `<div class="rounded-xl bg-surface-50 dark:bg-surface-800 border border-dashed border-surface-300 dark:border-surface-600 p-4 text-center">
+                 <p class="text-xs text-surface-400">Click "Generate Analysis" for an AI-powered acquisition assessment.</p>
+               </div>`}
+        </div>
+      </section>
 
       <!-- Registry Info -->
       <section>
@@ -1433,5 +1729,174 @@ async function pipelineFetchOfficers(companyId) {
         </a>
       </div>`;
     if (btn) { btn.disabled = false; btn.innerHTML = 'Retry'; }
+  }
+}
+
+// ─── AI Acquisition Analysis ──────────────────────────────────────────────────
+
+function _buildAcquisitionSystemPrompt() {
+  return `You are a search fund acquisition analyst. Assess whether a German SME is a potentially interesting acquisition target.
+
+Evaluate based on:
+1. Business quality (recurring revenue, defensible niche, market position, owner-operated)
+2. Financial health (revenue size, profitability, EBITDA margins relative to industry norms)
+3. Acquisition fit for a search fund (ideal: €0.5M–€5M EBITDA, founder-owned, succession opportunity)
+4. Risk factors (customer concentration, cyclicality, technology risk, competition)
+5. Growth potential (organic levers, add-on acquisition opportunities)
+
+Respond with exactly these sections:
+**Summary** (2–3 sentences overview)
+**Investment Highlights** (3–5 bullet points starting with -)
+**Risk Factors** (2–4 bullet points starting with -)
+**Verdict**: Interesting / Needs More Info / Not a Fit — one sentence rationale
+
+Be concise and practical. Focus on what matters for a search fund acquisition.`;
+}
+
+function _buildAcquisitionUserPrompt(company, fin) {
+  const parts = [
+    `**Company:** ${company.name}`,
+    `**Location:** ${company.location || 'Germany'}`,
+    `**Industry:** ${company.industry || classifyIndustryJS(company.name)}`,
+    `**Legal form:** ${company.type || 'GmbH'}`,
+  ];
+  if (company.hrNumber)    parts.push(`**HR Number:** ${company.hrNumber}`);
+  if (company.description) parts.push(`**Business description:** ${company.description}`);
+  if (fin) {
+    parts.push(`\n**Financial data (FY${fin.fiscal_year || '?'}):**`);
+    const M = v => `€${(v / 1_000_000).toFixed(2)}M`;
+    if (fin.revenue     != null) parts.push(`- Revenue: ${M(fin.revenue)}`);
+    if (fin.ebitda      != null) parts.push(`- EBITDA: ${M(fin.ebitda)}${fin.ebitda_margin_pct != null ? ` (${fin.ebitda_margin_pct.toFixed(1)}% margin)` : ''}`);
+    if (fin.ebit        != null) parts.push(`- EBIT: ${M(fin.ebit)}`);
+    if (fin.net_income  != null) parts.push(`- Net Income: ${M(fin.net_income)}${fin.net_margin_pct != null ? ` (${fin.net_margin_pct.toFixed(1)}%)` : ''}`);
+    if (fin.gross_profit!= null) parts.push(`- Gross Profit: ${M(fin.gross_profit)}`);
+    if (fin.employees   != null) parts.push(`- Employees: ${fin.employees}`);
+  } else {
+    parts.push(`\n**Financial data:** Not available`);
+  }
+  parts.push('\nProvide your acquisition analysis.');
+  return parts.join('\n');
+}
+
+function _renderAIAnalysis(text) {
+  if (!text) return '';
+
+  // Extract verdict keyword
+  const vMatch = text.match(/\*\*Verdict\*\*[:\s]*([^\n]+)/i);
+  const vText  = (vMatch ? vMatch[1] : '').toLowerCase();
+  const verdict = vText.includes('not a fit')   ? 'Not a Fit'
+                : vText.includes('interesting')  ? 'Interesting'
+                : vText.includes('needs')        ? 'Needs More Info'
+                : null;
+  const verdictClass = verdict === 'Interesting'   ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300'
+                     : verdict === 'Not a Fit'     ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300'
+                     : verdict                     ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300'
+                     : '';
+
+  // Convert simple markdown to HTML line by line
+  const lines = text.split('\n');
+  let html    = '';
+  let inList  = false;
+
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line) {
+      if (inList) { html += '</ul>'; inList = false; }
+      continue;
+    }
+    const fmt = line
+      .replace(/\*\*(.*?)\*\*/g, '<strong class="text-surface-800 dark:text-surface-200">$1</strong>')
+      .replace(/\*(.*?)\*/g, '<em>$1</em>');
+
+    if (line.startsWith('- ') || line.startsWith('• ')) {
+      if (!inList) { html += '<ul class="list-disc list-inside space-y-0.5 my-1.5 ml-1">'; inList = true; }
+      html += `<li class="text-xs text-surface-600 dark:text-surface-400">${fmt.replace(/^[-•]\s/, '')}</li>`;
+    } else {
+      if (inList) { html += '</ul>'; inList = false; }
+      html += `<p class="text-xs text-surface-600 dark:text-surface-400 leading-relaxed my-0.5">${fmt}</p>`;
+    }
+  }
+  if (inList) html += '</ul>';
+
+  return `
+    <div class="rounded-xl border border-surface-200 dark:border-surface-700 overflow-hidden">
+      ${verdict ? `
+        <div class="flex items-center justify-between px-3 py-2 bg-surface-50 dark:bg-surface-800 border-b border-surface-200 dark:border-surface-700">
+          <span class="text-[10px] font-semibold uppercase tracking-wide text-surface-400">Acquisition Verdict</span>
+          <span class="text-xs font-semibold px-2 py-0.5 rounded-full ${verdictClass}">${escapeHtml(verdict)}</span>
+        </div>` : ''}
+      <div class="p-3">${html}</div>
+    </div>`;
+}
+
+async function generatePipelineAIAnalysis(companyId) {
+  const company = _pipelineCompanies.find(c =>
+    c.id === companyId || (c.id || '').replace(/[^a-zA-Z0-9_-]/g, '_') === companyId
+  );
+  if (!company) return;
+
+  const safeId   = (company.id || '').replace(/[^a-zA-Z0-9_-]/g, '_');
+  const outputEl = document.getElementById(`ai-analysis-output-${safeId}`);
+  const btn      = document.getElementById(`ai-analysis-btn-${safeId}`);
+  if (!outputEl) return;
+
+  // Show spinner
+  outputEl.innerHTML = `
+    <div class="flex items-center gap-2 text-xs text-surface-400 py-3">
+      <svg class="animate-spin w-3.5 h-3.5 text-brand-500 flex-shrink-0" fill="none" viewBox="0 0 24 24">
+        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+      </svg>
+      Generating acquisition analysis…
+    </div>`;
+  if (btn) {
+    btn.disabled  = true;
+    btn.innerHTML = `<svg class="animate-spin w-3 h-3" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg> Generating…`;
+  }
+
+  try {
+    const fin        = company._pipeline?.financials || null;
+    const sysPrompt  = _buildAcquisitionSystemPrompt();
+    const userPrompt = _buildAcquisitionUserPrompt(company, fin);
+    const text       = await callAI(sysPrompt, userPrompt, 1200, 0.4);
+
+    const genDate = new Date().toLocaleDateString('de-DE');
+    outputEl.innerHTML = _renderAIAnalysis(text) +
+      `<p class="text-[10px] text-surface-400 mt-1.5 text-right">Generated ${escapeHtml(genDate)}</p>`;
+
+    // Cache in memory + persist to Firestore
+    if (!company._pipeline) company._pipeline = {};
+    company._pipeline.ai_analysis           = text;
+    company._pipeline.ai_analysis_generated = new Date().toISOString();
+
+    try {
+      await DB.put(STORES.companies, {
+        ...company,
+        _pipeline: {
+          ...(company._pipeline),
+          ai_analysis:           text,
+          ai_analysis_generated: company._pipeline.ai_analysis_generated,
+        },
+        updatedAt: new Date().toISOString(),
+      });
+    } catch (_) {}
+
+    if (btn) {
+      btn.disabled  = false;
+      btn.innerHTML = `<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg> Regenerate`;
+    }
+  } catch (err) {
+    console.error('[generatePipelineAIAnalysis]', err);
+    outputEl.innerHTML = `
+      <div class="rounded-lg bg-red-50 dark:bg-red-900/15 border border-red-200 dark:border-red-800 px-3 py-2 text-xs text-red-600 dark:text-red-400">
+        <strong>Analysis failed:</strong> ${escapeHtml(err.message)}
+        ${err.message?.toLowerCase().includes('api key') || err.message?.toLowerCase().includes('key')
+          ? '<br><span class="text-surface-500 mt-0.5 block">Add your API key in Settings → AI Configuration</span>'
+          : ''}
+      </div>`;
+    if (btn) {
+      btn.disabled  = false;
+      btn.innerHTML = `<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg> Try Again`;
+    }
   }
 }
