@@ -268,6 +268,215 @@ def cmd_migrate_pipeline() -> int:
     return 0
 
 
+# ─── enrich-all ──────────────────────────────────────────────────────────────
+
+def _load_function_env():
+    """Read functions/.env (where Cloud Function keys live)."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    env_path = os.path.normpath(os.path.join(here, "..", "functions", ".env"))
+    keys = {}
+    try:
+        with open(env_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                k, v = line.split("=", 1)
+                keys[k.strip()] = v.strip().strip('"').strip("'")
+    except FileNotFoundError:
+        pass
+    return keys
+
+
+def _enrich_one(name: str, city: str, hr: str, industry: str,
+                tavily_key: str, openai_key: str) -> dict | None:
+    """Synchronous enrichment of one company — Tavily search + OpenAI extract."""
+    import json
+    import requests
+
+    # 1. Tavily search
+    query = f"{name}{' ' + city if city else ''} German company website headquarters owners products"
+    try:
+        tr = requests.post(
+            "https://api.tavily.com/search",
+            json={
+                "api_key":        tavily_key,
+                "query":          query,
+                "search_depth":   "basic",
+                "include_answer": True,
+                "max_results":    8,
+            },
+            timeout=30,
+        )
+        if tr.status_code != 200:
+            return None
+        tavily = tr.json()
+    except Exception as e:
+        print(f"    ⚠ tavily error: {e}")
+        return None
+
+    ctx = "\n\n".join(
+        f"[{i+1}] {r.get('title','')}\n   URL: {r.get('url','')}\n   {(r.get('content','') or '')[:400]}"
+        for i, r in enumerate(tavily.get("results", []) or [])
+    )
+
+    system_prompt = """You are a research assistant for a search-fund investor analysing German SMEs.
+Extract STRUCTURED information about the target company from the web-search results provided.
+
+Return ONLY valid JSON with this exact schema (use null for any field you cannot reliably determine):
+{
+  "website": "https://www.example.de" or null,
+  "hq_address": "Street, Postcode City, Country" or null,
+  "city": "Munich" or null,
+  "founded_year": 1995 or null,
+  "ownership_type": "Family-owned" | "PE-backed" | "Public" | "Subsidiary" | "Independent" | "Unknown",
+  "key_executives": [{"name": "Anna Müller", "role": "CEO"}],
+  "products_services": "1-2 sentence description",
+  "main_customers": "Brief description",
+  "recent_news": ["Headline (year)"],
+  "estimated_revenue_eur": 15000000 or null,
+  "estimated_revenue_year": 2023 or null,
+  "estimated_employees": 120 or null,
+  "estimates_confidence": "high" | "medium" | "low" | "none"
+}
+
+Be conservative. Use null when uncertain. Limit news to 3, executives to 4."""
+
+    user_prompt = (
+        f"**Company:** {name}\n"
+        + (f"**City:** {city}\n" if city else "")
+        + (f"**HR Number:** {hr}\n" if hr else "")
+        + (f"**Industry:** {industry}\n" if industry else "")
+        + f"\n**Web search results:**\n{ctx or '(no results)'}\n"
+        + (f"\n**Quick answer:** {tavily.get('answer','')}\n" if tavily.get("answer") else "")
+        + "\nExtract the structured information now."
+    )
+
+    try:
+        ar = requests.post(
+            "https://api.openai.com/v1/chat/completions",
+            headers={
+                "Content-Type":  "application/json",
+                "Authorization": f"Bearer {openai_key}",
+            },
+            json={
+                "model": "gpt-4o-mini",
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user",   "content": user_prompt},
+                ],
+                "response_format": {"type": "json_object"},
+                "max_tokens":  900,
+                "temperature": 0.1,
+            },
+            timeout=60,
+        )
+        if ar.status_code != 200:
+            return None
+        ai = ar.json()
+        enrichment = json.loads(ai["choices"][0]["message"]["content"])
+    except Exception as e:
+        print(f"    ⚠ openai error: {e}")
+        return None
+
+    sources = [
+        {"title": r.get("title", ""), "url": r.get("url", "")}
+        for r in (tavily.get("results") or [])[:6]
+    ]
+    return {"enrichment": enrichment, "sources": sources}
+
+
+def cmd_enrich_all(skip_existing: bool = True, max_workers: int = 5) -> int:
+    """
+    Run AI enrichment on every /sharedPipeline company that hasn't been
+    enriched yet. Reads OPENAI_KEY and TAVILY_KEY from functions/.env.
+    Runs `max_workers` requests in parallel for speed.
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    from datetime import datetime, timezone
+
+    env = _load_function_env()
+    tavily_key = env.get("TAVILY_KEY", "")
+    openai_key = env.get("OPENAI_KEY", "")
+
+    if not tavily_key or not openai_key:
+        print("❌ Missing TAVILY_KEY or OPENAI_KEY in functions/.env")
+        return 1
+
+    db = _db()
+    coll = db.collection("sharedPipeline")
+
+    print("  Loading companies from /sharedPipeline …")
+    docs = list(coll.stream())
+    print(f"  Total: {len(docs)}")
+
+    todo = []
+    for d in docs:
+        data = d.to_dict() or {}
+        if skip_existing and data.get("_pipeline", {}).get("enrichment"):
+            continue
+        todo.append((d.id, data))
+
+    print(f"  Need to enrich: {len(todo)} (skipping {len(docs) - len(todo)} already done)")
+    if not todo:
+        print("✅ Nothing to do — all companies already enriched.")
+        return 0
+
+    confirm = input(
+        f"  This will use ~{len(todo)} Tavily searches and OpenAI calls. Continue? (Y/n): "
+    ).strip().lower()
+    if confirm and confirm != "y":
+        print("  Aborted.")
+        return 0
+
+    done_count = 0
+    fail_count = 0
+
+    def _worker(item):
+        cid, data = item
+        result = _enrich_one(
+            name     = data.get("name", ""),
+            city     = data.get("location", "") or "",
+            hr       = data.get("hrNumber", "") or "",
+            industry = data.get("industry", "") or "",
+            tavily_key=tavily_key, openai_key=openai_key,
+        )
+        if not result:
+            return cid, None
+        try:
+            coll.document(cid).set({
+                "_pipeline": {
+                    "enrichment":         result["enrichment"],
+                    "enrichment_sources": result["sources"],
+                    "enrichment_at":      datetime.now(timezone.utc).isoformat(),
+                    "enrichment_by":      "bulk-script",
+                },
+                "updatedAt": datetime.now(timezone.utc).isoformat(),
+            }, merge=True)
+        except Exception as e:
+            print(f"    ⚠ firestore write failed for {cid}: {e}")
+            return cid, None
+        return cid, result["enrichment"]
+
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futures = [pool.submit(_worker, item) for item in todo]
+        for f in as_completed(futures):
+            cid, enr = f.result()
+            if enr:
+                done_count += 1
+                website = enr.get("website") or "—"
+                city = enr.get("city") or enr.get("hq_address", "")[:40] or "—"
+                rev  = enr.get("estimated_revenue_eur")
+                rev_str = f"€{rev/1_000_000:.1f}M" if rev else "—"
+                print(f"  [{done_count}/{len(todo)}] {cid[:30]:<30} city={city[:25]:<25} rev={rev_str:<8} web={website[:40]}")
+            else:
+                fail_count += 1
+                print(f"  [×] {cid[:30]} — failed")
+
+    print(f"\n✅ Done — {done_count} enriched, {fail_count} failed")
+    return 0
+
+
 # ─── list-users ──────────────────────────────────────────────────────────────
 
 def cmd_list_users() -> int:
@@ -309,6 +518,12 @@ def main():
     sub.add_parser("list-users", help="List all Firebase Auth users")
     sub.add_parser("migrate-pipeline",
                    help="Copy master's pipeline companies to /sharedPipeline (one-time)")
+    p_enrich = sub.add_parser("enrich-all",
+                              help="Run AI web research for every company in /sharedPipeline")
+    p_enrich.add_argument("--all", action="store_true",
+                          help="Re-run enrichment even if already done (default skips done)")
+    p_enrich.add_argument("--workers", type=int, default=5,
+                          help="Parallel requests (default 5)")
 
     args = ap.parse_args()
     _init_firebase()
@@ -317,6 +532,8 @@ def main():
     if args.cmd == "wipe-user":        return cmd_wipe_user(args.email)
     if args.cmd == "list-users":       return cmd_list_users()
     if args.cmd == "migrate-pipeline": return cmd_migrate_pipeline()
+    if args.cmd == "enrich-all":
+        return cmd_enrich_all(skip_existing=not args.all, max_workers=args.workers)
     return 1
 
 
