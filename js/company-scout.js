@@ -131,6 +131,41 @@ function _matchSizeBucket(c, bucket) {
   return true;
 }
 
+// Returns true only if the company has at least one usable financial NUMBER
+// (revenue / ebitda / ebit / net_income / employees). We treat metadata-only
+// stubs (source_url + data_quality + fiscal_year, no actual figures) as
+// "no financials" because they're not useful for filtering or display.
+function _hasUsableFinancials(c) {
+  const f = c?._pipeline?.financials;
+  if (!f || typeof f !== 'object') return false;
+  return (
+    f.revenue    != null ||
+    f.ebitda     != null ||
+    f.ebit       != null ||
+    f.net_income != null ||
+    f.employees  != null ||
+    f.gross_profit != null
+  );
+}
+
+// Returns the best available location string. Falls back to AI-enriched
+// HQ city if the registry didn't supply one.
+function _displayLocation(c) {
+  if (c?.location) return c.location;
+  const hq = c?._pipeline?.enrichment?.hq_address;
+  if (hq) {
+    // Try to extract city from "Street, Postcode City, Country" format
+    const parts = String(hq).split(',').map(s => s.trim()).filter(Boolean);
+    if (parts.length >= 2) {
+      const m = parts[parts.length - 2].match(/\d{4,5}\s+(.+)/);
+      if (m) return m[1];
+      return parts[parts.length - 2];
+    }
+    return parts[0] || '';
+  }
+  return '';
+}
+
 function _applyPipelineFilters(companies) {
   let result = [...companies];
   const f = _pipelineFilters;
@@ -151,12 +186,16 @@ function _applyPipelineFilters(companies) {
     });
   }
   if (f.city) {
-    const city = f.city.toLowerCase();
-    result = result.filter(c => (c.location || '').toLowerCase().includes(city));
+    const needle = f.city.toLowerCase();
+    result = result.filter(c => {
+      const own = (c.location || '').toLowerCase();
+      const hq  = (c._pipeline?.enrichment?.hq_address || '').toLowerCase();
+      return own.includes(needle) || hq.includes(needle);
+    });
   }
   if (f.revenueRange) result = result.filter(c => _matchRevenueBucket(c, f.revenueRange));
   if (f.sizeRange)    result = result.filter(c => _matchSizeBucket(c, f.sizeRange));
-  if (f.hasFinancials) result = result.filter(c => !!c._pipeline?.financials);
+  if (f.hasFinancials) result = result.filter(c => _hasUsableFinancials(c));
 
   // Sort
   if (_pipelineSortBy === 'interest') {
@@ -170,7 +209,7 @@ function _applyPipelineFilters(companies) {
     );
   } else if (_pipelineSortBy === 'location') {
     result.sort((a, b) =>
-      (a.location || 'zzz').localeCompare(b.location || 'zzz', 'de')
+      (_displayLocation(a) || 'zzz').localeCompare(_displayLocation(b) || 'zzz', 'de')
     );
   }
   // 'recent' = Firestore insertion order — no re-sort
@@ -1146,7 +1185,7 @@ function _fmtEur(val) {
 }
 
 function renderPipelineCard(c) {
-  const city          = c.location || '';
+  const city          = _displayLocation(c);
   const desc          = c.description || '';
   const hrNum         = c.hrNumber || '';
   const safeId        = (c.id || '').replace(/[^a-zA-Z0-9_-]/g, '_');
@@ -1157,8 +1196,11 @@ function renderPipelineCard(c) {
   const industry      = c.industry || classifyIndustryJS(c.name) || 'Other';
   const interestScore = c._pipeline?.interest_score || 0;
 
-  // Financial data — stored under _pipeline.financials in Firestore
-  const fin = c._pipeline?.financials || null;
+  // Financial data — stored under _pipeline.financials in Firestore.
+  // Only treat as "has financials" if at least one numeric value is present;
+  // metadata-only stubs (source_url + data_quality + year, no figures) count
+  // as no financials so the cards stay clean.
+  const fin = _hasUsableFinancials(c) ? c._pipeline.financials : null;
 
   let financialsHtml = '';
   if (fin) {
@@ -2279,12 +2321,12 @@ function _renderPipelineDetailFull(c) {
 // wrapper as appropriate.
 function _renderPipelineDetailInnerHTML(c) {
   const safeId   = _safePipelineId(c.id);
-  const city     = c.location || '';
+  const city     = _displayLocation(c);
   const desc     = c.description || '';
   const hrNum    = c.hrNumber || '';
   const court    = c._pipeline?.court || '';
   const industry = c.industry || classifyIndustryJS(c.name) || 'Other';
-  const fin      = c._pipeline?.financials || null;
+  const fin      = _hasUsableFinancials(c) ? c._pipeline.financials : null;
   const interestScore   = c._pipeline?.interest_score || 0;
   const cachedAnalysis  = c._pipeline?.ai_analysis || null;
   const analysisGenDate = c._pipeline?.ai_analysis_generated
