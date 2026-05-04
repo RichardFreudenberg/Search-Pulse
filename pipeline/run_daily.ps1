@@ -20,37 +20,89 @@ if (-not $env:FIREBASE_USER_ID) {
 }
 
 # ── Searches to run each day ──────────────────────────────────────────────────
-# Edit these to match your target sectors / geographies
+# Broad coverage of search-fund-relevant German SMEs across sectors and states.
 $Queries = @(
-    # Manufacturing / Industrial
+    # ── Manufacturing / Industrial ──────────────────────────────────────
     "Maschinenbau GmbH Bayern",
     "Maschinenbau GmbH Nordrhein-Westfalen",
+    "Maschinenbau GmbH Baden-Württemberg",
     "Anlagenbau GmbH",
     "Metallbau GmbH",
-    # Technology
+    "Stahlbau GmbH",
+    "Werkzeugbau GmbH",
+    "Apparatebau GmbH",
+    "Fertigung GmbH",
+    "Industrietechnik GmbH",
+    "Antriebstechnik GmbH",
+    # ── Technology / IT ──────────────────────────────────────────────────
     "Software GmbH München",
     "Software GmbH Hamburg",
+    "Software GmbH Berlin",
+    "Software GmbH Köln",
     "Technologie GmbH Berlin",
     "IT-Dienstleistungen GmbH",
-    # Construction / Trades
+    "IT-Beratung GmbH",
+    "IT-Systeme GmbH",
+    "Informatik GmbH",
+    # ── Construction & Trades ───────────────────────────────────────────
     "Bau GmbH Stuttgart",
+    "Bau GmbH München",
+    "Bau GmbH Berlin",
     "Elektrotechnik GmbH",
+    "Elektroinstallation GmbH",
     "Sanitär GmbH Bayern",
+    "Sanitär GmbH Nordrhein-Westfalen",
+    "Heizungsbau GmbH",
+    "Klimatechnik GmbH",
     "Gebäudetechnik GmbH",
-    # Distribution / Logistics
+    "Dachdeckerei GmbH",
+    "Tischlerei GmbH",
+    "Schreinerei GmbH",
+    "Zimmerei GmbH",
+    # ── Distribution / Logistics ─────────────────────────────────────────
     "Logistik GmbH Frankfurt",
+    "Logistik GmbH Hamburg",
+    "Logistik GmbH München",
     "Großhandel GmbH Köln",
+    "Großhandel GmbH",
+    "Spedition GmbH",
     "Transport GmbH",
-    # Services
+    "Kurierdienst GmbH",
+    # ── Business Services ────────────────────────────────────────────────
     "Dienstleistung GmbH Hamburg",
     "Reinigung GmbH",
+    "Sicherheitsdienst GmbH",
     "Steuerberatung GmbH",
-    # Healthcare / Food
+    "Wirtschaftsprüfung GmbH",
+    "Unternehmensberatung GmbH",
+    "Personalberatung GmbH",
+    "Werbeagentur GmbH",
+    # ── Healthcare ───────────────────────────────────────────────────────
     "Pflege GmbH Bayern",
-    "Gastronomie GmbH"
+    "Pflegedienst GmbH",
+    "Apotheke GmbH",
+    "Medizintechnik GmbH",
+    "Sanitätshaus GmbH",
+    "Physiotherapie GmbH",
+    # ── Food & Beverage ──────────────────────────────────────────────────
+    "Gastronomie GmbH",
+    "Bäckerei GmbH",
+    "Catering GmbH",
+    "Lebensmittel GmbH",
+    # ── Consumer / Retail ────────────────────────────────────────────────
+    "Einzelhandel GmbH",
+    "Möbelhandel GmbH",
+    "Druckerei GmbH",
+    # ── Energy & Environment ─────────────────────────────────────────────
+    "Energietechnik GmbH",
+    "Solar GmbH",
+    "Photovoltaik GmbH",
+    "Recycling GmbH",
+    # ── Real Estate ──────────────────────────────────────────────────────
+    "Immobilien GmbH"
 )
 
-$PagesPerQuery = 4   # ~40-50 net-new companies per day across all queries
+$PagesPerQuery = 4   # widen by raising this; expect ~150-300 net-new companies per full daily run
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 function Log($msg) {
