@@ -166,16 +166,34 @@ Return ONLY valid JSON with this exact schema (use null for any field you cannot
 {
   "website": "https://www.example.de" or null,
   "hq_address": "Street, Postcode City, Country" or null,
+  "city": "Munich" or null,
   "founded_year": 1995 or null,
   "ownership_type": "Family-owned" | "PE-backed" | "Public" | "Subsidiary" | "Independent" | "Unknown",
   "key_executives": [{"name": "Anna Müller", "role": "CEO"}, ...],
   "products_services": "1-2 sentence description of what they sell",
   "main_customers": "Brief description: B2B/B2C, industries served, geography",
-  "recent_news": ["Headline 1 (year)", "Headline 2 (year)"]
+  "recent_news": ["Headline 1 (year)", "Headline 2 (year)"],
+  "estimated_revenue_eur": 15000000 or null,
+  "estimated_revenue_year": 2023 or null,
+  "estimated_employees": 120 or null,
+  "estimates_confidence": "high" | "medium" | "low" | "none"
 }
 
-Be conservative — never fabricate data. If only partial info is available, return what's confirmed and null the rest.
-Only include news from 2023 or later. Limit recent_news to 3 items max. Limit key_executives to 4 max.`;
+Rules:
+- Be conservative — never fabricate data.
+- If you cannot determine a piece of information, use null.
+- Only include news from 2023 or later. Limit recent_news to 3 items.
+- Limit key_executives to 4 maximum.
+- "city" should be the city name only (e.g. "Munich", not "Munich, Germany").
+- For estimated_revenue_eur: if a search result mentions revenue/Umsatz with a clear figure
+  (e.g. "Umsatz 15 Mio. EUR", "annual revenue of €25 million"), return it as raw EUR
+  (e.g. 15000000 for €15M). Only set this if you found a SPECIFIC figure.
+- For estimated_employees: if you see "Mitarbeiter: 120" or similar specific figure, include it.
+- estimates_confidence:
+  * "high" = exact figure found in a credible source from the last 3 years
+  * "medium" = figure found but slightly old or imprecisely worded
+  * "low" = inferred from context (e.g. "mid-sized") rather than a stated figure
+  * "none" = no financial signals found at all (then revenue/employees should be null)`;
 
   const userPrompt = `**Company:** ${name}
 ${city     ? `**City:** ${city}`        : ""}

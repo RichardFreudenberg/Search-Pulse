@@ -233,8 +233,21 @@ class BAFinancialsFetcher:
                 return results;
             }""")
 
+        # ── Filter out help / how-to / navigation pages that also contain
+        # the word "Jahresabschluss" but aren't actual filings ─────────────
+        BAD_URL_PATTERNS = (
+            "howto-hinterlegen", "/howto/", "/hilfe/", "/info/", "/anleitung",
+            "/kontakt", "/impressum", "/sitemap", "/themenwelten", "/suche",
+        )
+        links = [
+            l for l in links
+            if not any(pat in (l.get("href") or "").lower() for pat in BAD_URL_PATTERNS)
+            # Also require a year in the link text — actual filings always show a year
+            and l.get("year")
+        ]
+
         if not links:
-            logger.info("[ba_fin] No Jahresabschluss found for: %s", company_name)
+            logger.info("[ba_fin] No real Jahresabschluss filing found for: %s", company_name)
             return None
 
         # Pick the most recent year

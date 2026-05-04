@@ -112,7 +112,7 @@ function classifyIndustryJS(name) {
 
 // ─── Filter helpers ───────────────────────────────────────────────────────────
 function _matchRevenueBucket(c, bucket) {
-  const rev = c._pipeline?.financials?.revenue;
+  const rev = _getRevenueValue(c);
   if (rev == null) return bucket === '';
   if (bucket === '<500k')  return rev < 500_000;
   if (bucket === '500k-2m')return rev >= 500_000 && rev < 2_000_000;
@@ -122,7 +122,7 @@ function _matchRevenueBucket(c, bucket) {
 }
 
 function _matchSizeBucket(c, bucket) {
-  const emp = c._pipeline?.financials?.employees;
+  const emp = _getEmployeesValue(c);
   if (emp == null) return bucket === '';
   if (bucket === '<10')   return emp < 10;
   if (bucket === '10-50') return emp >= 10 && emp < 50;
@@ -131,28 +131,43 @@ function _matchSizeBucket(c, bucket) {
   return true;
 }
 
-// Returns true only if the company has at least one usable financial NUMBER
-// (revenue / ebitda / ebit / net_income / employees). We treat metadata-only
-// stubs (source_url + data_quality + fiscal_year, no actual figures) as
-// "no financials" because they're not useful for filtering or display.
+// Returns true only if the company has at least one usable financial NUMBER.
+// Checks both the Bundesanzeiger scraper data AND the AI enrichment estimates,
+// so any of those three sources counts.
 function _hasUsableFinancials(c) {
   const f = c?._pipeline?.financials;
-  if (!f || typeof f !== 'object') return false;
-  return (
-    f.revenue    != null ||
-    f.ebitda     != null ||
-    f.ebit       != null ||
-    f.net_income != null ||
-    f.employees  != null ||
-    f.gross_profit != null
-  );
+  if (f && typeof f === 'object' && (
+    f.revenue    != null || f.ebitda  != null || f.ebit     != null ||
+    f.net_income != null || f.employees != null || f.gross_profit != null
+  )) return true;
+
+  const e = c?._pipeline?.enrichment;
+  if (e && (e.estimated_revenue_eur != null || e.estimated_employees != null)) return true;
+
+  return false;
+}
+
+// Returns the best available revenue value for filtering / sorting / display.
+// Prefers verified Bundesanzeiger figures, then falls back to AI estimates.
+function _getRevenueValue(c) {
+  const v = c?._pipeline?.financials?.revenue;
+  if (v != null) return v;
+  return c?._pipeline?.enrichment?.estimated_revenue_eur ?? null;
+}
+
+function _getEmployeesValue(c) {
+  const v = c?._pipeline?.financials?.employees;
+  if (v != null) return v;
+  return c?._pipeline?.enrichment?.estimated_employees ?? null;
 }
 
 // Returns the best available location string. Falls back to AI-enriched
-// HQ city if the registry didn't supply one.
+// city / HQ if the registry didn't supply one.
 function _displayLocation(c) {
   if (c?.location) return c.location;
-  const hq = c?._pipeline?.enrichment?.hq_address;
+  const e = c?._pipeline?.enrichment;
+  if (e?.city) return e.city;
+  const hq = e?.hq_address;
   if (hq) {
     // Try to extract city from "Street, Postcode City, Country" format
     const parts = String(hq).split(',').map(s => s.trim()).filter(Boolean);
