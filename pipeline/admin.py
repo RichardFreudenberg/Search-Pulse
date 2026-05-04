@@ -366,7 +366,7 @@ Be conservative. Use null when uncertain. Limit news to 3, executives to 4."""
                     {"role": "user",   "content": user_prompt},
                 ],
                 "response_format": {"type": "json_object"},
-                "max_tokens":  900,
+                "max_tokens":  1600,
                 "temperature": 0.1,
             },
             timeout=60,
@@ -461,16 +461,25 @@ def cmd_enrich_all(skip_existing: bool = True, max_workers: int = 5) -> int:
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
         futures = [pool.submit(_worker, item) for item in todo]
         for f in as_completed(futures):
-            cid, enr = f.result()
+            try:
+                cid, enr = f.result()
+            except Exception as e:
+                fail_count += 1
+                print(f"  [×] worker raised: {e}")
+                continue
             if enr:
                 done_count += 1
-                website = enr.get("website") or "—"
-                city = enr.get("city") or enr.get("hq_address", "")[:40] or "—"
-                rev  = enr.get("estimated_revenue_eur")
-                rev_str = f"€{rev/1_000_000:.1f}M" if rev else "—"
-                print(f"  [{done_count}/{len(todo)}] {cid[:30]:<30} city={city[:25]:<25} rev={rev_str:<8} web={website[:40]}")
+                try:
+                    website = enr.get("website") or "—"
+                    city    = enr.get("city") or (enr.get("hq_address") or "")[:40] or "—"
+                    rev     = enr.get("estimated_revenue_eur")
+                    rev_str = f"€{rev/1_000_000:.1f}M" if rev else "—"
+                    print(f"  [{done_count}/{len(todo)}] {cid[:30]:<30} city={str(city)[:25]:<25} rev={rev_str:<8} web={str(website)[:40]}")
+                except Exception:
+                    print(f"  [{done_count}/{len(todo)}] {cid[:30]} (logged)")
             else:
                 fail_count += 1
+                print(f"  [×] {cid[:30]} — failed")
                 print(f"  [×] {cid[:30]} — failed")
 
     print(f"\n✅ Done — {done_count} enriched, {fail_count} failed")
