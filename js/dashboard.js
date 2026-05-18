@@ -5,8 +5,9 @@
 // Default widget order — users can drag to reorder
 const DEFAULT_WIDGET_ORDER = [
   'stats',
-  'call-stats',
+  'ai-suggestions',     // AI-powered next-action suggestions
   'follow-ups',
+  'call-stats',
   'pipeline',
   'recent-calls',
   'recent-contacts',
@@ -16,6 +17,7 @@ const DEFAULT_WIDGET_ORDER = [
 // Widget visibility defaults
 const DEFAULT_WIDGET_VISIBILITY = {
   'stats': true,
+  'ai-suggestions': true,
   'call-stats': true,
   'follow-ups': true,
   'pipeline': true,
@@ -26,10 +28,27 @@ const DEFAULT_WIDGET_VISIBILITY = {
 
 async function getDashboardLayout() {
   const settings = await DB.get(STORES.settings, `settings_${currentUser.id}`);
-  return {
-    order: settings?.dashboardWidgetOrder || [...DEFAULT_WIDGET_ORDER],
-    visibility: settings?.dashboardWidgetVisibility || { ...DEFAULT_WIDGET_VISIBILITY },
-  };
+  const savedOrder      = settings?.dashboardWidgetOrder;
+  const savedVisibility = settings?.dashboardWidgetVisibility;
+
+  // Soft-migrate: ensure any NEW default widgets get added to an existing
+  // user's order list without disturbing their drag-ordering of the rest.
+  const order = savedOrder ? [...savedOrder] : [...DEFAULT_WIDGET_ORDER];
+  DEFAULT_WIDGET_ORDER.forEach((id, defaultIdx) => {
+    if (!order.includes(id)) {
+      // Insert in the same relative position as in the default order
+      const insertAt = Math.min(defaultIdx, order.length);
+      order.splice(insertAt, 0, id);
+    }
+  });
+
+  const visibility = savedVisibility ? { ...savedVisibility } : { ...DEFAULT_WIDGET_VISIBILITY };
+  // Default any newly-added widgets to visible
+  Object.keys(DEFAULT_WIDGET_VISIBILITY).forEach(id => {
+    if (!(id in visibility)) visibility[id] = DEFAULT_WIDGET_VISIBILITY[id];
+  });
+
+  return { order, visibility };
 }
 
 async function saveDashboardLayout(order, visibility) {
@@ -133,6 +152,34 @@ async function renderDashboard() {
             '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>', 'yellow', "showDrilldown('contacts-today')")}
           ${renderStatCard('Overdue', overdueFollowUps.length,
             '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" /></svg>', 'red', "showDrilldown('contacts-overdue')")}
+        </div>
+      `,
+    },
+    'ai-suggestions': {
+      label: 'AI Suggested Next Steps',
+      fullWidth: true,
+      html: `
+        <div class="card">
+          <div class="flex items-center justify-between mb-3">
+            <div class="flex items-center gap-2">
+              <svg class="w-5 h-5 text-brand-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.456-2.456L14.25 6l1.035-.259a3.375 3.375 0 002.456-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 00-2.456 2.456zM16.894 20.567L16.5 21.75l-.394-1.183a2.25 2.25 0 00-1.423-1.423L13.5 18.75l1.183-.394a2.25 2.25 0 001.423-1.423l.394-1.183.394 1.183a2.25 2.25 0 001.423 1.423l1.183.394-1.183.394a2.25 2.25 0 00-1.423 1.423z"/></svg>
+              <h2 class="text-base font-semibold">AI Suggested Next Steps</h2>
+            </div>
+            <button onclick="refreshAISuggestions(true)" id="ai-sugg-refresh-btn"
+              class="text-xs px-2 py-1 rounded-lg border border-surface-200 dark:border-surface-700 text-surface-500 hover:text-surface-900 dark:hover:text-surface-100 hover:bg-surface-50 dark:hover:bg-surface-800 transition-colors flex items-center gap-1.5">
+              <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+              Refresh
+            </button>
+          </div>
+          <div id="ai-suggestions-output">
+            <div class="text-center py-6 text-xs text-surface-400">
+              <svg class="animate-spin w-4 h-4 inline-block mr-2 text-brand-500" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>
+              Generating suggestions…
+            </div>
+          </div>
+          <p class="text-[10px] text-surface-400 italic mt-2 text-right">
+            Refreshes once every 4 hours · click ↻ to force-refresh
+          </p>
         </div>
       `,
     },
@@ -666,6 +713,12 @@ async function renderDashboard() {
       }
     });
   }
+
+  // Kick off the AI suggestions widget if it's visible in the DOM
+  // (only when the CRM tab is active AND the user hasn't hidden it).
+  if (document.getElementById('ai-suggestions-output')) {
+    refreshAISuggestions(false); // false = use cache if fresh
+  }
 }
 
 function switchDashboardTab(tab) {
@@ -1177,5 +1230,238 @@ function _drilldownCompanyList(companies, contacts) {
         `).join('')}
       </tbody>
     </table>
+  `;
+}
+
+// ─── AI Suggested Next Steps (dashboard widget) ───────────────────────────────
+// Generates 3-6 specific concrete next actions for the search-fund operator
+// based on their recent activity. Cached for ~4 hours in localStorage so
+// switching tabs / pages doesn't burn OpenAI calls.
+
+const _AI_SUGG_CACHE_TTL_MS = 4 * 60 * 60 * 1000; // 4 hours
+const _AI_SUGG_CACHE_KEY    = () => `pulse_ai_suggestions_${currentUser?.id || 'anon'}`;
+
+function _readAISuggestionsCache() {
+  try {
+    const raw = localStorage.getItem(_AI_SUGG_CACHE_KEY());
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed.generatedAt || !Array.isArray(parsed.suggestions)) return null;
+    const age = Date.now() - new Date(parsed.generatedAt).getTime();
+    return age < _AI_SUGG_CACHE_TTL_MS ? parsed : null;
+  } catch (_) { return null; }
+}
+
+function _writeAISuggestionsCache(suggestions) {
+  try {
+    localStorage.setItem(_AI_SUGG_CACHE_KEY(), JSON.stringify({
+      generatedAt: new Date().toISOString(),
+      suggestions,
+    }));
+  } catch (_) {}
+}
+
+/**
+ * Refresh the AI suggestions widget.
+ * @param {boolean} force - if true, ignore cache and call the AI now.
+ */
+async function refreshAISuggestions(force = false) {
+  const outputEl = document.getElementById('ai-suggestions-output');
+  const btn      = document.getElementById('ai-sugg-refresh-btn');
+  if (!outputEl) return;
+
+  // 1. Cached path
+  if (!force) {
+    const cached = _readAISuggestionsCache();
+    if (cached) {
+      outputEl.innerHTML = _renderAISuggestionsHtml(cached.suggestions, cached.generatedAt);
+      return;
+    }
+  }
+
+  // 2. Live generation
+  outputEl.innerHTML = `
+    <div class="text-center py-6 text-xs text-surface-400">
+      <svg class="animate-spin w-4 h-4 inline-block mr-2 text-brand-500" fill="none" viewBox="0 0 24 24">
+        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+      </svg>
+      Generating personalised next steps…
+    </div>`;
+  if (btn) btn.disabled = true;
+
+  try {
+    const suggestions = await _generateAISuggestions();
+    _writeAISuggestionsCache(suggestions);
+    outputEl.innerHTML = _renderAISuggestionsHtml(suggestions, new Date().toISOString());
+  } catch (err) {
+    console.error('[ai-suggestions]', err);
+    outputEl.innerHTML = `
+      <div class="rounded-lg bg-red-50 dark:bg-red-900/15 border border-red-200 dark:border-red-800 px-3 py-2 text-xs text-red-600 dark:text-red-400">
+        Could not generate suggestions: ${escapeHtml(err.message || 'unknown error')}
+      </div>`;
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function _generateAISuggestions() {
+  // ── Gather context (lightweight — only top items per category) ────────
+  const [contacts, calls, reminders, deals, allCompanies] = await Promise.all([
+    DB.getForUser(STORES.contacts, currentUser.id).catch(() => []),
+    DB.getForUser(STORES.calls,    currentUser.id).catch(() => []),
+    DB.getForUser(STORES.reminders, currentUser.id).catch(() => []),
+    DB.getAll(STORES.deals).then(all => all.filter(d => d.userId === currentUser.id)).catch(() => []),
+    DB.getForUser(STORES.companies, currentUser.id).catch(() => []),
+  ]);
+
+  const today = new Date();
+  const daysSince = (iso) => iso ? Math.floor((today - new Date(iso)) / 86400000) : null;
+
+  const overdueContacts = contacts
+    .filter(c => !c.archived && c.nextFollowUpDate && new Date(c.nextFollowUpDate) < today)
+    .slice(0, 10)
+    .map(c => ({
+      name: c.fullName, title: c.title || '', stage: c.stage || '',
+      daysOverdue: Math.abs(daysSince(c.nextFollowUpDate)),
+    }));
+
+  const stale = contacts
+    .filter(c => !c.archived && c.lastContactDate && daysSince(c.lastContactDate) >= 45)
+    .filter(c => ['Active relationship','Warm relationship','Met once'].includes(c.stage))
+    .slice(0, 8)
+    .map(c => ({ name: c.fullName, daysSilent: daysSince(c.lastContactDate), stage: c.stage }));
+
+  const recentCalls = [...calls]
+    .sort((a,b) => new Date(b.date) - new Date(a.date))
+    .slice(0, 5)
+    .map(c => ({
+      contactName: (contacts.find(x => x.id === c.contactId) || {}).fullName || '',
+      date: c.date, callType: c.callType || '',
+      hasFollowUp: !!c.followUpDate,
+    }));
+
+  const activeDeals = deals
+    .filter(d => !['Closed - Won','Closed - Lost','Rejected'].includes(d.stage))
+    .slice(0, 10)
+    .map(d => ({ name: d.name, stage: d.stage, lastTouchDays: daysSince(d.updatedAt) }));
+
+  const upcomingReminders = reminders
+    .filter(r => !r.completed && r.dueDate)
+    .filter(r => {
+      const d = daysSince(r.dueDate);
+      return d != null && d <= 0 && d >= -7;
+    })
+    .slice(0, 10)
+    .map(r => ({ text: r.text || r.title || '', dueIn: -daysSince(r.dueDate) }));
+
+  const systemPrompt = `You are a no-nonsense assistant for a search-fund operator.
+Look at their recent CRM activity and suggest 4-6 SPECIFIC, CONCRETE next actions for the next 1-2 days.
+
+Rules:
+- Every suggestion MUST reference a real name, company, or deal from the context — never generic advice
+- Order by impact: highest-leverage actions first
+- Categorise each: "followup" | "outreach" | "review" | "admin"
+- Keep headlines short (5-12 words)
+- The reason must be 1 sentence, max 20 words
+- Be direct — not "you might want to consider" but "Call Anna at XYZ"
+
+Return ONLY valid JSON with this shape:
+{
+  "suggestions": [
+    {
+      "category": "followup|outreach|review|admin",
+      "priority": "high|medium|low",
+      "headline": "Specific action with a name",
+      "reason": "One-sentence why",
+      "link": "contacts|calls|deals|company-scout|reminders"
+    }
+  ]
+}`;
+
+  const ctx = {
+    today: today.toISOString().slice(0, 10),
+    overdueFollowUps: overdueContacts,
+    staleImportantContacts: stale,
+    recentCalls,
+    activeDeals,
+    upcomingReminders,
+    counts: {
+      totalContacts: contacts.length,
+      totalCalls:    calls.length,
+      totalDeals:    deals.length,
+      totalCompanies:allCompanies.length,
+    },
+  };
+
+  const userPrompt = `Today's date: ${ctx.today}
+
+CRM state:
+${JSON.stringify(ctx, null, 2)}
+
+Return JSON with 4-6 prioritised, specific next actions.`;
+
+  const raw = await callAI(systemPrompt, userPrompt, 1200, 0.3);
+  let parsed;
+  try {
+    const clean = String(raw).replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+    parsed = JSON.parse(clean);
+  } catch (e) {
+    throw new Error('AI response was not valid JSON');
+  }
+  return Array.isArray(parsed.suggestions) ? parsed.suggestions : [];
+}
+
+function _renderAISuggestionsHtml(suggestions, generatedAt) {
+  if (!suggestions || suggestions.length === 0) {
+    return `<p class="text-xs text-surface-400 italic py-2">No specific next steps surfaced — your pipeline looks under control.</p>`;
+  }
+
+  const ageMin = generatedAt
+    ? Math.floor((Date.now() - new Date(generatedAt).getTime()) / 60000)
+    : null;
+  const ageLabel = ageMin == null ? ''
+    : ageMin < 1 ? 'just now'
+    : ageMin < 60 ? `${ageMin}m ago`
+    : `${Math.floor(ageMin/60)}h ${ageMin % 60}m ago`;
+
+  const catBadge = (cat) => {
+    const map = {
+      followup: { label: 'Follow-up', cls: 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300' },
+      outreach: { label: 'Outreach',  cls: 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300' },
+      review:   { label: 'Review',    cls: 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300' },
+      admin:    { label: 'Admin',     cls: 'bg-surface-200 dark:bg-surface-700 text-surface-600 dark:text-surface-300' },
+    };
+    const m = map[cat] || map.admin;
+    return `<span class="text-[10px] px-1.5 py-0.5 rounded-full font-medium ${m.cls} flex-shrink-0">${m.label}</span>`;
+  };
+
+  const priorityDot = (p) => {
+    const c = p === 'high' ? 'bg-red-500' : p === 'medium' ? 'bg-amber-500' : 'bg-surface-300';
+    return `<span class="inline-block w-2 h-2 rounded-full ${c} flex-shrink-0 mt-1.5" title="${p || 'low'} priority"></span>`;
+  };
+
+  const validLinks = new Set(['contacts','calls','deals','company-scout','reminders']);
+
+  return `
+    <div class="space-y-2">
+      ${suggestions.map(s => {
+        const link = validLinks.has(s.link) ? s.link : 'dashboard';
+        return `
+          <div class="flex items-start gap-3 p-3 rounded-lg border border-surface-100 dark:border-surface-700 hover:bg-surface-50 dark:hover:bg-surface-800/40 transition-colors cursor-pointer"
+               onclick="navigate('${link}')">
+            ${priorityDot(s.priority)}
+            <div class="flex-1 min-w-0">
+              <div class="flex items-start justify-between gap-2 mb-0.5">
+                <p class="text-sm font-semibold leading-snug">${escapeHtml(s.headline || '')}</p>
+                ${catBadge(s.category)}
+              </div>
+              ${s.reason ? `<p class="text-xs text-surface-500">${escapeHtml(s.reason)}</p>` : ''}
+            </div>
+            <svg class="w-4 h-4 text-surface-300 flex-shrink-0 mt-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+          </div>`;
+      }).join('')}
+    </div>
+    ${ageLabel ? `<p class="text-[10px] text-surface-400 italic mt-2 text-right">Generated ${ageLabel}</p>` : ''}
   `;
 }
