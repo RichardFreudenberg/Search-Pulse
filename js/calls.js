@@ -25,6 +25,8 @@ let _callRecTimerInt     = null;
 let _callRecSession      = null;   // {rawTranscript, userNotes, aiSummary, aiStructuredNote}
 let _callRecContextInfo  = '';     // contact/deal names injected into Whisper + AI correction
 let _callRecLang         = localStorage.getItem('pulse_call_rec_lang') || 'en-US'; // persisted language
+let _callRecType         = localStorage.getItem('pulse_call_rec_type') || 'general'; // general|intro|follow-up|technical|diligence|networking|pitch
+let _callRecLength       = localStorage.getItem('pulse_call_rec_length') || 'standard'; // short|standard|detailed
 
 // ── Render Calls List ────────────────────────────────────────────
 
@@ -347,7 +349,8 @@ function _callFormHtml(defaults = {}) {
       <div id="call-rec-panel" class="hidden mb-2 rounded-xl border border-surface-200 dark:border-surface-700 overflow-hidden bg-surface-50 dark:bg-surface-800/50">
 
         <!-- STATE: idle -->
-        <div id="call-rec-idle" class="flex items-center justify-between px-4 py-3 gap-3 flex-wrap">
+        <div id="call-rec-idle" class="px-4 py-3 flex flex-col gap-2">
+          <div class="flex items-center justify-between gap-3 flex-wrap">
           <div class="flex items-center gap-2">
             <div class="w-2 h-2 rounded-full bg-surface-300"></div>
             <span class="text-sm text-surface-500">Record your meeting directly — live transcript + AI summary</span>
@@ -367,6 +370,34 @@ function _callFormHtml(defaults = {}) {
               <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/></svg>
               Start Recording
             </button>
+          </div>
+          </div>
+          <!-- Call type + note length controls (tune the AI summary) -->
+          <div class="flex items-center gap-3 flex-wrap pt-2 border-t border-surface-100 dark:border-surface-700/50">
+            <div class="flex items-center gap-1.5">
+              <label class="text-[11px] text-surface-400 uppercase tracking-wide">Type</label>
+              <select id="call-rec-type-select" onchange="callRecSetType(this.value)"
+                class="text-xs border border-surface-200 dark:border-surface-700 rounded-lg px-2 py-1 bg-white dark:bg-surface-800 text-surface-700 dark:text-surface-300 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                title="Tunes the AI summary to the kind of call this is">
+                <option value="general"    ${_callRecType==='general'    ?'selected':''}>General</option>
+                <option value="intro"      ${_callRecType==='intro'      ?'selected':''}>Intro</option>
+                <option value="follow-up"  ${_callRecType==='follow-up'  ?'selected':''}>Follow-up</option>
+                <option value="technical"  ${_callRecType==='technical'  ?'selected':''}>Technical interview</option>
+                <option value="diligence"  ${_callRecType==='diligence'  ?'selected':''}>Diligence</option>
+                <option value="networking" ${_callRecType==='networking' ?'selected':''}>Networking</option>
+                <option value="pitch"      ${_callRecType==='pitch'      ?'selected':''}>Pitch</option>
+              </select>
+            </div>
+            <div class="flex items-center gap-1.5">
+              <label class="text-[11px] text-surface-400 uppercase tracking-wide">Notes length</label>
+              <div class="flex gap-0.5 p-0.5 bg-surface-100 dark:bg-surface-800 rounded-lg">
+                ${['short','standard','detailed'].map(l => `
+                  <button type="button" id="call-rec-len-${l}" onclick="callRecSetLength('${l}')"
+                    class="px-2.5 py-1 rounded-md text-xs font-medium transition-colors capitalize ${_callRecLength === l ? 'bg-white dark:bg-surface-700 shadow-sm text-surface-900 dark:text-surface-100' : 'text-surface-500 dark:text-surface-400 hover:text-surface-900 dark:hover:text-surface-100'}">${l}</button>
+                `).join('')}
+              </div>
+            </div>
+            <span class="text-[10px] text-surface-400 italic ml-auto">Adjusts AI summary depth</span>
           </div>
         </div>
 
@@ -728,6 +759,31 @@ function callRecSetLang(code) {
   localStorage.setItem('pulse_call_rec_lang', code);
 }
 
+// Call type setter — drives the AI prompt template (intro/diligence/technical/etc.)
+function callRecSetType(t) {
+  const valid = ['general','intro','follow-up','technical','diligence','networking','pitch'];
+  if (!valid.includes(t)) return;
+  _callRecType = t;
+  localStorage.setItem('pulse_call_rec_type', t);
+}
+
+// Notes length setter — drives bullet count + token budget
+function callRecSetLength(len) {
+  const valid = ['short','standard','detailed'];
+  if (!valid.includes(len)) return;
+  _callRecLength = len;
+  localStorage.setItem('pulse_call_rec_length', len);
+  // Update the segmented control's active state
+  valid.forEach(l => {
+    const btn = document.getElementById(`call-rec-len-${l}`);
+    if (!btn) return;
+    btn.className = `px-2.5 py-1 rounded-md text-xs font-medium transition-colors capitalize ${
+      l === len
+        ? 'bg-white dark:bg-surface-700 shadow-sm text-surface-900 dark:text-surface-100'
+        : 'text-surface-500 dark:text-surface-400 hover:text-surface-900 dark:hover:text-surface-100'}`;
+  });
+}
+
 function _callRecStartSpeech() {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SR) return;
@@ -864,12 +920,17 @@ async function callRecStop() {
   let aiSummary = null, aiStructuredNote = null;
   try {
     [aiSummary, aiStructuredNote] = await Promise.all([
-      _mrGenerateSummary(transcript, userNotes, _callRecLang),
-      _mrGenerateStructuredNote(transcript, userNotes, _callRecLang),
+      _mrGenerateSummary(transcript, userNotes, _callRecLang, { callType: _callRecType, noteLength: _callRecLength }),
+      _mrGenerateStructuredNote(transcript, userNotes, _callRecLang, { callType: _callRecType, noteLength: _callRecLength }),
     ]);
   } catch (_) {}
 
-  _callRecSession = { rawTranscript: transcript, userNotes, aiSummary, aiStructuredNote, segments: _callRecSegments.slice() };
+  _callRecSession = {
+    rawTranscript: transcript, userNotes, aiSummary, aiStructuredNote,
+    segments: _callRecSegments.slice(),
+    callType:   _callRecType,
+    noteLength: _callRecLength,
+  };
 
   // Render review
   _callRecRenderReview();
@@ -1085,6 +1146,8 @@ async function saveNewCall() {
       positiveSignals:    [],
       sellerSentiment:    n.sentiment           || null,
       nextMeetingContext: (n.followUps || []).join('; ') || null,
+      callType:           rec.callType          || null,
+      noteLength:         rec.noteLength        || null,
       source:             'recorded',
       processedAt:        new Date().toISOString(),
     };

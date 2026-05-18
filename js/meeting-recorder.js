@@ -713,40 +713,84 @@ async function _mrCorrectTranscript(rawTranscript, contextInfo, langOverride = n
 
 // ── AI Processing ────────────────────────────────────────────────
 
-async function _mrGenerateSummary(transcript, userNotes, langOverride = null) {
+// ── Call-type & length tuning ──────────────────────────────────────────────
+// Both summary + structured note are tuned by:
+//   callType:    'general' | 'intro' | 'follow-up' | 'technical' | 'diligence' | 'networking' | 'pitch'
+//   noteLength:  'short' | 'standard' | 'detailed'
+// Older callers that only pass langOverride still work (defaults applied).
+
+const _CALL_TYPE_GUIDANCE = {
+  'general':     '',
+  'intro':       ' This is an INTRODUCTORY call. Prioritise capturing: who the person is, their background, their company, what they are working on, mutual interests, and concrete next steps to keep the relationship going.',
+  'follow-up':   ' This is a FOLLOW-UP call. Prioritise: what changed since the previous conversation, status updates, decisions made, and the next concrete step.',
+  'technical':   ' This is a TECHNICAL / DUE-DILIGENCE INTERVIEW about a specific business. Capture every quantitative detail mentioned: revenue figures, margins, customer concentration, growth rates, employee counts, contract terms, pricing, technology stack, operational specifics, risks and management observations. Include verbatim quotes for anything specific or surprising. Err strongly on the side of MORE detail rather than less.',
+  'diligence':   ' This is a DUE-DILIGENCE call. Capture every fact, figure, and claim — flag anything that needs further verification. Be precise about what was stated vs. inferred. Include red flags prominently.',
+  'networking':  ' This is a NETWORKING conversation. Prioritise: their network, who they suggest you connect with, mutual interests, opportunities to help each other, and a clear follow-up step.',
+  'pitch':       ' This is a PITCH meeting. Capture: the offer/ask, value props, terms discussed, objections raised, decision-makers involved, and the path to a yes.',
+};
+
+const _LENGTH_GUIDANCE = {
+  'short':    { bulletRange: '3-5 ultra-concise',    summaryTokens: 350,  structTokens: 700  },
+  'standard': { bulletRange: '5-8 crisp',            summaryTokens: 600,  structTokens: 900  },
+  'detailed': { bulletRange: '10-15 substantive',    summaryTokens: 1400, structTokens: 1800 },
+};
+
+function _mrResolveTuning(opts) {
+  const t = (opts && opts.callType   && _CALL_TYPE_GUIDANCE[opts.callType])   ? opts.callType   : 'general';
+  const l = (opts && opts.noteLength && _LENGTH_GUIDANCE[opts.noteLength])    ? opts.noteLength : 'standard';
+  return { callType: t, noteLength: l, typeGuide: _CALL_TYPE_GUIDANCE[t], lenCfg: _LENGTH_GUIDANCE[l] };
+}
+
+async function _mrGenerateSummary(transcript, userNotes, langOverride = null, opts = {}) {
   if (!transcript && !userNotes) return null;
   const lang = langOverride || _mrSession?.language || _mrLanguage;
   const langNote = lang.startsWith('de') ? ' The transcript may be in German — understand it fully and write the summary in English.' : '';
+  const { typeGuide, lenCfg, noteLength } = _mrResolveTuning(opts);
+
   const content = [transcript, userNotes].filter(Boolean).join('\n\n---\nUser notes:\n');
+
+  const detailExtra = noteLength === 'detailed'
+    ? ' Include sub-bullets where useful; do not omit numbers, names, or specifics.'
+    : '';
+
   const result = await callAI(
-    `You are an expert meeting summarizer for a search fund investor. Be concise and actionable.${langNote}`,
-    `Summarize this meeting in 5-8 crisp bullet points. Focus on: key insights, decisions made, red flags, and next steps.\n\nMeeting content:\n${content}`,
-    600, 0.2
+    `You are an expert meeting summarizer for a search fund investor. Be concise and actionable.${typeGuide}${langNote}`,
+    `Summarize this meeting in ${lenCfg.bulletRange} bullet points. Focus on: key insights, decisions made, red flags, and next steps.${detailExtra}\n\nMeeting content:\n${content}`,
+    lenCfg.summaryTokens, 0.2
   );
   return result;
 }
 
-async function _mrGenerateStructuredNote(transcript, userNotes, langOverride = null) {
+async function _mrGenerateStructuredNote(transcript, userNotes, langOverride = null, opts = {}) {
   if (!transcript && !userNotes) return null;
   const lang = langOverride || _mrSession?.language || _mrLanguage;
   const langNote = lang.startsWith('de') ? ' The transcript may be in German — understand it and return all field values in English.' : '';
+  const { typeGuide, lenCfg, noteLength } = _mrResolveTuning(opts);
+
+  // Detailed: ask for richer arrays
+  const arraySize = noteLength === 'short'    ? 'minimal (1-3 items per array)'
+                  : noteLength === 'detailed' ? 'as complete as the content supports — 5-10+ items per array, with specific facts/numbers/names preserved'
+                  :                             'standard (3-5 items per array)';
+
   const content = [transcript, userNotes].filter(Boolean).join('\n\n---\nUser notes:\n');
   const raw = await callAI(
-    `You are an expert meeting analyst for a search fund investor. Return ONLY valid JSON — no markdown, no code blocks.${langNote}`,
+    `You are an expert meeting analyst for a search fund investor. Return ONLY valid JSON — no markdown, no code blocks.${typeGuide}${langNote}`,
     `Analyze this meeting and return a JSON object with these fields:
 - title: string (short descriptive title)
-- themes: string[] (2-4 main topics discussed)
-- keyTakeaways: string[] (3-5 most important points)
+- themes: string[] (main topics discussed)
+- keyTakeaways: string[] (most important points; ${arraySize})
 - decisions: string[] (decisions made, or [])
 - risks: string[] (red flags or concerns, or [])
 - actionItems: string[] (concrete next steps with owners if mentioned)
 - openQuestions: string[] (questions raised but not answered)
 - followUps: string[] (things to follow up on)
-- keyQuotes: string[] (1-2 notable verbatim quotes, or [])
+- keyQuotes: string[] (notable verbatim quotes, ${arraySize})
 - sentiment: "positive"|"neutral"|"cautious"|"negative"
 
+Use the array size guidance above. ${noteLength === 'detailed' ? 'Capture EVERY specific fact, figure, name, and claim — do not summarise away detail.' : ''}
+
 Meeting content:\n${content}`,
-    900, 0.2
+    lenCfg.structTokens, 0.2
   );
 
   try {
