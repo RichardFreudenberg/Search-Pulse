@@ -198,17 +198,50 @@ async function openNewContactModal(prefill = {}) {
                   <input type="text" id="cp-search" class="input-field py-1.5 text-sm" placeholder="Search companies…" oninput="cpFilter(this.value)" />
                 </div>
                 <div id="cp-list" class="max-h-52 overflow-y-auto py-1"></div>
-                <div class="p-2 border-t border-surface-100 dark:border-surface-800">
-                  <button type="button" onclick="cpToggle(); openCreateCompanyDialog()"
-                    class="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium text-brand-600 dark:text-brand-400 hover:bg-brand-50 dark:hover:bg-brand-900/20 transition-colors">
+                <div class="p-2 border-t border-surface-100 dark:border-surface-800 flex gap-1">
+                  <button type="button" onclick="cpToggle(); toggleInlineCompany(true)"
+                    class="flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-medium text-brand-600 dark:text-brand-400 hover:bg-brand-50 dark:hover:bg-brand-900/20 transition-colors"
+                    title="Add company inline in this form">
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
-                    Create New Company…
+                    Create Inline
+                  </button>
+                  <button type="button" onclick="cpToggle(); openCreateCompanyDialog()"
+                    class="flex items-center justify-center gap-1 px-3 py-2 rounded-lg text-xs font-medium text-surface-500 dark:text-surface-400 hover:bg-surface-50 dark:hover:bg-surface-800 transition-colors"
+                    title="Open full company form in a dialog">
+                    Full Form
                   </button>
                 </div>
               </div>
             </div>
             <div id="cp-clear-row" class="hidden mt-1 flex justify-end">
               <button type="button" onclick="cpClear()" class="text-xs text-surface-400 hover:text-red-500 transition-colors">✕ Clear selection</button>
+            </div>
+
+            <!-- Inline company creation (expands when user clicks "Create New Company" or this toggle) -->
+            <div id="inline-company-section" class="hidden mt-3 p-4 rounded-xl bg-brand-50/60 dark:bg-surface-800/40 border border-brand-200 dark:border-brand-800/50 space-y-3">
+              <div class="flex items-center justify-between">
+                <p class="text-sm font-semibold flex items-center gap-1.5">
+                  <svg class="w-4 h-4 text-brand-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+                  Quick-add company
+                </p>
+                <button type="button" onclick="toggleInlineCompany(false)" class="text-xs text-surface-400 hover:text-red-500 transition-colors">✕ Collapse</button>
+              </div>
+              <input type="text" id="ic-name" class="input-field text-sm" placeholder="Company name *" />
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <select id="ic-industry" class="input-field text-sm">
+                  <option value="">— Industry —</option>
+                  ${COMPANY_INDUSTRY_LIST.map(s => `<option value="${s}">${s}</option>`).join('')}
+                </select>
+                <select id="ic-size" class="input-field text-sm">
+                  <option value="">— Size —</option>
+                  ${COMPANY_SIZE_LIST.map(s => `<option value="${s}">${s}</option>`).join('')}
+                </select>
+              </div>
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <input type="url"  id="ic-website"  class="input-field text-sm" placeholder="https://company.com" />
+                <input type="text" id="ic-location" class="input-field text-sm" placeholder="HQ / Location" />
+              </div>
+              <p class="text-[11px] text-surface-400 italic">Filled fields will be saved as a new company and linked to this contact in one go.</p>
             </div>
           </div>
           <div>
@@ -427,6 +460,36 @@ function cpClear() {
 }
 
 // --- Create New Company dialog ---
+
+// Inline company-creation panel toggle.
+// When `show` is true, expands the inline form in the contact modal so the
+// user can create a new company + contact in a single submit.
+// Pre-fills the company name from the picker search box when relevant.
+function toggleInlineCompany(show) {
+  const section = document.getElementById('inline-company-section');
+  if (!section) return;
+  if (show) {
+    section.classList.remove('hidden');
+    const nameInput = document.getElementById('ic-name');
+    // Pre-fill from picker search if user typed something there
+    const picked = document.getElementById('cp-search')?.value?.trim();
+    if (nameInput && picked && !nameInput.value) nameInput.value = picked;
+    // Clear any previously-selected existing company since we're creating new
+    if (typeof cpClear === 'function') cpClear();
+    if (nameInput) nameInput.focus();
+  } else {
+    section.classList.add('hidden');
+    // Clear inline fields so we don't accidentally create a company on submit
+    ['ic-name','ic-website','ic-location'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.value = '';
+    });
+    ['ic-industry','ic-size'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.value = '';
+    });
+  }
+}
 
 function openCreateCompanyDialog() {
   let dlg = document.getElementById('create-company-dlg');
@@ -833,8 +896,38 @@ async function saveNewContact() {
     if (!proceed) return;
   }
 
-  // Use whatever company was selected/created in the picker
-  const companyId = _selectedCompanyId || null;
+  // ── Inline company creation ───────────────────────────────────────
+  // If the inline-company panel is open and has a name, create it now
+  // BEFORE the contact so we have an ID to link.
+  let companyId = _selectedCompanyId || null;
+  const inlineSection = document.getElementById('inline-company-section');
+  const inlineOpen    = inlineSection && !inlineSection.classList.contains('hidden');
+  const inlineName    = inlineOpen ? (document.getElementById('ic-name')?.value || '').trim() : '';
+
+  if (inlineOpen && inlineName) {
+    // Guard: don't duplicate if a company with the same name already exists
+    const allCompanies = await DB.getForUser(STORES.companies, currentUser.id);
+    const existingMatch = allCompanies.find(c =>
+      c.name && c.name.toLowerCase() === inlineName.toLowerCase()
+    );
+    if (existingMatch) {
+      companyId = existingMatch.id;
+      showToast(`Linked existing "${existingMatch.name}" (no duplicate created)`, 'info');
+    } else {
+      const newCompany = await DB.add(STORES.companies, {
+        userId:      currentUser.id,
+        name:        inlineName,
+        industry:    document.getElementById('ic-industry')?.value || '',
+        size:        document.getElementById('ic-size')?.value     || '',
+        website:     (document.getElementById('ic-website')?.value || '').trim(),
+        location:    (document.getElementById('ic-location')?.value || '').trim(),
+        companyType: '',
+        source:      'contact-inline',
+        createdAt:   new Date().toISOString(),
+      });
+      companyId = newCompany.id;
+    }
+  }
   _selectedCompanyId = null; // clear after use
 
   const contact = await DB.add(STORES.contacts, {
