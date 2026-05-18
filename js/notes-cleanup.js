@@ -300,20 +300,48 @@ async function cleanCallNotes() {
     btn.innerHTML = `<svg class="w-3.5 h-3.5 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg> Cleaning…`;
   }
 
+  // ── Read the AI Type + Length controls (set on the call modal) ─────────
+  // Fall back to localStorage so this works even if the modal is detached.
+  const callType   = (typeof _callRecType   !== 'undefined' && _callRecType)   ||
+                     localStorage.getItem('pulse_call_rec_type')   || 'general';
+  const noteLength = (typeof _callRecLength !== 'undefined' && _callRecLength) ||
+                     localStorage.getItem('pulse_call_rec_length') || 'standard';
+
+  const TYPE_GUIDANCE = {
+    'general':     '',
+    'intro':       ' This was an INTRODUCTORY call — keep the structure around who they are, what they do, and follow-up steps.',
+    'follow-up':   ' This was a FOLLOW-UP call — keep the structure around what changed since last time, decisions, and next steps.',
+    'technical':   ' This was a TECHNICAL / DUE-DILIGENCE INTERVIEW — preserve every quantitative detail (revenue, margins, customers, employees, contracts, technology). Use sections like ## Business Model, ## Financials, ## Operations, ## Risks. Keep verbatim numbers and names exact.',
+    'diligence':   ' This was a DUE-DILIGENCE call — preserve every fact, figure, and claim precisely. Flag red flags clearly. Use sections like ## Findings, ## Red Flags, ## Open Questions.',
+    'networking':  ' This was a NETWORKING conversation — structure around their network, mutual interests, and follow-up actions.',
+    'pitch':       ' This was a PITCH meeting — structure around the offer, value props, objections, and the path to next steps.',
+  };
+  const LENGTH_CFG = {
+    'short':    { instr: 'Be concise — use the FEWEST bullets needed to preserve all facts. Tight, single-line bullets only. No section headers unless absolutely necessary.', tokens: 800 },
+    'standard': { instr: 'Use clear structure with bullet points and short ## section headers grouping related topics when helpful.',                                              tokens: 2000 },
+    'detailed': { instr: 'Be COMPREHENSIVE. Use ## section headers, sub-bullets where useful, and preserve EVERY specific number, name, date, and quote — do not summarise away detail. Err strongly on the side of MORE content.', tokens: 3500 },
+  };
+  const typeGuide = TYPE_GUIDANCE[callType] || '';
+  const lenCfg    = LENGTH_CFG[noteLength]   || LENGTH_CFG.standard;
+
   try {
     const settings = await DB.get(STORES.settings, `settings_${currentUser.id}`);
     let cleaned;
 
-    if (settings?.openaiApiKey || settings?.claudeApiKey) {
+    // Use Cloud Function (always available) OR local AI key OR plain regex fallback
+    const canUseAI = (typeof firebase !== 'undefined' && firebase.functions) ||
+                     settings?.openaiApiKey || settings?.claudeApiKey;
+    if (canUseAI) {
       cleaned = (await callAI(
-        `You are a notes formatting assistant for a search fund CRM. Your ONLY job is to improve the formatting, structure, readability, punctuation, and grammar of networking call notes. Rules:
+        `You are a notes formatting assistant for a search fund CRM. Your ONLY job is to improve the formatting, structure, readability, punctuation, and grammar of networking call notes.${typeGuide}
+
+Rules:
 - Preserve the original meaning and every piece of content EXACTLY — do not add, invent, or remove any facts
-- Rewrite as clean, structured bullet points
-- Group related points under short ## section headers when the notes cover multiple topics (e.g. ## Background, ## Search Fund Relevance, ## Follow-up Items)
+- ${lenCfg.instr}
 - Fix grammar, punctuation, capitalisation, and sentence flow
 - Output ONLY the cleaned notes in markdown format — no preamble, no commentary`,
         `Please clean up these call notes:\n\n${raw}`,
-        2000, 0.2
+        lenCfg.tokens, 0.2
       )).trim();
     } else {
       cleaned = cleanUpNotesLocally(raw);

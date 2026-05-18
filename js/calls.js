@@ -325,7 +325,7 @@ function _callFormHtml(defaults = {}) {
     </div>
 
     <div>
-      <div class="flex items-center justify-between mb-1">
+      <div class="flex items-center justify-between mb-1 flex-wrap gap-2">
         <label class="block text-sm font-medium text-surface-600 dark:text-surface-400">Notes</label>
         <div class="flex items-center gap-2">
           <button type="button" id="call-rec-toggle-btn" onclick="callRecToggle()"
@@ -345,12 +345,39 @@ function _callFormHtml(defaults = {}) {
         </div>
       </div>
 
+      <!-- ALWAYS-visible AI tuning controls (apply to BOTH Record→summary AND Clean Notes) -->
+      <div class="flex items-center gap-3 flex-wrap mb-2 px-3 py-2 rounded-lg bg-surface-50 dark:bg-surface-800/50 border border-surface-100 dark:border-surface-700">
+        <div class="flex items-center gap-1.5">
+          <label class="text-[11px] text-surface-500 uppercase tracking-wide font-medium">AI Type</label>
+          <select id="call-rec-type-select" onchange="callRecSetType(this.value)"
+            class="text-xs border border-surface-200 dark:border-surface-700 rounded-lg px-2 py-1 bg-white dark:bg-surface-900 text-surface-700 dark:text-surface-300 focus:outline-none focus:ring-1 focus:ring-brand-500"
+            title="Tunes the AI summary / cleaned notes to the kind of call this is">
+            <option value="general"    ${_callRecType==='general'    ?'selected':''}>General</option>
+            <option value="intro"      ${_callRecType==='intro'      ?'selected':''}>Intro</option>
+            <option value="follow-up"  ${_callRecType==='follow-up'  ?'selected':''}>Follow-up</option>
+            <option value="technical"  ${_callRecType==='technical'  ?'selected':''}>Technical interview</option>
+            <option value="diligence"  ${_callRecType==='diligence'  ?'selected':''}>Diligence</option>
+            <option value="networking" ${_callRecType==='networking' ?'selected':''}>Networking</option>
+            <option value="pitch"      ${_callRecType==='pitch'      ?'selected':''}>Pitch</option>
+          </select>
+        </div>
+        <div class="flex items-center gap-1.5">
+          <label class="text-[11px] text-surface-500 uppercase tracking-wide font-medium">Length</label>
+          <div class="flex gap-0.5 p-0.5 bg-white dark:bg-surface-900 rounded-lg border border-surface-200 dark:border-surface-700">
+            ${['short','standard','detailed'].map(l => `
+              <button type="button" id="call-rec-len-${l}" onclick="callRecSetLength('${l}')"
+                class="px-2.5 py-1 rounded-md text-xs font-medium transition-colors capitalize ${_callRecLength === l ? 'bg-brand-100 dark:bg-brand-900/30 text-brand-700 dark:text-brand-300' : 'text-surface-500 dark:text-surface-400 hover:text-surface-900 dark:hover:text-surface-100'}">${l}</button>
+            `).join('')}
+          </div>
+        </div>
+        <span class="text-[10px] text-surface-400 italic ml-auto">Applies to Record &amp; Clean Notes</span>
+      </div>
+
       <!-- Inline recorder panel (4 states: idle / recording+paused / processing / review) -->
       <div id="call-rec-panel" class="hidden mb-2 rounded-xl border border-surface-200 dark:border-surface-700 overflow-hidden bg-surface-50 dark:bg-surface-800/50">
 
         <!-- STATE: idle -->
-        <div id="call-rec-idle" class="px-4 py-3 flex flex-col gap-2">
-          <div class="flex items-center justify-between gap-3 flex-wrap">
+        <div id="call-rec-idle" class="flex items-center justify-between px-4 py-3 gap-3 flex-wrap">
           <div class="flex items-center gap-2">
             <div class="w-2 h-2 rounded-full bg-surface-300"></div>
             <span class="text-sm text-surface-500">Record your meeting directly — live transcript + AI summary</span>
@@ -370,34 +397,6 @@ function _callFormHtml(defaults = {}) {
               <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/></svg>
               Start Recording
             </button>
-          </div>
-          </div>
-          <!-- Call type + note length controls (tune the AI summary) -->
-          <div class="flex items-center gap-3 flex-wrap pt-2 border-t border-surface-100 dark:border-surface-700/50">
-            <div class="flex items-center gap-1.5">
-              <label class="text-[11px] text-surface-400 uppercase tracking-wide">Type</label>
-              <select id="call-rec-type-select" onchange="callRecSetType(this.value)"
-                class="text-xs border border-surface-200 dark:border-surface-700 rounded-lg px-2 py-1 bg-white dark:bg-surface-800 text-surface-700 dark:text-surface-300 focus:outline-none focus:ring-1 focus:ring-brand-500"
-                title="Tunes the AI summary to the kind of call this is">
-                <option value="general"    ${_callRecType==='general'    ?'selected':''}>General</option>
-                <option value="intro"      ${_callRecType==='intro'      ?'selected':''}>Intro</option>
-                <option value="follow-up"  ${_callRecType==='follow-up'  ?'selected':''}>Follow-up</option>
-                <option value="technical"  ${_callRecType==='technical'  ?'selected':''}>Technical interview</option>
-                <option value="diligence"  ${_callRecType==='diligence'  ?'selected':''}>Diligence</option>
-                <option value="networking" ${_callRecType==='networking' ?'selected':''}>Networking</option>
-                <option value="pitch"      ${_callRecType==='pitch'      ?'selected':''}>Pitch</option>
-              </select>
-            </div>
-            <div class="flex items-center gap-1.5">
-              <label class="text-[11px] text-surface-400 uppercase tracking-wide">Notes length</label>
-              <div class="flex gap-0.5 p-0.5 bg-surface-100 dark:bg-surface-800 rounded-lg">
-                ${['short','standard','detailed'].map(l => `
-                  <button type="button" id="call-rec-len-${l}" onclick="callRecSetLength('${l}')"
-                    class="px-2.5 py-1 rounded-md text-xs font-medium transition-colors capitalize ${_callRecLength === l ? 'bg-white dark:bg-surface-700 shadow-sm text-surface-900 dark:text-surface-100' : 'text-surface-500 dark:text-surface-400 hover:text-surface-900 dark:hover:text-surface-100'}">${l}</button>
-                `).join('')}
-              </div>
-            </div>
-            <span class="text-[10px] text-surface-400 italic ml-auto">Adjusts AI summary depth</span>
           </div>
         </div>
 
