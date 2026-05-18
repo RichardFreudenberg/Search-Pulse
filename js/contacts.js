@@ -224,7 +224,7 @@ async function openNewContactModal(prefill = {}) {
         </div>
 
         <!-- Inline company creation — full-width section, hidden by default. -->
-        <div id="inline-company-section" class="hidden p-4 rounded-xl bg-brand-50/60 dark:bg-surface-800/40 border border-brand-200 dark:border-brand-800/50 space-y-3">
+        <div id="inline-company-section" class="hidden p-4 rounded-xl bg-brand-50/60 dark:bg-surface-800/40 border border-brand-200 dark:border-brand-800/50 space-y-3 animate-fade-in">
           <div class="flex items-center justify-between">
             <p class="text-sm font-semibold flex items-center gap-1.5">
               <svg class="w-4 h-4 text-brand-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
@@ -484,6 +484,11 @@ function toggleInlineCompany(show) {
   if (!section) return;
   if (show) {
     section.classList.remove('hidden');
+    // Re-trigger the fade-in animation each time the panel opens
+    section.style.animation = 'none';
+    void section.offsetWidth; // force reflow
+    section.style.animation = '';
+
     const nameInput = document.getElementById('ic-name');
     // Pre-fill from picker search if user typed something there
     const picked = document.getElementById('cp-search')?.value?.trim();

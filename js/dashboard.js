@@ -1315,6 +1315,19 @@ async function _generateAISuggestions() {
     DB.getForUser(STORES.companies, currentUser.id).catch(() => []),
   ]);
 
+  // Sparse-data guard: if the user has almost nothing yet, return helpful
+  // onboarding-style suggestions WITHOUT burning an AI call. This avoids
+  // the AI inventing generic advice for a brand-new account.
+  const totalSignal = contacts.length + calls.length + deals.length;
+  if (totalSignal < 3) {
+    const tips = [];
+    if (contacts.length === 0) tips.push({ category:'admin', priority:'high', headline:'Add your first contacts',  reason:'Start building your network — add 5-10 people you know in the deal ecosystem.', link:'contacts' });
+    if (calls.length === 0)    tips.push({ category:'admin', priority:'medium', headline:'Log your first call',     reason:'Once logged, the AI can suggest specific follow-ups by name.',                  link:'calls' });
+    if (deals.length === 0)    tips.push({ category:'review', priority:'medium', headline:'Browse pipeline companies', reason:'400+ German SMEs are pre-loaded — open one and the AI will profile it for you.', link:'company-scout' });
+    tips.push({ category:'admin', priority:'low', headline:'Set your investment thesis (coming soon)', reason:'A clear thesis sharpens every AI suggestion the tool makes.', link:'settings' });
+    return tips;
+  }
+
   const today = new Date();
   const daysSince = (iso) => iso ? Math.floor((today - new Date(iso)) / 86400000) : null;
 
