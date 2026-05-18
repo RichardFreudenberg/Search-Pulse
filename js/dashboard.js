@@ -1427,7 +1427,16 @@ Return JSON with 4-6 prioritised, specific next actions.`;
 
 function _renderAISuggestionsHtml(suggestions, generatedAt) {
   if (!suggestions || suggestions.length === 0) {
-    return `<p class="text-xs text-surface-400 italic py-2">No specific next steps surfaced — your pipeline looks under control.</p>`;
+    return `
+      <div class="flex flex-col items-center text-center py-6 gap-2">
+        <div class="w-10 h-10 rounded-full bg-green-50 dark:bg-green-900/20 flex items-center justify-center">
+          <svg class="w-5 h-5 text-green-600 dark:text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+          </svg>
+        </div>
+        <p class="text-sm font-medium text-surface-700 dark:text-surface-300">Inbox zero — for now</p>
+        <p class="text-xs text-surface-400 max-w-xs">No urgent actions surfaced from your current data. Keep logging calls and adding contacts; suggestions will appear as patterns emerge.</p>
+      </div>`;
   }
 
   const ageMin = generatedAt
