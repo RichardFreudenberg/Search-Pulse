@@ -82,6 +82,20 @@ function closeModal(force = false) {
   document.removeEventListener('keydown', handleModalEscape);
   // Clean up company picker dropdown if it was portaled to body
   if (typeof cpClose === 'function') cpClose();
+  // Close any orphaned sub-dialogs spawned by the modal (e.g. the
+  // "Create New Company" full-form dialog). Otherwise they remain on
+  // screen after the parent modal disappears.
+  const subDialogs = [
+    'create-company-dlg',
+    // Add other known sub-dialog IDs here as new ones are introduced
+  ];
+  subDialogs.forEach(id => {
+    const dlg = document.getElementById(id);
+    if (dlg) {
+      try { if (typeof dlg.close === 'function' && dlg.open) dlg.close(); } catch (_) {}
+      dlg.remove();
+    }
+  });
 }
 
 function handleModalEscape(e) {

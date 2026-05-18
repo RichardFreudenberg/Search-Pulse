@@ -216,39 +216,53 @@ async function openNewContactModal(prefill = {}) {
             <div id="cp-clear-row" class="hidden mt-1 flex justify-end">
               <button type="button" onclick="cpClear()" class="text-xs text-surface-400 hover:text-red-500 transition-colors">✕ Clear selection</button>
             </div>
-
-            <!-- Inline company creation (expands when user clicks "Create New Company" or this toggle) -->
-            <div id="inline-company-section" class="hidden mt-3 p-4 rounded-xl bg-brand-50/60 dark:bg-surface-800/40 border border-brand-200 dark:border-brand-800/50 space-y-3">
-              <div class="flex items-center justify-between">
-                <p class="text-sm font-semibold flex items-center gap-1.5">
-                  <svg class="w-4 h-4 text-brand-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
-                  Quick-add company
-                </p>
-                <button type="button" onclick="toggleInlineCompany(false)" class="text-xs text-surface-400 hover:text-red-500 transition-colors">✕ Collapse</button>
-              </div>
-              <input type="text" id="ic-name" class="input-field text-sm" placeholder="Company name *" />
-              <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                <select id="ic-industry" class="input-field text-sm">
-                  <option value="">— Industry —</option>
-                  ${COMPANY_INDUSTRY_LIST.map(s => `<option value="${s}">${s}</option>`).join('')}
-                </select>
-                <select id="ic-size" class="input-field text-sm">
-                  <option value="">— Size —</option>
-                  ${COMPANY_SIZE_LIST.map(s => `<option value="${s}">${s}</option>`).join('')}
-                </select>
-              </div>
-              <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                <input type="url"  id="ic-website"  class="input-field text-sm" placeholder="https://company.com" />
-                <input type="text" id="ic-location" class="input-field text-sm" placeholder="HQ / Location" />
-              </div>
-              <p class="text-[11px] text-surface-400 italic">Filled fields will be saved as a new company and linked to this contact in one go.</p>
-            </div>
           </div>
           <div>
             <label class="block text-sm font-medium text-surface-600 dark:text-surface-400 mb-1">Location</label>
             <input type="text" id="contact-location" class="input-field" placeholder="Boston, MA" value="${escapeHtml(prefill.location || '')}" />
           </div>
         </div>
+
+        <!-- Inline company creation — full-width section, hidden by default. -->
+        <div id="inline-company-section" class="hidden p-4 rounded-xl bg-brand-50/60 dark:bg-surface-800/40 border border-brand-200 dark:border-brand-800/50 space-y-3">
+          <div class="flex items-center justify-between">
+            <p class="text-sm font-semibold flex items-center gap-1.5">
+              <svg class="w-4 h-4 text-brand-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+              Quick-add company
+            </p>
+            <button type="button" onclick="toggleInlineCompany(false)" class="text-xs text-surface-400 hover:text-red-500 transition-colors">✕ Collapse</button>
+          </div>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div class="sm:col-span-2">
+              <label class="block text-xs font-medium text-surface-500 mb-1">Company name *</label>
+              <input type="text" id="ic-name" class="input-field text-sm" placeholder="Acme GmbH" />
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-surface-500 mb-1">Industry</label>
+              <select id="ic-industry" class="input-field text-sm">
+                <option value="">— Industry —</option>
+                ${COMPANY_INDUSTRY_LIST.map(s => `<option value="${s}">${s}</option>`).join('')}
+              </select>
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-surface-500 mb-1">Size</label>
+              <select id="ic-size" class="input-field text-sm">
+                <option value="">— Size —</option>
+                ${COMPANY_SIZE_LIST.map(s => `<option value="${s}">${s}</option>`).join('')}
+              </select>
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-surface-500 mb-1">Website</label>
+              <input type="url"  id="ic-website"  class="input-field text-sm" placeholder="https://company.com" />
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-surface-500 mb-1">HQ / Location</label>
+              <input type="text" id="ic-location" class="input-field text-sm" placeholder="Hamburg, Germany" />
+            </div>
+          </div>
+          <p class="text-[11px] text-surface-400 italic">A new company will be created and linked to this contact when you save.</p>
+        </div>
+
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label class="block text-sm font-medium text-surface-600 dark:text-surface-400 mb-1">Email</label>
