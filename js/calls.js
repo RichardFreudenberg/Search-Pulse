@@ -347,8 +347,11 @@ function _callFormHtml(defaults = {}) {
 
       <!-- ALWAYS-visible AI tuning controls (apply to BOTH Record→summary AND Clean Notes) -->
       <div class="flex items-center gap-3 flex-wrap mb-2 px-3 py-2 rounded-lg bg-surface-50 dark:bg-surface-800/50 border border-surface-100 dark:border-surface-700">
+        <svg class="w-3.5 h-3.5 text-brand-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z"/>
+        </svg>
         <div class="flex items-center gap-1.5">
-          <label class="text-[11px] text-surface-500 uppercase tracking-wide font-medium">AI Type</label>
+          <label class="text-[11px] text-surface-500 uppercase tracking-wide font-medium">Type</label>
           <select id="call-rec-type-select" onchange="callRecSetType(this.value)"
             class="text-xs border border-surface-200 dark:border-surface-700 rounded-lg px-2 py-1 bg-white dark:bg-surface-900 text-surface-700 dark:text-surface-300 focus:outline-none focus:ring-1 focus:ring-brand-500"
             title="Tunes the AI summary / cleaned notes to the kind of call this is">

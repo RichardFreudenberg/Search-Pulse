@@ -1448,7 +1448,7 @@ function _renderAISuggestionsHtml(suggestions, generatedAt) {
       ${suggestions.map(s => {
         const link = validLinks.has(s.link) ? s.link : 'dashboard';
         return `
-          <div class="flex items-start gap-3 p-3 rounded-lg border border-surface-100 dark:border-surface-700 hover:bg-surface-50 dark:hover:bg-surface-800/40 transition-colors cursor-pointer"
+          <div class="ai-sugg-item flex items-start gap-3 p-3 rounded-lg border border-surface-100 dark:border-surface-700 hover:border-surface-200 dark:hover:border-surface-600 hover:bg-surface-50 dark:hover:bg-surface-800/40 transition-all cursor-pointer group"
                onclick="navigate('${link}')">
             ${priorityDot(s.priority)}
             <div class="flex-1 min-w-0">
@@ -1458,7 +1458,7 @@ function _renderAISuggestionsHtml(suggestions, generatedAt) {
               </div>
               ${s.reason ? `<p class="text-xs text-surface-500">${escapeHtml(s.reason)}</p>` : ''}
             </div>
-            <svg class="w-4 h-4 text-surface-300 flex-shrink-0 mt-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+            <svg class="w-4 h-4 text-surface-300 dark:text-surface-600 flex-shrink-0 mt-1 transition-transform group-hover:translate-x-0.5 group-hover:text-brand-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
           </div>`;
       }).join('')}
     </div>

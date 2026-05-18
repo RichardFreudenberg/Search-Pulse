@@ -4,7 +4,11 @@
 
 // Version marker — visible in browser console (F12) so you can confirm
 // the live site is running the latest code after a hard refresh.
-console.log('[Pulse] auth.js loaded — version 20260430 (LOCAL-persistence+data-safety)');
+// Single source of truth: the ?v= cache-bust string in index.html.
+if (typeof window !== 'undefined') {
+  const _v = document.currentScript?.src.match(/auth\.js\?v=([^&"']+)/)?.[1];
+  if (_v) console.log('[Pulse] auth.js loaded — version ' + _v);
+}
 
 let currentUser = null;
 

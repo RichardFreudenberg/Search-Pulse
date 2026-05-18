@@ -487,18 +487,20 @@ async function _hrApifySearch(query, state, city, apifyKey) {
   };
 
   // Area search: register_court must be a lowercase value from the actor's enum
+  // Debug flag — set window.PULSE_DEBUG_HR = true in console to enable verbose logs
+  const _hrDebug = (typeof window !== 'undefined' && window.PULSE_DEBUG_HR);
   if (_hrSearchMode === 'area' && city) {
     const courtVal = _HR_CITY_TO_COURT[city] || city.toLowerCase();
     if (_HR_VALID_COURTS.has(courtVal)) {
       input.register_court = courtVal;
-      console.log('[Handelsregister] Area court:', courtVal);
+      if (_hrDebug) console.log('[Handelsregister] Area court:', courtVal);
     } else {
-      console.log('[Handelsregister] City not in valid courts, skipping court filter:', city);
+      if (_hrDebug) console.log('[Handelsregister] City not in valid courts, skipping court filter:', city);
       // State-level post-filter still applies
     }
   }
 
-  console.log('[Handelsregister] Apify input:', input);
+  if (_hrDebug) console.log('[Handelsregister] Apify input:', input);
 
   const BASE  = 'https://api.apify.com/v2';
   const TOKEN = `token=${encodeURIComponent(apifyKey)}`;
@@ -562,7 +564,7 @@ async function _hrApifySearch(query, state, city, apifyKey) {
   if (!itemsResp.ok) throw new Error(`Failed to fetch results (${itemsResp.status})`);
 
   const items = await itemsResp.json();
-  console.log('[Handelsregister] Apify items:', items?.length, items?.[0]);
+  if (_hrDebug) console.log('[Handelsregister] Apify items:', items?.length, items?.[0]);
 
   let results = (Array.isArray(items) ? items : [])
     .map(_hrNormalizeApify)
