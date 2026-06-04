@@ -238,7 +238,7 @@ async function folderRenderSection(dealId) {
   const record = await _folderLoad(dealId);
 
   if (!record) {
-    wrapper.innerHTML = _renderEmpty(dealId);
+    wrapper.innerHTML = _faRenderEmpty(dealId);
     return;
   }
 
@@ -266,7 +266,7 @@ async function folderRenderSection(dealId) {
   wrapper.innerHTML = _renderLinked(dealId, record, files);
 }
 
-function _renderEmpty(dealId) {
+function _faRenderEmpty(dealId) {
   return `
   <div class="fa-card fa-empty">
     <div class="fa-empty-icon">
