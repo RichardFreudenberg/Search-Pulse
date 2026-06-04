@@ -43,7 +43,7 @@ function openDocUploadModal(dealId) {
         <label class="block text-sm font-medium text-surface-600 dark:text-surface-400 mb-1">File</label>
         <input type="file" id="doc-file-input" accept=".pdf,.xlsx,.xls,.csv,.txt,.png,.jpg,.jpeg,.doc,.docx"
           class="input-field" onchange="onDocFileSelected()" />
-        <p class="text-xs text-surface-400 mt-1">Supports PDF, Excel, CSV, images, and text files (max 25MB)</p>
+        <p class="text-xs text-surface-400 mt-1">Supports PDF, Excel, CSV, images, and text files (max 50MB)</p>
       </div>
       <div>
         <label class="block text-sm font-medium text-surface-600 dark:text-surface-400 mb-1">Category</label>
@@ -102,19 +102,47 @@ async function uploadDealDocument(dealId) {
   if (!input.files.length) return showToast('Please select a file', 'error');
 
   const file = input.files[0];
-  if (file.size > 25 * 1024 * 1024) return showToast('File too large (max 25MB)', 'error');
+  if (file.size > 50 * 1024 * 1024) return showToast('File too large (max 50MB)', 'error');
 
   const btn = document.getElementById('doc-upload-btn');
   btn.disabled    = true;
   btn.textContent = 'Processing…';
 
   try {
-    const base64 = await readFileAsBase64(file);
-    const ext    = file.name.split('.').pop().toLowerCase();
-    const type   = getDocType(ext);
+    const docId = generateId();
+    const ext   = file.name.split('.').pop().toLowerCase();
+    const type  = getDocType(ext);
+
+    // ── Client-side text extraction (before upload, uses base64 for PDF/XLSX) ──
+    let extractedText = null, extractedTables = null;
+    try {
+      if (type === 'pdf' && typeof pdfjsLib !== 'undefined') {
+        btn.textContent = 'Extracting text…';
+        const b64 = await readFileAsBase64(file);
+        extractedText = await extractTextFromPDF(b64);
+      } else if (type === 'xlsx' && typeof XLSX !== 'undefined') {
+        btn.textContent = 'Reading spreadsheet…';
+        const b64 = await readFileAsBase64(file);
+        const result = await extractDataFromSpreadsheet(b64, file.name);
+        extractedText = result.text;
+        extractedTables = result.tables;
+      } else if (['csv', 'txt', 'md'].includes(ext)) {
+        const b64 = await readFileAsBase64(file);
+        extractedText = atob(b64.split(',')[1] || b64);
+      }
+    } catch (e) {
+      console.warn('[Docs] Text extraction failed:', e);
+    }
+
+    // ── Upload file to Firebase Storage ──────────────────────────────────────
+    btn.textContent = 'Uploading…';
+    const storagePath = `deal-documents/${currentUser.id}/${dealId}/${docId}_${file.name}`;
+    const storageRef  = firebase.storage().ref(storagePath);
+    const snapshot    = await storageRef.put(file, { contentType: file.type || 'application/octet-stream' });
+    const storageUrl  = await snapshot.ref.getDownloadURL();
 
     const doc = {
-      id: generateId(),
+      id: docId,
       dealId,
       userId: currentUser.id,
       name: file.name,
@@ -122,30 +150,15 @@ async function uploadDealDocument(dealId) {
       category,
       mimeType: file.type,
       size: file.size,
-      data: base64,
-      extractedText: null,
-      extractedTables: null,
-      aiExtractedAt: null,      // set when AI field extraction completes
+      storageUrl,    // Firebase Storage download URL (used for preview & download)
+      storagePath,   // kept for deletion
+      extractedText,
+      extractedTables,
+      aiExtractedAt: null,
       uploadedAt: new Date().toISOString(),
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
-
-    // ── Text extraction ──────────────────────────────
-    try {
-      if (type === 'pdf' && typeof pdfjsLib !== 'undefined') {
-        btn.textContent = 'Extracting text…';
-        doc.extractedText = await extractTextFromPDF(base64);
-      } else if (type === 'xlsx' && typeof XLSX !== 'undefined') {
-        const result = await extractDataFromSpreadsheet(base64, file.name);
-        doc.extractedText = result.text;
-        doc.extractedTables = result.tables;
-      } else if (['csv', 'txt', 'md'].includes(ext)) {
-        doc.extractedText = atob(base64.split(',')[1] || base64);
-      }
-    } catch (e) {
-      console.warn('[Docs] Text extraction failed:', e);
-    }
 
     await DB.put(STORES.dealDocuments, doc);
     await logDealHistory(dealId, 'document_uploaded', {
@@ -155,19 +168,17 @@ async function uploadDealDocument(dealId) {
     closeModal();
     showToast(`"${file.name}" uploaded${doc.extractedText ? ' — reading with AI…' : ''}`, 'success');
 
-    // ── Auto AI field extraction (non-blocking) ──────
+    // ── Auto AI field extraction (non-blocking) ──────────────────────────────
     if (doc.extractedText && doc.extractedText.length > 200) {
-      // Fire-and-forget — user sees the docs tab immediately
       _autoExtractFields(doc, dealId);
     }
 
-    // ── Auto financial history extraction for financial/model/qoe docs ──────
+    // ── Auto financial history extraction ────────────────────────────────────
     if (['financials', 'model', 'qoe', 'tax'].includes(category) &&
         (doc.extractedText || doc.extractedTables)) {
       _extractFinancialHistory(doc, dealId);
     }
 
-    // Re-render docs tab
     if (typeof currentDealId !== 'undefined' && currentDealId === dealId) {
       switchDealTab('documents');
     }
@@ -560,6 +571,15 @@ async function getAllDealDocumentTexts(dealId) {
 async function deleteDealDocument(docId, dealId) {
   confirmDialog('Delete Document', 'This document and its extracted data will be permanently deleted.', async () => {
     const doc = await DB.get(STORES.dealDocuments, docId);
+
+    // Remove from Firebase Storage
+    const path = doc?.storagePath || null;
+    if (path) {
+      try { await firebase.storage().ref(path).delete(); } catch (_) {}
+    } else if (doc?.storageUrl) {
+      try { await firebase.storage().refFromURL(doc.storageUrl).delete(); } catch (_) {}
+    }
+
     await DB.delete(STORES.dealDocuments, docId);
     await logDealHistory(dealId, 'document_deleted', { documentId: docId, name: doc?.name });
     showToast('Document deleted', 'success');
@@ -634,27 +654,29 @@ async function previewDocument(docId) {
   const isImage = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'].includes(ext);
   const isPdf   = ext === 'pdf';
   const hasText = !!doc.extractedText;
+  // Use Storage URL for new docs; fall back to legacy base64 for old ones
+  const viewUrl = doc.storageUrl || doc.data || null;
 
   // Build the viewer content
   let viewerHtml = '';
-  if (isPdf && doc.data) {
+  if (isPdf && viewUrl) {
     viewerHtml = `
-      <iframe src="${doc.data}" class="w-full rounded border border-surface-200 dark:border-surface-700"
+      <iframe src="${viewUrl}" class="w-full rounded border border-surface-200 dark:border-surface-700"
         style="height:70vh;" title="${escapeHtml(doc.name)}"></iframe>`;
-  } else if (isImage && doc.data) {
+  } else if (isImage && viewUrl) {
     viewerHtml = `
       <div class="flex items-center justify-center bg-surface-50 dark:bg-surface-800 rounded border border-surface-200 dark:border-surface-700 p-4" style="min-height:40vh;">
-        <img src="${doc.data}" alt="${escapeHtml(doc.name)}" class="max-w-full max-h-[65vh] object-contain rounded" />
+        <img src="${viewUrl}" alt="${escapeHtml(doc.name)}" class="max-w-full max-h-[65vh] object-contain rounded" />
       </div>`;
   } else if (hasText) {
     viewerHtml = `
       <div class="bg-surface-50 dark:bg-surface-900 border border-surface-200 dark:border-surface-700 rounded p-4 overflow-y-auto text-xs font-mono leading-relaxed whitespace-pre-wrap text-surface-700 dark:text-surface-300" style="max-height:65vh;">${escapeHtml(doc.extractedText.slice(0, 50000))}</div>`;
-  } else if (doc.data) {
+  } else if (viewUrl) {
     viewerHtml = `
       <div class="flex flex-col items-center justify-center gap-4 py-12 text-center">
         <svg class="w-12 h-12 text-surface-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z"/></svg>
         <p class="text-sm text-surface-500">Preview not available for this file type.</p>
-        <a href="${doc.data}" download="${escapeHtml(doc.name)}" class="btn-primary">Download File</a>
+        <a href="${viewUrl}" target="_blank" rel="noopener" class="btn-primary">Open File</a>
       </div>`;
   } else {
     viewerHtml = `<p class="text-center text-sm text-surface-400 py-8">No content available to preview.</p>`;
@@ -672,7 +694,7 @@ async function previewDocument(docId) {
           </div>
         </div>
         <div class="flex items-center gap-2 flex-shrink-0 ml-4">
-          ${doc.data ? `<a href="${doc.data}" download="${escapeHtml(doc.name)}" class="btn-secondary btn-sm flex items-center gap-1.5">
+          ${viewUrl ? `<a href="${viewUrl}" target="_blank" rel="noopener" class="btn-secondary btn-sm flex items-center gap-1.5">
             <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3"/></svg>
             Download
           </a>` : ''}

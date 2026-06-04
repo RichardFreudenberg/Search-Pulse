@@ -11,10 +11,11 @@ const VALID_PAGES = new Set([
   'company-scout','sourcing','settings','shared-dashboard',
   'email-templates','brokers',
   'pipeline-company',  // /#pipeline-company/<id> — full-page detail view
+  'deal',              // /#deal/<id>/<tab> — full-page deal detail view
 ]);
 
 // Nav tab switcher
-const DEALS_PAGES = new Set(['deals','deal-search','company-scout','sourcing','shared-dashboard','email-templates','brokers','pipeline-company']);
+const DEALS_PAGES = new Set(['deals','deal-search','company-scout','sourcing','shared-dashboard','email-templates','brokers','pipeline-company','deal']);
 
 function switchNavTab(tab) {
   const relPanel  = document.getElementById('nav-panel-relationships');
@@ -90,6 +91,14 @@ function navigate(pageInput, { pushState = true } = {}) {
         renderPipelineCompanyDetail(param);
       } else {
         renderDashboard();
+      }
+      break;
+    case 'deal':
+      // param is "<dealId>" or "<dealId>/<tab>"
+      if (param && typeof viewDeal === 'function') {
+        viewDeal(param, { fromRoute: true });
+      } else {
+        renderDeals();
       }
       break;
     default: renderDashboard();

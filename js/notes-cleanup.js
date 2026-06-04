@@ -302,10 +302,12 @@ async function cleanCallNotes() {
 
   // ── Read the AI Type + Length controls (set on the call modal) ─────────
   // Fall back to localStorage so this works even if the modal is detached.
-  const callType   = (typeof _callRecType   !== 'undefined' && _callRecType)   ||
-                     localStorage.getItem('pulse_call_rec_type')   || 'general';
-  const noteLength = (typeof _callRecLength !== 'undefined' && _callRecLength) ||
-                     localStorage.getItem('pulse_call_rec_length') || 'standard';
+  const callType    = (typeof _callRecType       !== 'undefined' && _callRecType)       ||
+                      localStorage.getItem('pulse_call_rec_type')       || 'general';
+  const noteLength  = (typeof _callRecLength     !== 'undefined' && _callRecLength)     ||
+                      localStorage.getItem('pulse_call_rec_length')     || 'standard';
+  const customInstr = (typeof _callRecCustomInstr !== 'undefined' && _callRecCustomInstr) ||
+                      localStorage.getItem('pulse_call_rec_custom_instr') || '';
 
   const TYPE_GUIDANCE = {
     'general':     '',
@@ -331,6 +333,7 @@ async function cleanCallNotes() {
     // Use Cloud Function (always available) OR local AI key OR plain regex fallback
     const canUseAI = (typeof firebase !== 'undefined' && firebase.functions) ||
                      settings?.openaiApiKey || settings?.claudeApiKey;
+    const customPart = customInstr ? `\n- ${customInstr}` : '';
     if (canUseAI) {
       cleaned = (await callAI(
         `You are a notes formatting assistant for a search fund CRM. Your ONLY job is to improve the formatting, structure, readability, punctuation, and grammar of networking call notes.${typeGuide}
@@ -338,7 +341,7 @@ async function cleanCallNotes() {
 Rules:
 - Preserve the original meaning and every piece of content EXACTLY — do not add, invent, or remove any facts
 - ${lenCfg.instr}
-- Fix grammar, punctuation, capitalisation, and sentence flow
+- Fix grammar, punctuation, capitalisation, and sentence flow${customPart}
 - Output ONLY the cleaned notes in markdown format — no preamble, no commentary`,
         `Please clean up these call notes:\n\n${raw}`,
         lenCfg.tokens, 0.2

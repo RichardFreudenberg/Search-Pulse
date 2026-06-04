@@ -84,6 +84,46 @@ async function renderSettings() {
             `).join('')}
           </div>
         </div>
+
+        <!-- Note-taking defaults -->
+        <div class="pt-4 mt-4 border-t border-surface-100 dark:border-surface-800">
+          <p class="text-sm font-semibold mb-3">Note-Taking Defaults</p>
+          <p class="text-xs text-surface-400 mb-4">Default AI style for call recordings and note clean-up</p>
+          <div class="space-y-4">
+            <div class="flex items-center justify-between gap-4">
+              <div>
+                <p class="text-sm">Default call type</p>
+                <p class="text-xs text-surface-400">Guides how AI structures the notes</p>
+              </div>
+              <select id="settings-default-call-type" class="input-field" style="width:160px">
+                ${[
+                  ['general','General'],['intro','Intro'],['follow-up','Follow-up'],
+                  ['technical','Technical interview'],['diligence','Diligence'],
+                  ['networking','Networking'],['pitch','Pitch']
+                ].map(([v,l]) => `<option value="${v}" ${(localStorage.getItem('pulse_call_rec_type')||'general')===v?'selected':''}>${l}</option>`).join('')}
+              </select>
+            </div>
+            <div class="flex items-center justify-between gap-4">
+              <div>
+                <p class="text-sm">Default note length</p>
+                <p class="text-xs text-surface-400">Controls detail level of AI summaries</p>
+              </div>
+              <div class="flex gap-0.5 p-0.5 bg-white dark:bg-surface-900 rounded-lg border border-surface-200 dark:border-surface-700 flex-shrink-0">
+                ${['short','standard','detailed'].map(l => `
+                  <button type="button" onclick="settingsSetNoteLength('${l}')" id="settings-note-len-${l}"
+                    class="px-3 py-1.5 rounded-md text-xs font-medium transition-colors capitalize ${(localStorage.getItem('pulse_call_rec_length')||'standard')===l ? 'bg-brand-100 dark:bg-brand-900/30 text-brand-700 dark:text-brand-300' : 'text-surface-500 dark:text-surface-400 hover:text-surface-900 dark:hover:text-surface-100'}">${l}</button>
+                `).join('')}
+              </div>
+            </div>
+            <div>
+              <p class="text-sm mb-1">Custom style instructions</p>
+              <p class="text-xs text-surface-400 mb-2">Tell the AI how to format notes — applies to recordings and Clean Notes</p>
+              <textarea id="settings-note-custom-instr" class="input-field" rows="2"
+                placeholder="e.g. Focus on financials and numbers. Always include a Red Flags section. Use formal language."
+              >${escapeHtml(localStorage.getItem('pulse_call_rec_custom_instr') || '')}</textarea>
+            </div>
+          </div>
+        </div>
       </div>
 
       ${!_isOwner ? `
@@ -694,6 +734,18 @@ function clearResearchCacheFromSettings() {
   }
 }
 
+function settingsSetNoteLength(len) {
+  localStorage.setItem('pulse_call_rec_length', len);
+  if (typeof _callRecLength !== 'undefined') _callRecLength = len;
+  ['short','standard','detailed'].forEach(l => {
+    const btn = document.getElementById(`settings-note-len-${l}`);
+    if (!btn) return;
+    btn.className = `px-3 py-1.5 rounded-md text-xs font-medium transition-colors capitalize ${
+      l === len ? 'bg-brand-100 dark:bg-brand-900/30 text-brand-700 dark:text-brand-300'
+                : 'text-surface-500 dark:text-surface-400 hover:text-surface-900 dark:hover:text-surface-100'}`;
+  });
+}
+
 async function saveSettings() {
   const settings = await DB.get(STORES.settings, `settings_${currentUser.id}`);
   settings.defaultFollowUpDays = parseInt(document.getElementById('settings-default-followup').value) || 14;
@@ -710,6 +762,16 @@ async function saveSettings() {
   if (_sf('settings-apify-key'))         settings.apifyApiKey             = _sf('settings-apify-key').value.trim();
   settings.linkedInProfileUrl = document.getElementById('settings-linkedin-url').value.trim();
   settings.linkedInConnected = !!settings.linkedInProfileUrl;
+
+  // Note-taking defaults — persist to localStorage so the call modal picks them up
+  const _noteType = document.getElementById('settings-default-call-type')?.value;
+  const _noteCustom = document.getElementById('settings-note-custom-instr')?.value || '';
+  if (_noteType) {
+    localStorage.setItem('pulse_call_rec_type', _noteType);
+    if (typeof _callRecType !== 'undefined') _callRecType = _noteType;
+  }
+  localStorage.setItem('pulse_call_rec_custom_instr', _noteCustom);
+  if (typeof _callRecCustomInstr !== 'undefined') _callRecCustomInstr = _noteCustom;
 
   settings.stageCadence = {};
   for (const stage of STAGES) {

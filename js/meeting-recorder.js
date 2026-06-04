@@ -738,23 +738,25 @@ const _LENGTH_GUIDANCE = {
 function _mrResolveTuning(opts) {
   const t = (opts && opts.callType   && _CALL_TYPE_GUIDANCE[opts.callType])   ? opts.callType   : 'general';
   const l = (opts && opts.noteLength && _LENGTH_GUIDANCE[opts.noteLength])    ? opts.noteLength : 'standard';
-  return { callType: t, noteLength: l, typeGuide: _CALL_TYPE_GUIDANCE[t], lenCfg: _LENGTH_GUIDANCE[l] };
+  const c = (opts && opts.customInstr) ? opts.customInstr.trim() : '';
+  return { callType: t, noteLength: l, typeGuide: _CALL_TYPE_GUIDANCE[t], lenCfg: _LENGTH_GUIDANCE[l], customInstr: c };
 }
 
 async function _mrGenerateSummary(transcript, userNotes, langOverride = null, opts = {}) {
   if (!transcript && !userNotes) return null;
   const lang = langOverride || _mrSession?.language || _mrLanguage;
   const langNote = lang.startsWith('de') ? ' The transcript may be in German — understand it fully and write the summary in English.' : '';
-  const { typeGuide, lenCfg, noteLength } = _mrResolveTuning(opts);
+  const { typeGuide, lenCfg, noteLength, customInstr } = _mrResolveTuning(opts);
 
   const content = [transcript, userNotes].filter(Boolean).join('\n\n---\nUser notes:\n');
 
   const detailExtra = noteLength === 'detailed'
     ? ' Include sub-bullets where useful; do not omit numbers, names, or specifics.'
     : '';
+  const customPart = customInstr ? ` Additional instructions: ${customInstr}` : '';
 
   const result = await callAI(
-    `You are an expert meeting summarizer for a search fund investor. Be concise and actionable.${typeGuide}${langNote}`,
+    `You are an expert meeting summarizer for a search fund investor. Be concise and actionable.${typeGuide}${langNote}${customPart}`,
     `Summarize this meeting in ${lenCfg.bulletRange} bullet points. Focus on: key insights, decisions made, red flags, and next steps.${detailExtra}\n\nMeeting content:\n${content}`,
     lenCfg.summaryTokens, 0.2
   );
@@ -765,7 +767,8 @@ async function _mrGenerateStructuredNote(transcript, userNotes, langOverride = n
   if (!transcript && !userNotes) return null;
   const lang = langOverride || _mrSession?.language || _mrLanguage;
   const langNote = lang.startsWith('de') ? ' The transcript may be in German — understand it and return all field values in English.' : '';
-  const { typeGuide, lenCfg, noteLength } = _mrResolveTuning(opts);
+  const { typeGuide, lenCfg, noteLength, customInstr } = _mrResolveTuning(opts);
+  const customPart = customInstr ? ` Additional instructions: ${customInstr}` : '';
 
   // Detailed: ask for richer arrays
   const arraySize = noteLength === 'short'    ? 'minimal (1-3 items per array)'
@@ -774,7 +777,7 @@ async function _mrGenerateStructuredNote(transcript, userNotes, langOverride = n
 
   const content = [transcript, userNotes].filter(Boolean).join('\n\n---\nUser notes:\n');
   const raw = await callAI(
-    `You are an expert meeting analyst for a search fund investor. Return ONLY valid JSON — no markdown, no code blocks.${typeGuide}${langNote}`,
+    `You are an expert meeting analyst for a search fund investor. Return ONLY valid JSON — no markdown, no code blocks.${typeGuide}${langNote}${customPart}`,
     `Analyze this meeting and return a JSON object with these fields:
 - title: string (short descriptive title)
 - themes: string[] (main topics discussed)

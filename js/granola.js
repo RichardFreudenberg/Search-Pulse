@@ -415,7 +415,7 @@ async function granolaImportMeeting(meetingId, dealId) {
 
     closeModal();
     showToast(`✓ "${call.title}" imported${call.processedAt ? ' & AI-analysed' : ''}`, 'success');
-    if (typeof currentDealId !== 'undefined' && currentDealId === dealId) switchDealTab('calls');
+    if (typeof currentDealId !== 'undefined' && currentDealId === dealId) switchDealTab('notes');
 
   } catch (e) {
     const el = document.getElementById('g-pick-list');
@@ -628,7 +628,7 @@ async function granolaConfirmManual(dealId) {
     _gManPendingCall = null;
     closeModal();
     showToast(`✓ "${savedTitle}" logged${wasAI ? ' & AI-analysed' : ''}`, 'success');
-    if (typeof currentDealId !== 'undefined' && currentDealId === dealId) switchDealTab('calls');
+    if (typeof currentDealId !== 'undefined' && currentDealId === dealId) switchDealTab('notes');
 
   } catch (err) {
     if (btn) { btn.disabled = false; btn.textContent = 'Save Call'; }
@@ -1026,7 +1026,7 @@ async function gProcessCall(callId) {
     await DB.put(STORES.calls, { ...call, updatedAt: new Date().toISOString() });
     await _applyDealUpdates(ai.dealUpdates, deal, call.dealId);
     showToast('✓ AI analysis complete', 'success');
-    if (typeof currentDealId !== 'undefined' && currentDealId === call.dealId) switchDealTab('calls');
+    if (typeof currentDealId !== 'undefined' && currentDealId === call.dealId) switchDealTab('notes');
   } catch (e) {
     showToast('Analysis failed: ' + e.message, 'error');
     if (btn) { btn.disabled = false; btn.innerHTML = `${_gIcon(13)} Analyse with AI`; }
@@ -1141,7 +1141,7 @@ function gDeleteCall(callId, dealId) {
   confirmDialog('Remove Meeting', 'Remove this call log from the deal? Your files are untouched.', async () => {
     await DB.delete(STORES.calls, callId);
     showToast('Call removed', 'info');
-    if (typeof currentDealId !== 'undefined' && currentDealId === dealId) switchDealTab('calls');
+    if (typeof currentDealId !== 'undefined' && currentDealId === dealId) switchDealTab('notes');
   });
 }
 

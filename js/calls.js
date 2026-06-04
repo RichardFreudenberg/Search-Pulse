@@ -27,6 +27,7 @@ let _callRecContextInfo  = '';     // contact/deal names injected into Whisper +
 let _callRecLang         = localStorage.getItem('pulse_call_rec_lang') || 'en-US'; // persisted language
 let _callRecType         = localStorage.getItem('pulse_call_rec_type') || 'general'; // general|intro|follow-up|technical|diligence|networking|pitch
 let _callRecLength       = localStorage.getItem('pulse_call_rec_length') || 'standard'; // short|standard|detailed
+let _callRecCustomInstr  = localStorage.getItem('pulse_call_rec_custom_instr') || ''; // free-form style instructions
 
 // ── Render Calls List ────────────────────────────────────────────
 
@@ -114,12 +115,20 @@ async function renderCalls() {
                     ` : ''}
                     ${call.followUpDate ? `<p class="text-xs text-surface-500 mt-2">Follow-up: ${formatDate(call.followUpDate)}</p>` : ''}
                   </div>
-                  <button onclick="openEditCallModal('${call.id}')" title="Edit call"
-                    class="flex-shrink-0 p-1.5 text-surface-400 hover:text-brand-600 transition-colors">
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                    </svg>
-                  </button>
+                  <div class="flex-shrink-0 flex items-center gap-0.5">
+                    <button onclick="openEditCallModal('${call.id}')" title="Edit call"
+                      class="p-1.5 text-surface-400 hover:text-brand-600 transition-colors">
+                      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                      </svg>
+                    </button>
+                    <button onclick="deleteCall('${call.id}')" title="Delete call"
+                      class="p-1.5 text-surface-400 hover:text-red-500 transition-colors">
+                      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                      </svg>
+                    </button>
+                  </div>
                 </div>
               </div>
             `;
@@ -374,6 +383,13 @@ function _callFormHtml(defaults = {}) {
           </div>
         </div>
         <span class="text-[10px] text-surface-400 italic ml-auto">Applies to Record &amp; Clean Notes</span>
+      </div>
+      <div class="mt-1.5">
+        <input type="text" id="call-rec-custom-instr"
+          placeholder="Style instructions… e.g. 'Focus on financials, formal tone, always list risks'"
+          value="${escapeHtml(_callRecCustomInstr)}"
+          oninput="callRecSetCustomInstr(this.value)"
+          class="w-full text-xs border border-surface-200 dark:border-surface-700 rounded-lg px-2.5 py-1.5 bg-white dark:bg-surface-900 text-surface-700 dark:text-surface-300 placeholder-surface-400 focus:outline-none focus:ring-1 focus:ring-brand-500" />
       </div>
 
       <!-- Inline recorder panel (4 states: idle / recording+paused / processing / review) -->
@@ -786,6 +802,23 @@ function callRecSetLength(len) {
   });
 }
 
+function callRecSetCustomInstr(val) {
+  _callRecCustomInstr = val || '';
+  localStorage.setItem('pulse_call_rec_custom_instr', _callRecCustomInstr);
+}
+
+function deleteCall(callId) {
+  confirmDialog(
+    'Delete Call',
+    'This call and its notes will be permanently deleted. This cannot be undone.',
+    async () => {
+      await DB.delete(STORES.calls, callId);
+      showToast('Call deleted', 'success');
+      renderCalls();
+    }
+  );
+}
+
 function _callRecStartSpeech() {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SR) return;
@@ -901,6 +934,7 @@ async function callRecStop() {
 
   const settings  = await DB.get(STORES.settings, `settings_${currentUser.id}`) || {};
   const openAiKey = settings.openAiApiKey || settings.openaiApiKey || '';
+  const _aiOpts   = { callType: _callRecType, noteLength: _callRecLength, customInstr: _callRecCustomInstr };
 
   // Step 1: Whisper fallback — trigger when fewer than 40 words captured
   if (audioBlob && openAiKey && transcript.split(/\s+/).filter(Boolean).length < 40) {
@@ -922,8 +956,8 @@ async function callRecStop() {
   let aiSummary = null, aiStructuredNote = null;
   try {
     [aiSummary, aiStructuredNote] = await Promise.all([
-      _mrGenerateSummary(transcript, userNotes, _callRecLang, { callType: _callRecType, noteLength: _callRecLength }),
-      _mrGenerateStructuredNote(transcript, userNotes, _callRecLang, { callType: _callRecType, noteLength: _callRecLength }),
+      _mrGenerateSummary(transcript, userNotes, _callRecLang, _aiOpts),
+      _mrGenerateStructuredNote(transcript, userNotes, _callRecLang, _aiOpts),
     ]);
   } catch (_) {}
 
@@ -932,6 +966,7 @@ async function callRecStop() {
     segments: _callRecSegments.slice(),
     callType:   _callRecType,
     noteLength: _callRecLength,
+    customInstr: _callRecCustomInstr,
   };
 
   // Render review

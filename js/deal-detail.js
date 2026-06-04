@@ -5,8 +5,30 @@
 let currentDealId = null;
 let currentDealTab = 'overview';
 
-async function viewDeal(dealId) {
+async function viewDeal(dealIdInput, opts = {}) {
+  // Routable input: "<id>" (open/refresh) or "<id>/<tab>" (deep link / restore)
+  const raw = String(dealIdInput || '');
+  const slash = raw.indexOf('/');
+  const dealId  = slash >= 0 ? raw.slice(0, slash) : raw;
+  const routeTab = slash >= 0 ? raw.slice(slash + 1) : null;
+
   currentDealId = dealId;
+  currentPage = 'deal';
+  // Only override the active tab when the URL specifies one; otherwise preserve
+  // the current tab (so in-place refreshes after edits/uploads stay put).
+  if (routeTab) currentDealTab = routeTab;
+
+  // Reflect the deal + tab in the URL so refresh and back/forward restore it.
+  const hash = `deal/${dealId}/${currentDealTab}`;
+  const stateObj = { page: 'deal', param: `${dealId}/${currentDealTab}` };
+  try {
+    if (opts.fromRoute) history.replaceState(stateObj, '', '#' + hash);
+    else                history.pushState(stateObj, '', '#' + hash);
+  } catch (_) {}
+
+  // Keep the sidebar in the Deals section
+  if (typeof switchNavTab === 'function') switchNavTab('deals');
+
   const pageContent = document.getElementById('page-content');
   pageContent.innerHTML = `<div class="p-4 lg:p-8 max-w-6xl mx-auto">${renderLoadingSkeleton(6)}</div>`;
 
@@ -20,22 +42,23 @@ async function viewDeal(dealId) {
   } catch (_) {}
 
   // Fetch counts for tabs
-  const [tabNotes, tabDocs, tabTasks, tabCalls] = await Promise.all([
+  const [manualNoteCount, tabDocs, tabTasks, linkedCallCount] = await Promise.all([
     DB.getAllByIndex(STORES.dealNotes, 'dealId', dealId).then(r => r.filter(x => x.userId === currentUser.id).length).catch(() => 0),
     DB.getAllByIndex(STORES.dealDocuments, 'dealId', dealId).then(r => r.filter(x => x.userId === currentUser.id).length).catch(() => 0),
     DB.getAllByIndex(STORES.dealTasks, 'dealId', dealId).then(r => r.filter(x => x.userId === currentUser.id && x.status !== 'done').length).catch(() => 0),
-    DB.getAllByIndex(STORES.dealCalls, 'dealId', dealId).then(r => r.filter(x => x.userId === currentUser.id).length).catch(() => 0),
+    DB.getForUser(STORES.calls, currentUser.id).then(r => r.filter(c => c.dealId === dealId).length).catch(() => 0),
   ]);
+  // Notes tab aggregates written notes + notes pulled from linked calls
+  const tabNotes = manualNoteCount + linkedCallCount;
 
   // Guard: if we were on a removed tab, fall back to overview
-  if (['scoring', 'gap-finder'].includes(currentDealTab)) currentDealTab = 'overview';
+  if (['scoring', 'gap-finder', 'calls'].includes(currentDealTab)) currentDealTab = 'overview';
 
   const tabs = [
     { id: 'overview',   label: 'Overview',      icon: '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M2.25 12l8.954-8.955a1.126 1.126 0 011.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25" /></svg>' },
     { id: 'financials', label: 'Financials',    icon: '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z" /></svg>' },
     { id: 'fit-score',  label: 'Fit Score',     icon: '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.955 11.955 0 003 12c0 6.627 5.373 12 12 12s12-5.373 12-12c0-2.13-.558-4.128-1.534-5.856A11.955 11.955 0 0112 5.044z" /></svg>' },
     { id: 'diligence',  label: 'AI Diligence',  icon: '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" /></svg>' },
-    { id: 'calls',      label: 'Calls',         icon: '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z"/></svg>', count: tabCalls || null },
     { id: 'notes',      label: 'Notes',         icon: '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" /></svg>', count: tabNotes },
     { id: 'documents',  label: 'Documents',     icon: '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" /></svg>', count: tabDocs },
     { id: 'tasks',      label: 'Tasks',         icon: '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>', count: tabTasks },
@@ -145,6 +168,15 @@ async function viewDeal(dealId) {
 
 async function switchDealTab(tabId) {
   currentDealTab = tabId;
+
+  // Keep the URL in sync so a page refresh stays on this tab (no extra history entry)
+  if (currentDealId) {
+    try {
+      const hash = `deal/${currentDealId}/${tabId}`;
+      history.replaceState({ page: 'deal', param: `${currentDealId}/${tabId}` }, '', '#' + hash);
+    } catch (_) {}
+  }
+
   const container = document.getElementById('deal-tab-content');
   if (!container) return;
 
@@ -162,7 +194,6 @@ async function switchDealTab(tabId) {
       container.innerHTML = await renderDealFinancialsTab();
       setTimeout(() => _initFinancialChartsForDeal(currentDealId), 60);
       break;
-    case 'calls':     container.innerHTML = await renderDealCallsTab(); break;
     case 'notes':     container.innerHTML = await renderDealNotesTab(); break;
     case 'documents':
       container.innerHTML = await renderDealDocsTab();
@@ -336,40 +367,144 @@ async function renderDealOverviewTab() {
 
 // === NOTES TAB ===
 async function renderDealNotesTab() {
-  const notes = (await DB.getAllByIndex(STORES.dealNotes, 'dealId', currentDealId))
-    .filter(n => n.userId === currentUser.id)
-    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  // 1. Manual notes authored directly on the deal
+  const manualNotes = (await DB.getAllByIndex(STORES.dealNotes, 'dealId', currentDealId))
+    .filter(n => n.userId === currentUser.id);
+
+  // 2. Notes pulled in from calls linked to this deal (via call.dealId)
+  const allCalls = await DB.getForUser(STORES.calls, currentUser.id).catch(() => []);
+  const linkedCalls = allCalls.filter(c => c.dealId === currentDealId);
+
+  // Normalize both sources into a single, sortable list
+  const items = [];
+
+  for (const n of manualNotes) {
+    items.push({
+      kind: 'manual',
+      id: n.id,
+      type: n.type || 'note',
+      pinned: !!n.pinned,
+      content: n.content || '',
+      sortDate: n.createdAt || n.updatedAt || new Date(0).toISOString(),
+      displayDate: n.createdAt,
+    });
+  }
+
+  for (const c of linkedCalls) {
+    const body = (c.cleanedNotes || c.aiSummary || c.notes || '').trim();
+    // Skip calls that carry no usable notes content at all
+    if (!body && !(c.keyInsights?.length) && !(c.actionItems?.length || c.tasks?.length)) continue;
+    items.push({
+      kind: 'call',
+      id: c.id,
+      title: c.title || c.outcome || 'Call',
+      content: body,
+      keyInsights: c.keyInsights || [],
+      actionItems: (c.actionItems && c.actionItems.length)
+        ? c.actionItems.map(a => (typeof a === 'string' ? a : (a.task || a.title || ''))).filter(Boolean)
+        : (c.tasks || []).map(t => (typeof t === 'string' ? t : (t.title || t.task || ''))).filter(Boolean),
+      nextSteps: c.nextMeetingContext || c.nextSteps || '',
+      isAI: !!c.processedAt,
+      sortDate: c.date || c.createdAt || new Date(0).toISOString(),
+      displayDate: c.date || c.createdAt,
+    });
+  }
+
+  // Pinned manual notes first, then everything by date (newest first)
+  items.sort((a, b) => {
+    if (a.pinned && !b.pinned) return -1;
+    if (!a.pinned && b.pinned) return 1;
+    return new Date(b.sortDate) - new Date(a.sortDate);
+  });
+
+  const callCount = items.filter(i => i.kind === 'call').length;
+  const manualCount = items.filter(i => i.kind === 'manual').length;
 
   return `
     <div>
       <div class="flex justify-between items-center mb-4">
-        <h3 class="text-sm font-semibold">${notes.length} note${notes.length !== 1 ? 's' : ''}</h3>
+        <div>
+          <h3 class="text-sm font-semibold">${items.length} note${items.length !== 1 ? 's' : ''}</h3>
+          <p class="text-xs text-surface-400 mt-0.5">${manualCount} written &bull; ${callCount} from linked call${callCount !== 1 ? 's' : ''}</p>
+        </div>
         <button onclick="openDealNoteModal('${currentDealId}')" class="btn-primary btn-sm">+ Add Note</button>
       </div>
-      ${notes.length === 0 ? `
+      ${items.length === 0 ? `
         <div class="card text-center py-8">
-          <p class="text-sm text-surface-500">No notes yet. Add your first note about this deal.</p>
+          <p class="text-sm text-surface-500">No notes yet. Add a note, or log a call linked to this deal and its notes will appear here automatically.</p>
         </div>
-      ` : notes.map(note => `
-        <div class="card mb-3">
-          <div class="flex items-start justify-between mb-2">
-            <div class="flex items-center gap-2">
-              <span class="badge badge-${note.type === 'call_note' ? 'blue' : note.type === 'meeting_note' ? 'purple' : 'green'}">${note.type === 'call_note' ? 'Call' : note.type === 'meeting_note' ? 'Meeting' : 'Note'}</span>
-              ${note.pinned ? '<svg class="w-4 h-4 text-yellow-500" fill="currentColor" viewBox="0 0 24 24"><path d="M11.48 3.499a.562.562 0 011.04 0l2.125 5.111a.563.563 0 00.475.345l5.518.442c.499.04.701.663.321.988l-4.204 3.602a.563.563 0 00-.182.557l1.285 5.385a.562.562 0 01-.84.61l-4.725-2.885a.563.563 0 00-.586 0L6.982 20.54a.562.562 0 01-.84-.61l1.285-5.386a.562.562 0 00-.182-.557l-4.204-3.602a.563.563 0 01.321-.988l5.518-.442a.563.563 0 00.475-.345L11.48 3.5z" /></svg>' : ''}
-            </div>
-            <div class="flex items-center gap-1">
-              <span class="text-xs text-surface-400">${formatDateTime(note.createdAt)}</span>
-              <button onclick="openDealNoteModal('${currentDealId}', '${note.id}')" class="p-1 rounded hover:bg-surface-100 dark:hover:bg-surface-800 text-surface-400">
-                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125" /></svg>
-              </button>
-              <button onclick="deleteDealNote('${note.id}')" class="p-1 rounded hover:bg-red-50 dark:hover:bg-red-900/20 text-surface-400 hover:text-red-500">
-                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg>
-              </button>
-            </div>
-          </div>
-          <p class="text-sm whitespace-pre-wrap">${escapeHtml(note.content)}</p>
+      ` : items.map(item => item.kind === 'call' ? _renderCallNoteCard(item) : _renderManualNoteCard(item)).join('')}
+    </div>
+  `;
+}
+
+function _renderManualNoteCard(note) {
+  return `
+    <div class="card mb-3">
+      <div class="flex items-start justify-between mb-2">
+        <div class="flex items-center gap-2">
+          <span class="badge badge-${note.type === 'call_note' ? 'blue' : note.type === 'meeting_note' ? 'purple' : 'green'}">${note.type === 'call_note' ? 'Call' : note.type === 'meeting_note' ? 'Meeting' : 'Note'}</span>
+          ${note.pinned ? '<svg class="w-4 h-4 text-yellow-500" fill="currentColor" viewBox="0 0 24 24"><path d="M11.48 3.499a.562.562 0 011.04 0l2.125 5.111a.563.563 0 00.475.345l5.518.442c.499.04.701.663.321.988l-4.204 3.602a.563.563 0 00-.182.557l1.285 5.385a.562.562 0 01-.84.61l-4.725-2.885a.563.563 0 00-.586 0L6.982 20.54a.562.562 0 01-.84-.61l1.285-5.386a.562.562 0 00-.182-.557l-4.204-3.602a.563.563 0 01.321-.988l5.518-.442a.563.563 0 00.475-.345L11.48 3.5z" /></svg>' : ''}
         </div>
-      `).join('')}
+        <div class="flex items-center gap-1">
+          <span class="text-xs text-surface-400">${formatDateTime(note.displayDate)}</span>
+          <button onclick="openDealNoteModal('${currentDealId}', '${note.id}')" class="p-1 rounded hover:bg-surface-100 dark:hover:bg-surface-800 text-surface-400">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125" /></svg>
+          </button>
+          <button onclick="deleteDealNote('${note.id}')" class="p-1 rounded hover:bg-red-50 dark:hover:bg-red-900/20 text-surface-400 hover:text-red-500">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg>
+          </button>
+        </div>
+      </div>
+      <p class="text-sm whitespace-pre-wrap">${escapeHtml(note.content)}</p>
+    </div>
+  `;
+}
+
+function _renderCallNoteCard(item) {
+  return `
+    <div class="card mb-3 border-l-2 border-l-blue-400 dark:border-l-blue-600">
+      <div class="flex items-start justify-between mb-2">
+        <div class="flex items-center gap-2 min-w-0">
+          <span class="badge badge-blue">Call</span>
+          ${item.isAI ? '<span class="badge badge-purple">AI</span>' : ''}
+          <span class="text-sm font-semibold truncate">${escapeHtml(item.title)}</span>
+        </div>
+        <span class="text-xs text-surface-400 whitespace-nowrap ml-2">${formatDateTime(item.displayDate)}</span>
+      </div>
+
+      ${item.content ? `
+        <p class="text-sm whitespace-pre-wrap text-surface-700 dark:text-surface-300 leading-relaxed">${escapeHtml(item.content)}</p>
+      ` : ''}
+
+      ${item.keyInsights.length ? `
+        <div class="mt-3">
+          <p class="text-xs font-semibold uppercase tracking-wide text-surface-400 mb-1">Key Insights</p>
+          <ul class="list-disc list-inside space-y-0.5">
+            ${item.keyInsights.map(k => `<li class="text-sm text-surface-600 dark:text-surface-400">${escapeHtml(typeof k === 'string' ? k : (k.text || ''))}</li>`).join('')}
+          </ul>
+        </div>
+      ` : ''}
+
+      ${item.actionItems.length ? `
+        <div class="mt-3">
+          <p class="text-xs font-semibold uppercase tracking-wide text-surface-400 mb-1">Action Items</p>
+          <ul class="space-y-0.5">
+            ${item.actionItems.map(a => `<li class="text-sm text-surface-600 dark:text-surface-400 flex gap-1.5"><span class="text-brand-500">&#9633;</span><span>${escapeHtml(a)}</span></li>`).join('')}
+          </ul>
+        </div>
+      ` : ''}
+
+      ${item.nextSteps ? `
+        <div class="mt-3 pt-2 border-t border-surface-100 dark:border-surface-800">
+          <p class="text-xs font-semibold uppercase tracking-wide text-surface-400 mb-1">Next Steps</p>
+          <p class="text-sm text-surface-600 dark:text-surface-400">${escapeHtml(item.nextSteps)}</p>
+        </div>
+      ` : ''}
+
+      <div class="mt-3 pt-2 border-t border-surface-100 dark:border-surface-800">
+        <button onclick="openEditCallModal('${item.id}')" class="text-xs text-brand-600 hover:text-brand-700 font-medium">View full call &rarr;</button>
+      </div>
     </div>
   `;
 }

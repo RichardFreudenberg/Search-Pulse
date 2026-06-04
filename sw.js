@@ -4,7 +4,7 @@
    so the app never runs stale cached code after a deployment.
    ============================================================ */
 
-const SW_VERSION = '20260428t';
+const SW_VERSION = '20260604';
 
 // Install: activate immediately, don't wait for old tabs to close
 self.addEventListener('install', () => self.skipWaiting());

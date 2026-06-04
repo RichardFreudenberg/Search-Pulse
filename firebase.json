@@ -11,5 +11,21 @@
         "*.local"
       ]
     }
-  ]
+  ],
+  "storage": {
+    "rules": "storage.rules"
+  },
+  "hosting": {
+    "public": ".",
+    "ignore": [
+      "firebase.json",
+      "storage.rules",
+      ".firebaserc",
+      "**/.*",
+      "**/node_modules/**",
+      "pipeline/**",
+      "serve.bat",
+      "serve.ps1"
+    ]
+  }
 }
