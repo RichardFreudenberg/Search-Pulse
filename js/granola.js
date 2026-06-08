@@ -213,17 +213,49 @@ DEAL CONTEXT (do not invent data not in the transcript):
 - Stage: ${deal.stage}
 ` : '';
 
+  // ── Note-style tuning ─────────────────────────────────────────────
+  // Honour the Type / Length / Custom-instruction controls from the Log Call
+  // modal (persisted in localStorage) so the user fully controls how detailed
+  // the AI summary is. Defaults to "detailed" so summaries are rich by default.
+  const _noteLen    = (typeof _callRecLength      !== 'undefined' && _callRecLength)      || localStorage.getItem('pulse_call_rec_length')       || 'detailed';
+  const _noteType   = (typeof _callRecType        !== 'undefined' && _callRecType)        || localStorage.getItem('pulse_call_rec_type')         || 'general';
+  const _noteCustom = (typeof _callRecCustomInstr !== 'undefined' && _callRecCustomInstr) || localStorage.getItem('pulse_call_rec_custom_instr') || '';
+
+  const G_LEN = {
+    short:    { summary: 'a tight 2–3 sentence executive summary',
+                insights: '3–5 of the most important', actions: 'the few critical',
+                detailRule: 'Keep everything brief — only the essentials, single-line bullets.', tokens: 1200 },
+    standard: { summary: 'a 4–6 sentence executive summary',
+                insights: '5–8', actions: 'all clearly-stated',
+                detailRule: 'Balance brevity with completeness; keep important specifics.', tokens: 2400 },
+    detailed: { summary: 'a thorough, multi-paragraph summary (at least 6–10 sentences) that walks through the conversation in the order it happened and preserves EVERY number, name, date, figure, term, and specific claim mentioned',
+                insights: '8–15 (as many as the content genuinely supports)', actions: 'every',
+                detailRule: 'Be COMPREHENSIVE — do NOT summarise away detail. Capture specifics verbatim where they matter (financials, deal terms, names, commitments, dates). Each insight should be a full, specific sentence, not a fragment.', tokens: 4000 },
+  };
+  const G_TYPE = {
+    general:     '',
+    intro:       ' This was an INTRODUCTORY call — emphasise who they are, the business, and follow-up steps.',
+    'follow-up': ' This was a FOLLOW-UP call — emphasise what changed since last time, decisions, and next steps.',
+    technical:   ' This was a TECHNICAL / DUE-DILIGENCE interview — preserve every quantitative and operational detail precisely.',
+    diligence:   ' This was a DUE-DILIGENCE call — preserve every fact and figure, and flag red flags clearly.',
+    networking:  ' This was a NETWORKING conversation — emphasise their network, mutual interests, and follow-ups.',
+    pitch:       ' This was a PITCH meeting — emphasise the offer, value props, objections, and path to next steps.',
+  };
+  const lenCfg   = G_LEN[_noteLen] || G_LEN.detailed;
+  const typeGd   = G_TYPE[_noteType] || '';
+  const customGd = _noteCustom ? `\n\nADDITIONAL STYLE INSTRUCTIONS FROM THE USER (follow these precisely): ${_noteCustom}` : '';
+
   const raw = await callAI(
-    'You are an expert M&A analyst for a search fund. Analyse meeting transcripts to extract structured deal intelligence. Return ONLY valid JSON — no markdown fences, no preamble.',
-    `Analyse the transcript/notes below and return a single JSON object.${dealCtx}
+    `You are an expert M&A analyst for a search fund. Analyse meeting transcripts to extract structured deal intelligence.${typeGd} ${lenCfg.detailRule} Return ONLY valid JSON — no markdown fences, no preamble.`,
+    `Analyse the transcript/notes below and return a single JSON object.${dealCtx}${customGd}
 
 JSON STRUCTURE (use null for missing fields):
 {
   "meetingTitle": "Concise descriptive title for this specific meeting",
-  "summary": "3–4 sentence executive summary: what was discussed, decisions made, key outcomes",
-  "keyInsights": ["insight relevant to the acquisition", "…"],
+  "summary": "${lenCfg.summary}: what was discussed, decisions made, and key outcomes",
+  "keyInsights": ["${lenCfg.insights} insights relevant to the acquisition — each a full, specific sentence"],
   "actionItems": [
-    { "task": "Specific action to complete", "owner": "Searcher / Seller / Advisor", "dueContext": "by next call / within 1 week / etc." }
+    { "task": "Specific action to complete — list ${lenCfg.actions} action item(s) raised", "owner": "Searcher / Seller / Advisor", "dueContext": "by next call / within 1 week / etc." }
   ],
   "positiveSignals": ["encouraging signal about this deal", "…"],
   "redFlags": ["concern or risk surfaced in the call", "…"],
@@ -242,7 +274,7 @@ JSON STRUCTURE (use null for missing fields):
 
 TRANSCRIPT / NOTES:
 ${src.substring(0, 14000)}`,
-    1500, 0.05
+    lenCfg.tokens, 0.05
   );
 
   const cleaned = raw.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '').trim();

@@ -26,7 +26,7 @@ let _callRecSession      = null;   // {rawTranscript, userNotes, aiSummary, aiSt
 let _callRecContextInfo  = '';     // contact/deal names injected into Whisper + AI correction
 let _callRecLang         = localStorage.getItem('pulse_call_rec_lang') || 'en-US'; // persisted language
 let _callRecType         = localStorage.getItem('pulse_call_rec_type') || 'general'; // general|intro|follow-up|technical|diligence|networking|pitch
-let _callRecLength       = localStorage.getItem('pulse_call_rec_length') || 'standard'; // short|standard|detailed
+let _callRecLength       = localStorage.getItem('pulse_call_rec_length') || 'detailed'; // short|standard|detailed
 let _callRecCustomInstr  = localStorage.getItem('pulse_call_rec_custom_instr') || ''; // free-form style instructions
 
 // ── Render Calls List ────────────────────────────────────────────
@@ -1285,9 +1285,12 @@ async function saveNewCall() {
 
 // ── Edit Call ─────────────────────────────────────────────────────
 
-async function openEditCallModal(callId) {
+async function openEditCallModal(callId, returnCtx = null) {
   const call = await DB.get(STORES.calls, callId);
   if (!call) { showToast('Call not found', 'error'); return; }
+
+  // Remember where to refresh after saving (contact view, deal tab, or calls list)
+  window._callEditReturn = returnCtx;
 
   _callParticipants = [];
   _callTasks = [];
@@ -1329,7 +1332,9 @@ async function openEditCallModal(callId) {
       date: call.date ? toInputDateTime(call.date) : '',
       duration: call.duration || '',
       outcome: call.outcome || '',
-      notes: call.notes || '',
+      // Show the effective note (AI summary if one exists, otherwise the raw note)
+      // so the user edits exactly what they see across the app.
+      notes: call.cleanedNotes || call.aiSummary || call.notes || '',
       nextSteps: call.nextSteps || '',
       followUpDate: call.followUpDate ? toInputDate(call.followUpDate) : '',
     }
@@ -1381,7 +1386,15 @@ async function saveEditCall(callId) {
   call.date = callDate ? new Date(callDate).toISOString() : call.date;
   call.duration = duration ? parseInt(duration) : null;
   call.outcome = outcome;
-  call.notes = notes;
+  // Persist the edited note. If this call carried an AI summary, the textarea
+  // showed that summary, so write the edit back to the AI-summary fields the
+  // rest of the app displays; otherwise update the raw note.
+  if (call.cleanedNotes || call.aiSummary) {
+    call.cleanedNotes = notes;
+    call.aiSummary = notes;
+  } else {
+    call.notes = notes;
+  }
   call.nextSteps = nextSteps;
   call.followUpDate = followUpDate ? new Date(followUpDate).toISOString() : null;
   call.tasks = validTasks.map(t => ({
@@ -1406,5 +1419,25 @@ async function saveEditCall(callId) {
 
   _clHidePanel();
   showToast('Call updated', 'success');
-  renderCalls();
+
+  // Refresh whichever view the edit was launched from
+  const ret = window._callEditReturn;
+  window._callEditReturn = null;
+  if (ret && ret.type === 'contact' && typeof viewContact === 'function') {
+    viewContact(ret.id);
+  } else if (typeof currentPage !== 'undefined' && currentPage === 'deal' &&
+             typeof currentDealId !== 'undefined' && currentDealId && typeof switchDealTab === 'function') {
+    switchDealTab(typeof currentDealTab !== 'undefined' ? currentDealTab : 'notes');
+  } else {
+    renderCalls();
+  }
+}
+
+// Delete a call from the contact (Relationships) view, then refresh that view.
+function deleteCallFromContact(callId, contactId) {
+  confirmDialog('Delete Call', 'This call and its notes will be permanently deleted. This cannot be undone.', async () => {
+    await DB.delete(STORES.calls, callId);
+    showToast('Call deleted', 'success');
+    if (typeof viewContact === 'function') viewContact(contactId);
+  });
 }
