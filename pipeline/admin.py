@@ -38,6 +38,14 @@ import os
 import sys
 from datetime import datetime, timezone
 
+# Windows consoles default to cp1252, which can't encode the ✅/❌ status
+# glyphs used below. Force UTF-8 so status messages never crash the script.
+try:
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
+except Exception:
+    pass
+
 # Hard-coded master account — these CANNOT be wiped, ever.
 # NOTE: the account is identified by UID, which never changes even if the
 # login email is updated. MASTER_EMAIL is only a convenience guard.
