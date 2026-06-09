@@ -9,6 +9,11 @@ Subcommands
       Ensures the given email is set as the owner in Firestore
       (`/config/registration.ownerUid`). Idempotent — safe to run any time.
 
+  set-email IDENTIFIER NEW_EMAIL
+      Changes a user's login email in Firebase Auth. IDENTIFIER is the current
+      email or the UID. Keeps UID, password, and all data (data is keyed by
+      UID). Also refreshes owner/access email records. No verification email.
+
   wipe-user EMAIL
       Permanently deletes the user with this email from Firebase Auth
       and removes all their Firestore data. Refuses to touch the master
@@ -34,7 +39,9 @@ import sys
 from datetime import datetime, timezone
 
 # Hard-coded master account — these CANNOT be wiped, ever.
-MASTER_EMAIL = "rfreudenberg@mba2027.hbs.edu"
+# NOTE: the account is identified by UID, which never changes even if the
+# login email is updated. MASTER_EMAIL is only a convenience guard.
+MASTER_EMAIL = "rfreudenberg@rf-nachfolge.de"
 MASTER_UID   = "TisrYqOVZFfNV8bFjYgVTlO4EAd2"
 
 
@@ -119,6 +126,74 @@ def cmd_verify_owner(email: str) -> int:
         "updatedAt":  datetime.now(timezone.utc).isoformat(),
     }, merge=True)
     print(f"✅ /userAccess/{user.uid} marked active + isOwner")
+    return 0
+
+
+# ─── set-email ───────────────────────────────────────────────────────────────
+
+def cmd_set_email(identifier: str, new_email: str) -> int:
+    """
+    Change a user's login email in Firebase Auth WITHOUT touching their UID,
+    password, or any data (all data is keyed by UID, which is unchanged).
+
+    `identifier` may be the current email OR the UID.
+    Also refreshes the owner/access records if this user is the owner.
+    """
+    auth = _auth()
+    db   = _db()
+
+    # Resolve the user by email or UID
+    try:
+        if "@" in identifier:
+            user = auth.get_user_by_email(identifier)
+        else:
+            user = auth.get_user(identifier)
+    except Exception as e:
+        print(f"❌ User not found: {identifier} ({e})")
+        return 1
+
+    print(f"  User:      {user.email}")
+    print(f"  UID:       {user.uid}  (unchanged)")
+    print(f"  New email: {new_email}")
+
+    # Make sure the new email isn't already taken by a different account
+    try:
+        existing = auth.get_user_by_email(new_email)
+        if existing.uid != user.uid:
+            print(f"❌ {new_email} is already used by another account (UID {existing.uid}).")
+            return 1
+    except Exception:
+        pass  # not found = good, it's free
+
+    # Update the email. email_verified=True so no verification email is required.
+    try:
+        auth.update_user(user.uid, email=new_email, email_verified=True)
+        print(f"✅ Firebase Auth email updated to {new_email} (password & data untouched)")
+    except Exception as e:
+        print(f"❌ Could not update email: {e}")
+        return 1
+
+    # If this user is the owner, refresh the email stored in owner/access docs
+    try:
+        reg = db.collection("config").document("registration").get()
+        reg_data = reg.to_dict() if reg.exists else {}
+        if reg_data.get("ownerUid") == user.uid:
+            db.collection("config").document("registration").set(
+                {"ownerEmail": new_email,
+                 "updatedAt": datetime.now(timezone.utc).isoformat()}, merge=True)
+            print("✅ Updated config/registration.ownerEmail")
+    except Exception as e:
+        print(f"  ⚠ could not update registration doc: {e}")
+
+    try:
+        db.collection("userAccess").document(user.uid).set(
+            {"email": new_email,
+             "updatedAt": datetime.now(timezone.utc).isoformat()}, merge=True)
+        print(f"✅ Updated userAccess/{user.uid}.email")
+    except Exception as e:
+        print(f"  ⚠ could not update userAccess doc: {e}")
+
+    print("\n✅ Done. Log in with the new email and your existing password.")
     return 0
 
 
@@ -524,6 +599,11 @@ def main():
     p_wipe = sub.add_parser("wipe-user", help="Permanently delete a user (refuses master)")
     p_wipe.add_argument("email")
 
+    p_setemail = sub.add_parser("set-email",
+                                help="Change a user's login email (keeps UID, password, data)")
+    p_setemail.add_argument("identifier", help="Current email OR uid of the account")
+    p_setemail.add_argument("new_email", help="The new login email")
+
     sub.add_parser("list-users", help="List all Firebase Auth users")
     sub.add_parser("migrate-pipeline",
                    help="Copy master's pipeline companies to /sharedPipeline (one-time)")
@@ -539,6 +619,7 @@ def main():
 
     if args.cmd == "verify-owner":     return cmd_verify_owner(args.email)
     if args.cmd == "wipe-user":        return cmd_wipe_user(args.email)
+    if args.cmd == "set-email":        return cmd_set_email(args.identifier, args.new_email)
     if args.cmd == "list-users":       return cmd_list_users()
     if args.cmd == "migrate-pipeline": return cmd_migrate_pipeline()
     if args.cmd == "enrich-all":
