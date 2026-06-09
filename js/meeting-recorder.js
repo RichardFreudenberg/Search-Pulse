@@ -732,12 +732,12 @@ const _CALL_TYPE_GUIDANCE = {
 const _LENGTH_GUIDANCE = {
   'short':    { bulletRange: '3-5 ultra-concise',    summaryTokens: 350,  structTokens: 700  },
   'standard': { bulletRange: '5-8 crisp',            summaryTokens: 600,  structTokens: 900  },
-  'detailed': { bulletRange: '10-15 substantive',    summaryTokens: 1400, structTokens: 1800 },
+  'detailed': { bulletRange: '14-22 substantive, multi-sentence', summaryTokens: 2400, structTokens: 3000 },
 };
 
 function _mrResolveTuning(opts) {
   const t = (opts && opts.callType   && _CALL_TYPE_GUIDANCE[opts.callType])   ? opts.callType   : 'general';
-  const l = (opts && opts.noteLength && _LENGTH_GUIDANCE[opts.noteLength])    ? opts.noteLength : 'standard';
+  const l = (opts && opts.noteLength && _LENGTH_GUIDANCE[opts.noteLength])    ? opts.noteLength : 'detailed';
   const c = (opts && opts.customInstr) ? opts.customInstr.trim() : '';
   return { callType: t, noteLength: l, typeGuide: _CALL_TYPE_GUIDANCE[t], lenCfg: _LENGTH_GUIDANCE[l], customInstr: c };
 }
@@ -751,7 +751,7 @@ async function _mrGenerateSummary(transcript, userNotes, langOverride = null, op
   const content = [transcript, userNotes].filter(Boolean).join('\n\n---\nUser notes:\n');
 
   const detailExtra = noteLength === 'detailed'
-    ? ' Include sub-bullets where useful; do not omit numbers, names, or specifics.'
+    ? ' Make each bullet a FULL, detailed sentence (or two) that includes the specific numbers, names, dates, and context — not a terse fragment. Add sub-bullets to expand important points, and err strongly on the side of MORE and LONGER bullets. Do not omit any specifics.'
     : '';
   const customPart = customInstr ? ` Additional instructions: ${customInstr}` : '';
 
@@ -772,7 +772,7 @@ async function _mrGenerateStructuredNote(transcript, userNotes, langOverride = n
 
   // Detailed: ask for richer arrays
   const arraySize = noteLength === 'short'    ? 'minimal (1-3 items per array)'
-                  : noteLength === 'detailed' ? 'as complete as the content supports — 5-10+ items per array, with specific facts/numbers/names preserved'
+                  : noteLength === 'detailed' ? 'as complete as the content supports — 8-15+ items per array, and each item should be a FULL, detailed point (a complete sentence or two) with the specific facts, numbers, names, and dates preserved'
                   :                             'standard (3-5 items per array)';
 
   const content = [transcript, userNotes].filter(Boolean).join('\n\n---\nUser notes:\n');

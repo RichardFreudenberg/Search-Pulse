@@ -228,9 +228,9 @@ DEAL CONTEXT (do not invent data not in the transcript):
     standard: { summary: 'a 4–6 sentence executive summary',
                 insights: '5–8', actions: 'all clearly-stated',
                 detailRule: 'Balance brevity with completeness; keep important specifics.', tokens: 2400 },
-    detailed: { summary: 'a thorough, multi-paragraph summary (at least 6–10 sentences) that walks through the conversation in the order it happened and preserves EVERY number, name, date, figure, term, and specific claim mentioned',
-                insights: '8–15 (as many as the content genuinely supports)', actions: 'every',
-                detailRule: 'Be COMPREHENSIVE — do NOT summarise away detail. Capture specifics verbatim where they matter (financials, deal terms, names, commitments, dates). Each insight should be a full, specific sentence, not a fragment.', tokens: 4000 },
+    detailed: { summary: 'a thorough, multi-paragraph summary (at least 8–12 sentences) that walks through the conversation in the order it happened and preserves EVERY number, name, date, figure, term, and specific claim mentioned',
+                insights: '12–20 (as many as the content genuinely supports — be generous)', actions: 'every',
+                detailRule: 'Be COMPREHENSIVE — produce MANY bullets and make each one LONG. Do NOT summarise away detail. Capture specifics verbatim where they matter (financials, deal terms, names, commitments, dates). Every key insight and action item must be a full, detailed point of 1–2 complete sentences that includes the specific numbers, names, and context — never a short fragment. Always err on the side of more and longer content.', tokens: 4500 },
   };
   const G_TYPE = {
     general:     '',
@@ -253,7 +253,7 @@ JSON STRUCTURE (use null for missing fields):
 {
   "meetingTitle": "Concise descriptive title for this specific meeting",
   "summary": "${lenCfg.summary}: what was discussed, decisions made, and key outcomes",
-  "keyInsights": ["${lenCfg.insights} insights relevant to the acquisition — each a full, specific sentence"],
+  "keyInsights": ["${lenCfg.insights} insights relevant to the acquisition — each a detailed point of 1–2 complete sentences that includes the specifics (numbers, names, context), not a short fragment"],
   "actionItems": [
     { "task": "Specific action to complete — list ${lenCfg.actions} action item(s) raised", "owner": "Searcher / Seller / Advisor", "dueContext": "by next call / within 1 week / etc." }
   ],

@@ -305,7 +305,7 @@ async function cleanCallNotes() {
   const callType    = (typeof _callRecType       !== 'undefined' && _callRecType)       ||
                       localStorage.getItem('pulse_call_rec_type')       || 'general';
   const noteLength  = (typeof _callRecLength     !== 'undefined' && _callRecLength)     ||
-                      localStorage.getItem('pulse_call_rec_length')     || 'standard';
+                      localStorage.getItem('pulse_call_rec_length')     || 'detailed';
   const customInstr = (typeof _callRecCustomInstr !== 'undefined' && _callRecCustomInstr) ||
                       localStorage.getItem('pulse_call_rec_custom_instr') || '';
 
@@ -321,10 +321,10 @@ async function cleanCallNotes() {
   const LENGTH_CFG = {
     'short':    { instr: 'Be concise — use the FEWEST bullets needed to preserve all facts. Tight, single-line bullets only. No section headers unless absolutely necessary.', tokens: 800 },
     'standard': { instr: 'Use clear structure with bullet points and short ## section headers grouping related topics when helpful.',                                              tokens: 2000 },
-    'detailed': { instr: 'Be COMPREHENSIVE. Use ## section headers, sub-bullets where useful, and preserve EVERY specific number, name, date, and quote — do not summarise away detail. Err strongly on the side of MORE content.', tokens: 3500 },
+    'detailed': { instr: 'Be COMPREHENSIVE and thorough. Use ## section headers and produce MANY bullets — cover every distinct point raised. Each bullet must be a FULL, detailed sentence (or two), not a terse fragment: include the specific numbers, names, dates, figures, and context behind each point. Use sub-bullets to expand important items. Preserve EVERY specific detail and quote — never summarise away detail. Always err strongly on the side of MORE and LONGER content.', tokens: 4000 },
   };
   const typeGuide = TYPE_GUIDANCE[callType] || '';
-  const lenCfg    = LENGTH_CFG[noteLength]   || LENGTH_CFG.standard;
+  const lenCfg    = LENGTH_CFG[noteLength]   || LENGTH_CFG.detailed;
 
   try {
     const settings = await DB.get(STORES.settings, `settings_${currentUser.id}`);
