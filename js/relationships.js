@@ -19,7 +19,8 @@ const RELATIONSHIP_BUCKETS = [
   { key: 'advisors',    label: 'Advisors',              short: 'Advisor',     color: 'indigo',  order: 4 },
   { key: 'brokers',     label: 'Brokers',               short: 'Broker',      color: 'amber',   order: 5 },
   { key: 'targets',     label: 'Targets',               short: 'Target',      color: 'rose',    order: 6 },
-  { key: 'searchers',   label: 'Searchers',             short: 'Searcher',    color: 'cyan',    order: 7 },
+  { key: 'operators',   label: 'Operators',             short: 'Operator',    color: 'orange',  order: 7 },
+  { key: 'searchers',   label: 'Searchers',             short: 'Searcher',    color: 'cyan',    order: 8 },
   { key: 'unassigned',  label: 'Unassigned',            short: 'Unassigned',  color: 'gray',    order: 99 },
 ];
 
@@ -35,6 +36,7 @@ const _LEGACY_TYPE_TO_BUCKET = {
   'Broker / Intermediary':    'brokers',
   'Advisor / Mentor':         'advisors',
   'Fellow Searcher':          'searchers',
+  'Operator / Executive':     'operators',
 };
 
 /** Resolve a contact's bucket: explicit field, else derived from legacy type. */
@@ -50,6 +52,7 @@ function getContactBucket(contact) {
   if (lc.includes('mentor'))                        return 'mentors';
   if (lc.includes('advisor'))                       return 'advisors';
   if (lc.includes('search'))                        return 'searchers';
+  if (lc.includes('operator') || lc.includes('executive')) return 'operators';
   if (/\b(pe|vc)\b/.test(lc) || lc.includes('venture') || lc.includes('private equity')) return 'pevc';
   return 'unassigned';
 }
