@@ -19,7 +19,7 @@ const _BROKER_IMPORT_FIELDS = [
   { key: 'title',       label: 'Title / Position', hints: ['position', 'title', 'rolle', 'funktion', 'job'] },
   { key: 'linkedInUrl', label: 'Website / LinkedIn', hints: ['linkedin', 'website', 'url', 'homepage', 'webseite', 'web'] },
   { key: 'location',    label: 'Location',       hints: ['location', 'city', 'region', 'ort', 'stadt', 'standort', 'address', 'adresse'] },
-  { key: 'specialties', label: 'Specialties',    hints: ['specialt', 'industry', 'industries', 'sector', 'focus', 'branche', 'fokus', 'schwerpunkt', 'type', 'typ'] },
+  { key: 'specialties', label: 'Category / Type', hints: ['type', 'typ', 'category', 'kategorie', 'specialt', 'industry', 'industries', 'sector', 'focus', 'branche', 'fokus', 'schwerpunkt'] },
   { key: 'notes',       label: 'Notes',          hints: ['note', 'comment', 'remark', 'bemerkung', 'kommentar', 'info'] },
 ];
 

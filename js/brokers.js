@@ -37,6 +37,8 @@ async function renderBrokers() {
       companyId: f.companyId, company: f.company, contacts: f.contacts,
       name: f.company ? f.company.name : (f.contacts[0]?.fullName || '(No firm)'),
       website: f.company ? (f.company.website || f.company.linkedInUrl || '') : '',
+      category: f.company ? (f.company.industry || '') : '',
+      description: f.company ? (f.company.description || '') : '',
       lastContact, count: f.contacts.length, needsReply,
     };
   });
@@ -66,7 +68,17 @@ async function renderBrokers() {
 
 function _brokerFirmsRefresh() {
   const el = document.getElementById('brokers-main');
-  if (el) el.innerHTML = _brokerFirmsMainHtml(_brokerFirms);
+  if (!el) return;
+  // Preserve search-box focus + caret across the re-render (otherwise typing
+  // loses focus after each character).
+  const ae = document.activeElement;
+  const wasSearch = ae && ae.id === 'broker-search-input';
+  const caret = wasSearch ? ae.selectionStart : null;
+  el.innerHTML = _brokerFirmsMainHtml(_brokerFirms);
+  if (wasSearch) {
+    const inp = document.getElementById('broker-search-input');
+    if (inp) { inp.focus(); try { inp.setSelectionRange(caret, caret); } catch (_) {} }
+  }
 }
 
 function _brokerFirmsMainHtml(firms) {
@@ -75,7 +87,10 @@ function _brokerFirmsMainHtml(firms) {
   let filtered = firms.filter(f => {
     const isActive = f.lastContact && f.lastContact >= thirty;
     const matchStatus = _brokerFilter === 'all' || (_brokerFilter === 'active' && isActive) || (_brokerFilter === 'inactive' && !isActive);
-    const matchSearch = !q || f.name.toLowerCase().includes(q) || f.contacts.some(c => (c.fullName || '').toLowerCase().includes(q));
+    const matchSearch = !q || f.name.toLowerCase().includes(q) ||
+      (f.category || '').toLowerCase().includes(q) ||
+      (f.description || '').toLowerCase().includes(q) ||
+      f.contacts.some(c => (c.fullName || '').toLowerCase().includes(q) || (c.title || '').toLowerCase().includes(q));
     return matchStatus && matchSearch;
   });
   const activeCount = firms.filter(f => f.lastContact && f.lastContact >= thirty).length;
@@ -92,7 +107,7 @@ function _brokerFirmsMainHtml(firms) {
       <div class="flex items-center gap-3 flex-wrap">
         <div class="relative">
           <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-surface-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"/></svg>
-          <input type="text" placeholder="Search firms or contacts…" value="${escapeHtml(_brokerSearch)}" oninput="_brokerSetSearch(this.value)" class="input-field pl-9 text-sm w-60"/>
+          <input type="text" id="broker-search-input" placeholder="Search firms or contacts…" value="${escapeHtml(_brokerSearch)}" oninput="_brokerSetSearch(this.value)" class="input-field pl-9 text-sm w-60"/>
         </div>
         <div class="flex gap-1.5">${chip('all', 'All', firms.length)}${chip('active', 'Active', activeCount)}${chip('inactive', 'Need Attention', firms.length - activeCount)}</div>
       </div>
@@ -116,7 +131,11 @@ function _brokerFirmCardHtml(f) {
             <h3 class="font-semibold truncate">${escapeHtml(f.name)}</h3>
             ${f.needsReply ? '<span class="badge bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 text-[11px]">Reply due</span>' : ''}
           </div>
-          <div class="text-xs text-surface-500 mt-0.5">${f.count} contact${f.count !== 1 ? 's' : ''}</div>
+          <div class="flex items-center gap-2 mt-0.5 flex-wrap">
+            <span class="text-xs text-surface-500">${f.count} contact${f.count !== 1 ? 's' : ''}</span>
+            ${f.category ? `<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-surface-100 dark:bg-surface-700 text-surface-600 dark:text-surface-300">${escapeHtml(f.category)}</span>` : ''}
+          </div>
+          ${f.description ? `<p class="text-xs text-surface-500 dark:text-surface-400 mt-1.5 line-clamp-2 leading-relaxed">${escapeHtml(f.description)}</p>` : ''}
           <div class="flex items-center gap-3 mt-2 text-xs flex-wrap">
             ${f.website ? renderSiteLink(f.website, 'Website') : ''}
             <span class="text-surface-400">Last: ${last}</span>
@@ -193,7 +212,11 @@ async function viewBrokerFirm(companyId) {
         <div class="flex items-start gap-4">
           ${company && typeof renderCompanyLogo === 'function' ? renderCompanyLogo(company, 'xl') : `<div class="w-14 h-14 rounded-xl bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 flex items-center justify-center text-lg font-bold shrink-0">${escapeHtml((name || '?').slice(0, 2).toUpperCase())}</div>`}
           <div class="flex-1 min-w-0">
-            <h1 class="text-2xl font-semibold">${escapeHtml(name)}</h1>
+            <div class="flex items-center gap-2 flex-wrap">
+              <h1 class="text-2xl font-semibold">${escapeHtml(name)}</h1>
+              ${company && company.industry ? `<span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-surface-100 dark:bg-surface-700 text-surface-600 dark:text-surface-300">${escapeHtml(company.industry)}</span>` : ''}
+            </div>
+            ${company && company.description ? `<p class="text-sm text-surface-600 dark:text-surface-400 mt-2 leading-relaxed">${escapeHtml(company.description)}</p>` : ''}
             <div class="flex items-center gap-4 mt-2 text-sm flex-wrap">
               <span class="text-surface-500">${firmContacts.length} contact${firmContacts.length !== 1 ? 's' : ''}</span>
               ${website ? renderSiteLink(website, 'Website', false) : ''}
