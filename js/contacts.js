@@ -1189,6 +1189,7 @@ async function viewContact(contactId) {
               <div class="flex items-center gap-2 flex-wrap">
                 ${typeof renderBucketSelect === 'function' ? renderBucketSelect(contact.id, getContactBucket(contact), 'detail') : ''}
                 ${typeof renderStrengthChip === 'function' ? renderStrengthChip(contact) : ''}
+                ${typeof renderEmailStatusChip === 'function' ? renderEmailStatusChip(contact) : ''}
                 ${renderStageBadge(contact.stage)}
               </div>
             </div>

@@ -384,6 +384,10 @@
             <span>Reminders</span>
             <span id="reminder-badge" class="ml-auto text-xs bg-red-500 text-white rounded-full px-1.5 py-0.5 hidden">0</span>
           </button>
+          <button onclick="navigate('email')" class="nav-item" data-page="email">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75" /></svg>
+            <span>Inbox</span>
+          </button>
           <span class="nav-section-label">Intelligence</span>
           <button onclick="navigate('suggestions')" class="nav-item" data-page="suggestions">
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 18v-5.25m0 0a6.01 6.01 0 001.5-.189m-1.5.189a6.01 6.01 0 01-1.5-.189m3.75 7.478a12.06 12.06 0 01-4.5 0m3.75 2.383a14.406 14.406 0 01-3 0M14.25 18v-.192c0-.983.658-1.823 1.508-2.316a7.5 7.5 0 10-7.517 0c.85.493 1.509 1.333 1.509 2.316V18" /></svg>
@@ -662,6 +666,8 @@
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-functions-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-storage-compat.js"></script>
+  <!-- Microsoft auth (Outlook email connector) -->
+  <script src="https://alcdn.msauth.net/browser/3.27.0/js/msal-browser.min.js"></script>
 
   <!-- Scripts -->
   <script src="js/shared-config.js?v=1"></script>
@@ -673,12 +679,13 @@
   <script src="js/modal.js?v=20260516"></script>
   <script src="js/components.js?v=8"></script>
   <script src="js/dashboard.js?v=20260517b"></script>
-  <script src="js/relationships.js?v=20260613"></script>
-  <script src="js/contacts.js?v=20260612"></script>
+  <script src="js/relationships.js?v=20260614"></script>
+  <script src="js/contacts.js?v=20260614"></script>
   <script src="js/companies.js?v=20260502"></script>
   <script src="js/meeting-recorder.js?v=20260609"></script>
   <script src="js/calls.js?v=20260611"></script>
   <script src="js/reminders.js?v=10"></script>
+  <script src="js/email-connect.js?v=20260614"></script>
   <script src="js/notes-cleanup.js?v=20260609"></script>
   <script src="js/enrichment.js?v=8"></script>
   <script src="js/search.js?v=8"></script>
@@ -723,7 +730,7 @@
   <script src="js/sourcing-analyser.js?v=1"></script>
   <script src="js/handelsregister.js?v=20260517"></script>
   <script src="js/todos.js?v=1"></script>
-  <script src="js/app.js?v=20260604"></script>
+  <script src="js/app.js?v=20260614"></script>
   <!-- EmailJS — for real email verification on signup -->
   <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
 

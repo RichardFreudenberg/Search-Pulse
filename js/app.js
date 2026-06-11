@@ -6,7 +6,7 @@ let currentPage = 'dashboard';
 
 // Valid pages — anything not in this set falls back to dashboard
 const VALID_PAGES = new Set([
-  'dashboard','contacts','companies','calls','reminders',
+  'dashboard','contacts','companies','calls','reminders','email',
   'suggestions','news','resources','deals','deal-search',
   'company-scout','sourcing','settings','shared-dashboard',
   'email-templates','brokers',
@@ -75,6 +75,7 @@ function navigate(pageInput, { pushState = true } = {}) {
     case 'companies': renderCompanies(); break;
     case 'calls': renderCalls(); break;
     case 'reminders': renderReminders(); break;
+    case 'email': renderEmailHub(); break;
     case 'suggestions': renderSuggestions(); break;
     case 'news': renderNews(); break;
     case 'resources': renderResources(); break;

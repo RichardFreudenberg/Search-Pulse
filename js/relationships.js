@@ -185,6 +185,7 @@ function renderRelationshipCard(contact, company) {
 
           <div class="flex items-center flex-wrap gap-2 mt-2.5">
             ${renderStrengthChip(contact)}
+            ${typeof renderEmailStatusChip === 'function' ? renderEmailStatusChip(contact) : ''}
             ${fuText ? `<span class="inline-flex items-center gap-1 text-[11px] font-medium ${overdue ? 'text-red-600 dark:text-red-400' : 'text-surface-500'}">
               <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
               ${overdue ? 'Overdue · ' : ''}${fuText}</span>` : ''}
