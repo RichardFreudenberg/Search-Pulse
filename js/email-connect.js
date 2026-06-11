@@ -426,8 +426,117 @@ function _emailRow(contact, company, dir) {
         <div class="text-xs text-surface-500 truncate">${subj ? escapeHtml(subj) : '<span class="italic text-surface-400">No subject</span>'}</div>
         <div class="text-[11px] ${dir === 'in' ? 'text-red-500' : 'text-surface-400'}">${dir === 'in' ? 'Received' : 'Sent'} ${whenStr}${waitDays > 0 ? ` · waiting ${waitDays}d` : ''}</div>
       </div>
+      <button onclick="event.stopPropagation(); openEmailAIMenu('${contact.id}')" class="btn-ghost btn-sm flex-shrink-0 text-brand-600" title="AI: summarize, draft a reply, or talking points">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z"/></svg>
+      </button>
       ${replyHref ? `<a href="${replyHref}" onclick="event.stopPropagation()" class="btn-secondary btn-sm flex-shrink-0">${dir === 'in' ? 'Reply' : 'Nudge'}</a>` : ''}
     </div>`;
+}
+
+// ── Full-body → AI: summarize / draft reply / talking points ──
+// Fetches the recent thread (with body) on demand only when you ask — bodies
+// are sent to your configured AI provider for the action and are not stored.
+async function _outlookFetchThread(email, token, top = 15) {
+  const q = encodeURIComponent(`"${email}"`);
+  const url = `${GRAPH_BASE}/me/messages?$search=${q}&$top=${top}&$select=subject,from,toRecipients,receivedDateTime,sentDateTime,bodyPreview,body`;
+  const res = await fetch(url, {
+    headers: { Authorization: 'Bearer ' + token, 'Prefer': 'outlook.body-content-type="text"' },
+  });
+  if (!res.ok) throw new Error(`Graph ${res.status}: ${res.statusText}`);
+  return (await res.json()).value || [];
+}
+
+function _outlookThreadToText(messages, selfEmail) {
+  const msgs = [...messages].sort((a, b) =>
+    new Date(a.receivedDateTime || a.sentDateTime || 0) - new Date(b.receivedDateTime || b.sentDateTime || 0));
+  return msgs.map(m => {
+    const fromAddr = (m.from?.emailAddress?.address || '').toLowerCase();
+    const who = fromAddr === selfEmail ? 'You' : (m.from?.emailAddress?.name || fromAddr || 'Them');
+    const when = new Date(m.receivedDateTime || m.sentDateTime || 0).toLocaleString();
+    let body = (m.body?.content || m.bodyPreview || '').replace(/\r/g, '').replace(/\n{3,}/g, '\n\n').trim();
+    if (body.length > 3000) body = body.slice(0, 3000) + '…';
+    return `=== ${who} · ${when}\nSubject: ${m.subject || '(none)'}\n${body}`;
+  }).join('\n\n');
+}
+
+function _emailAIPrompt(action, contact, transcript) {
+  const name = contact.fullName || 'this contact';
+  const base = `You are an executive assistant for a search-fund investor. Below is the recent email conversation with ${name}${contact.title ? ' (' + contact.title + ')' : ''}. Be accurate and only use what is actually in the emails.`;
+  if (action === 'draft') return {
+    title: `Draft reply to ${name}`, tokens: 1200,
+    system: base + ' Draft a reply to their most recent message. Match the existing tone, be concise and professional, and move things forward. Return ONLY the email body — no subject line, no commentary.',
+    user: `EMAIL CONVERSATION (oldest first):\n\n${transcript}\n\nWrite my reply now.`,
+  };
+  if (action === 'talking') return {
+    title: `Talking points · ${name}`, tokens: 1000,
+    system: base + ' I have an upcoming catch-up. Give concise bullet talking points: where things stand, open threads or unanswered questions, commitments made by either side, and 2-3 good things to raise. Markdown bullets only.',
+    user: `EMAIL CONVERSATION (oldest first):\n\n${transcript}\n\nGive me my talking points.`,
+  };
+  return {
+    title: `Conversation summary · ${name}`, tokens: 1100,
+    system: base + ' Summarize the conversation: what it is about, key decisions/agreements, current status, and any open items or who owes the next reply. Concise markdown with short sections and bullets.',
+    user: `EMAIL CONVERSATION (oldest first):\n\n${transcript}\n\nSummarize it.`,
+  };
+}
+
+function openEmailAIMenu(contactId) {
+  openModal(`
+    <div class="p-6" style="max-width: 24rem">
+      <h2 class="text-lg font-semibold mb-1">Email AI</h2>
+      <p class="text-sm text-surface-500 mb-4">Reads your recent email thread with this contact and runs AI on it.</p>
+      <div class="space-y-2">
+        <button onclick="outlookEmailAI('${contactId}','summary')" class="btn-secondary w-full">Summarize conversation</button>
+        <button onclick="outlookEmailAI('${contactId}','draft')" class="btn-secondary w-full">Draft a reply</button>
+        <button onclick="outlookEmailAI('${contactId}','talking')" class="btn-secondary w-full">Talking points for a catch-up</button>
+      </div>
+      <p class="text-[11px] text-surface-400 mt-4">Email content is sent to your configured AI provider for this action. Nothing is stored unless you save it.</p>
+    </div>`);
+}
+
+async function outlookEmailAI(contactId, action) {
+  const contact = await DB.get(STORES.contacts, contactId);
+  if (!contact) { showToast('Contact not found', 'error'); return; }
+  if (!contact.email) { showToast('This contact has no email address on file', 'warning'); return; }
+  const cfg = await _outlookCfg();
+  if (!cfg.clientId || !cfg.account) { showToast('Connect Outlook on the Inbox page first', 'warning'); return; }
+
+  openModal(`<div class="p-8 text-center"><svg class="w-6 h-6 animate-spin mx-auto mb-3 text-brand-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg><p class="text-sm text-surface-500">Reading your conversation with ${escapeHtml(contact.fullName)}…</p></div>`);
+
+  try {
+    await _getMsal(cfg.clientId, cfg.tenantId);
+    const token = await _outlookToken();
+    const selfEmail = (cfg.account || '').toLowerCase();
+    const msgs = await _outlookFetchThread(contact.email, token);
+    if (!msgs.length) {
+      openModal(`<div class="p-6"><h2 class="text-lg font-semibold mb-2">No emails found</h2><p class="text-sm text-surface-500 mb-4">I couldn't find any emails with ${escapeHtml(contact.email)} in your mailbox.</p><div class="flex justify-end"><button onclick="closeModal()" class="btn-secondary">Close</button></div></div>`);
+      return;
+    }
+    const transcript = _outlookThreadToText(msgs, selfEmail);
+    const p = _emailAIPrompt(action, contact, transcript);
+    const out = (await callAI(p.system, p.user, p.tokens, 0.4)).trim();
+
+    const replyHref = (action === 'draft' && contact.email)
+      ? `mailto:${encodeURIComponent(contact.email)}?subject=${encodeURIComponent('Re: ' + ((msgs[0]?.subject || '').replace(/^re:\s*/i, '')))}&body=${encodeURIComponent(out)}`
+      : '';
+
+    openModal(`
+      <div class="p-6">
+        <div class="flex items-center justify-between mb-1 gap-3">
+          <h2 class="text-lg font-semibold">${escapeHtml(p.title)}</h2>
+          <span class="text-[11px] px-2 py-0.5 rounded-full bg-brand-50 text-brand-600 dark:bg-brand-900/20 font-medium whitespace-nowrap">AI · ${msgs.length} emails</span>
+        </div>
+        <p class="text-xs text-surface-400 mb-3">Editable — review before you use it.</p>
+        <textarea id="email-ai-out" class="input-field w-full font-sans text-sm leading-relaxed" rows="14">${escapeHtml(out)}</textarea>
+        <div class="flex justify-end gap-2 mt-4">
+          <button onclick="closeModal()" class="btn-ghost text-surface-500">Close</button>
+          <button onclick="navigator.clipboard.writeText(document.getElementById('email-ai-out').value); showToast('Copied','success')" class="btn-secondary">Copy</button>
+          ${replyHref ? `<a href="${replyHref}" class="btn-primary">Open in email</a>` : ''}
+        </div>
+      </div>`, { wide: true });
+  } catch (err) {
+    console.error('[Outlook] email AI failed:', err);
+    openModal(`<div class="p-6"><h2 class="text-lg font-semibold mb-2">Couldn't complete</h2><p class="text-sm text-surface-500 mb-4">${escapeHtml(err.errorMessage || err.message || 'Unknown error')}</p><div class="flex justify-end"><button onclick="closeModal()" class="btn-secondary">Close</button></div></div>`);
+  }
 }
 
 function _emailSetupView(cfg) {
