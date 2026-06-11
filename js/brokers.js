@@ -7,46 +7,211 @@ let _brokerFilter   = 'all'; // 'all' | 'active' | 'inactive'
 let _brokerSearch   = '';
 let _brokerEditingId = null; // for safe modal save onclick
 let _brokerView     = localStorage.getItem('pulse_broker_view') || 'cards'; // 'cards' | 'list'
+let _brokerFirms    = []; // cached firm groups for the current render
 
-/* ─── renderBrokers ──────────────────────────────────────────────────────────── */
+/* ─── renderBrokers (firm-first) ─────────────────────────────────────────────── */
 async function renderBrokers() {
   const container = document.getElementById('page-content');
   if (!container) return;
+  container.innerHTML = `<div class="p-4 lg:p-8 max-w-7xl mx-auto">${renderLoadingSkeleton(4)}</div>`;
 
-  let brokers = [];
-  try {
-    const all = await DB.getForUser(STORES.brokers, currentUser.id);
-    brokers = (all || []).sort((a, b) => {
-      // Sort: most recently contacted first, then by name
-      const aLast = a.lastContactDate || a.createdAt || '';
-      const bLast = b.lastContactDate || b.createdAt || '';
-      return bLast > aLast ? 1 : bLast < aLast ? -1 : 0;
-    });
-  } catch (_) {}
+  const [contacts, companies] = await Promise.all([
+    DB.getForUser(STORES.contacts, currentUser.id),
+    DB.getForUser(STORES.companies, currentUser.id),
+  ]);
+  const coById = buildMap(companies);
+  const bucketOf = c => (typeof getContactBucket === 'function' ? getContactBucket(c) : c.bucket);
+  const brokerContacts = contacts.filter(c => !c.archived && bucketOf(c) === 'brokers');
+
+  // Group the individual broker contacts by their firm (company)
+  const firmsMap = {};
+  brokerContacts.forEach(c => {
+    const key = c.companyId || ('__person__' + c.id);
+    if (!firmsMap[key]) firmsMap[key] = { companyId: c.companyId || null, company: c.companyId ? coById[c.companyId] : null, contacts: [] };
+    firmsMap[key].contacts.push(c);
+  });
+  let firms = Object.values(firmsMap).map(f => {
+    const lastContact = f.contacts.reduce((mx, c) => (c.lastContactDate && (!mx || c.lastContactDate > mx)) ? c.lastContactDate : mx, null);
+    const needsReply = f.contacts.some(c => c.emailStats && c.emailStats.awaiting === 'you');
+    return {
+      companyId: f.companyId, company: f.company, contacts: f.contacts,
+      name: f.company ? f.company.name : (f.contacts[0]?.fullName || '(No firm)'),
+      website: f.company ? (f.company.website || f.company.linkedInUrl || '') : '',
+      lastContact, count: f.contacts.length, needsReply,
+    };
+  });
+  firms.sort((a, b) => (b.lastContact || '').localeCompare(a.lastContact || '') || a.name.localeCompare(b.name));
+  _brokerFirms = firms;
+
+  const active = firms.filter(f => f.lastContact && f.lastContact >= new Date(Date.now() - 30 * 86400000).toISOString().split('T')[0]).length;
 
   container.innerHTML = `<div class="p-4 lg:p-8 max-w-7xl mx-auto animate-fade-in">
-    ${renderPageHeader('Brokers', 'Track your M&A broker & intermediary relationships', `
+    ${renderPageHeader('Brokers', `${firms.length} firms · ${brokerContacts.length} contacts · ${active} active`, `
       <button onclick="openBrokerIntelligenceModal()" class="btn-secondary btn-sm" title="AI analysis of your broker network">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z"/></svg>
         Broker Intelligence
       </button>
-      <button onclick="openAddBrokerModal()" class="btn-primary btn-sm">+ Add Broker</button>
+      <button onclick="brokerFindWebsitesAI()" class="btn-secondary btn-sm" title="Use AI to find each firm's real website">
+        <svg class="w-4 h-4 text-brand-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z"/></svg>
+        Find Websites
+      </button>
+      <button onclick="openBrokerImport()" class="btn-secondary btn-sm">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5"/></svg>
+        Import Excel
+      </button>
     `)}
-
-    <div id="brokers-stats-row">
-      ${_brokersStatsHtml(brokers)}
-    </div>
-
-    <div class="mt-6" id="brokers-main">
-      ${_brokersMainHtml(brokers)}
-    </div>
+    <div class="mt-2" id="brokers-main">${_brokerFirmsMainHtml(firms)}</div>
   </div>`;
+}
+
+function _brokerFirmsRefresh() {
+  const el = document.getElementById('brokers-main');
+  if (el) el.innerHTML = _brokerFirmsMainHtml(_brokerFirms);
+}
+
+function _brokerFirmsMainHtml(firms) {
+  const thirty = new Date(Date.now() - 30 * 86400000).toISOString().split('T')[0];
+  const q = _brokerSearch.toLowerCase();
+  let filtered = firms.filter(f => {
+    const isActive = f.lastContact && f.lastContact >= thirty;
+    const matchStatus = _brokerFilter === 'all' || (_brokerFilter === 'active' && isActive) || (_brokerFilter === 'inactive' && !isActive);
+    const matchSearch = !q || f.name.toLowerCase().includes(q) || f.contacts.some(c => (c.fullName || '').toLowerCase().includes(q));
+    return matchStatus && matchSearch;
+  });
+  const activeCount = firms.filter(f => f.lastContact && f.lastContact >= thirty).length;
+  const chip = (key, label, count) => `<button onclick="_brokerSetFilter('${key}')" class="px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap ${_brokerFilter === key ? 'bg-brand-600 text-white shadow-sm' : 'bg-surface-100 text-surface-600 hover:bg-surface-200 dark:bg-surface-700 dark:text-surface-300'}">${label} <span class="opacity-60">${count}</span></button>`;
+
+  const body = filtered.length === 0
+    ? `<div class="py-12 text-center text-sm text-surface-500">No broker firms match your search or filter.</div>`
+    : (_brokerView === 'list'
+      ? `<div class="card p-0 overflow-x-auto"><table class="data-table"><thead><tr><th>Firm</th><th>Contacts</th><th>Website</th><th>Last Contact</th><th></th></tr></thead><tbody>${filtered.map(_brokerFirmRowHtml).join('')}</tbody></table></div>`
+      : `<div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">${filtered.map(_brokerFirmCardHtml).join('')}</div>`);
+
+  return `
+    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5">
+      <div class="flex items-center gap-3 flex-wrap">
+        <div class="relative">
+          <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-surface-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"/></svg>
+          <input type="text" placeholder="Search firms or contacts…" value="${escapeHtml(_brokerSearch)}" oninput="_brokerSetSearch(this.value)" class="input-field pl-9 text-sm w-60"/>
+        </div>
+        <div class="flex gap-1.5">${chip('all', 'All', firms.length)}${chip('active', 'Active', activeCount)}${chip('inactive', 'Need Attention', firms.length - activeCount)}</div>
+      </div>
+      <div class="flex border border-surface-200 dark:border-surface-700 rounded-lg overflow-hidden shrink-0">
+        <button onclick="_brokerSetView('cards')" class="p-2 ${_brokerView === 'cards' ? 'bg-surface-200 dark:bg-surface-700' : 'hover:bg-surface-100 dark:hover:bg-surface-800'}" title="Card view"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z"/></svg></button>
+        <button onclick="_brokerSetView('list')" class="p-2 ${_brokerView === 'list' ? 'bg-surface-200 dark:bg-surface-700' : 'hover:bg-surface-100 dark:hover:bg-surface-800'}" title="List view"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3.75 5.25h16.5m-16.5 4.5h16.5m-16.5 4.5h16.5m-16.5 4.5h16.5"/></svg></button>
+      </div>
+    </div>
+    ${body}`;
+}
+
+function _brokerFirmCardHtml(f) {
+  const initials = (f.name || '?').split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
+  const last = f.lastContact ? formatRelative(f.lastContact) : 'No contact yet';
+  return `
+    <div class="card card-interactive" onclick="viewBrokerFirm('${f.companyId || ''}')">
+      <div class="flex items-start gap-3">
+        ${f.company && typeof renderCompanyLogo === 'function' ? renderCompanyLogo(f.company, 'lg') : `<div class="w-10 h-10 rounded-lg bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 flex items-center justify-center text-sm font-bold shrink-0">${escapeHtml(initials)}</div>`}
+        <div class="min-w-0 flex-1">
+          <div class="flex items-start justify-between gap-2">
+            <h3 class="font-semibold truncate">${escapeHtml(f.name)}</h3>
+            ${f.needsReply ? '<span class="badge bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 text-[11px]">Reply due</span>' : ''}
+          </div>
+          <div class="text-xs text-surface-500 mt-0.5">${f.count} contact${f.count !== 1 ? 's' : ''}</div>
+          <div class="flex items-center gap-3 mt-2 text-xs flex-wrap">
+            ${f.website ? renderSiteLink(f.website, 'Website') : ''}
+            <span class="text-surface-400">Last: ${last}</span>
+          </div>
+          <div class="flex -space-x-2 mt-3">
+            ${f.contacts.slice(0, 5).map(c => typeof renderAvatar === 'function' ? renderAvatar(c.fullName, c.photoUrl, 'sm') : '').join('')}
+            ${f.count > 5 ? `<span class="w-7 h-7 rounded-full bg-surface-100 dark:bg-surface-700 text-[10px] flex items-center justify-center text-surface-500 ring-2 ring-white dark:ring-surface-900">+${f.count - 5}</span>` : ''}
+          </div>
+        </div>
+      </div>
+    </div>`;
+}
+
+function _brokerFirmRowHtml(f) {
+  return `
+    <tr class="clickable" onclick="viewBrokerFirm('${f.companyId || ''}')">
+      <td class="font-medium">${escapeHtml(f.name)}${f.needsReply ? ' <span class="text-red-500 text-xs">• reply due</span>' : ''}</td>
+      <td>${f.count}</td>
+      <td>${f.website ? renderSiteLink(f.website, 'Website') : '—'}</td>
+      <td class="text-sm text-surface-500">${f.lastContact ? formatRelative(f.lastContact) : '—'}</td>
+      <td class="text-right text-brand-600 text-sm">View →</td>
+    </tr>`;
+}
+
+/* ─── Firm detail: the firm's individual contacts + touchpoints + summaries ──── */
+async function viewBrokerFirm(companyId) {
+  const container = document.getElementById('page-content');
+  if (!container) return;
+  container.innerHTML = `<div class="p-4 lg:p-8 max-w-5xl mx-auto">${renderLoadingSkeleton(4)}</div>`;
+  const [company, contacts] = await Promise.all([
+    companyId ? DB.get(STORES.companies, companyId) : null,
+    DB.getForUser(STORES.contacts, currentUser.id),
+  ]);
+  const bucketOf = c => (typeof getContactBucket === 'function' ? getContactBucket(c) : c.bucket);
+  const firmContacts = contacts.filter(c => c.companyId === companyId && !c.archived && bucketOf(c) === 'brokers')
+    .sort((a, b) => (b.lastContactDate || '').localeCompare(a.lastContactDate || ''));
+  const name = company ? company.name : (firmContacts[0]?.fullName || 'Firm');
+  const website = company ? (company.website || company.linkedInUrl || '') : '';
+
+  const contactCard = c => {
+    const last = c.lastContactDate ? formatRelative(c.lastContactDate) : 'No touchpoint yet';
+    const brief = (c.emailBrief && c.emailBrief.summary) || c.aiSummary || '';
+    const subj = c.emailStats && c.emailStats.lastSubject;
+    return `
+      <div class="card card-interactive" onclick="viewContact('${c.id}')">
+        <div class="flex items-start gap-3">
+          ${typeof renderAvatar === 'function' ? renderAvatar(c.fullName, c.photoUrl, 'md', c.linkedInUrl) : ''}
+          <div class="min-w-0 flex-1">
+            <div class="flex items-start justify-between gap-2">
+              <div class="min-w-0">
+                <h3 class="font-semibold truncate">${escapeHtml(c.fullName)}</h3>
+                ${c.title ? `<p class="text-xs text-surface-500 truncate">${escapeHtml(c.title)}</p>` : ''}
+              </div>
+              ${typeof renderEmailStatusChip === 'function' ? renderEmailStatusChip(c) : ''}
+            </div>
+            <div class="flex items-center gap-3 mt-2 text-xs flex-wrap">
+              ${c.email ? `<a href="mailto:${escapeHtml(c.email)}" onclick="event.stopPropagation()" class="text-brand-600 hover:underline">${escapeHtml(c.email)}</a>` : ''}
+              <span class="text-surface-400">Last contact: ${last}</span>
+            </div>
+            ${subj ? `<div class="text-xs text-surface-400 mt-1 truncate">Re: ${escapeHtml(subj)}</div>` : ''}
+            ${brief ? `<p class="mt-2 text-xs text-surface-500 dark:text-surface-400 line-clamp-3 leading-relaxed"><span class="text-brand-500 font-medium mr-1">AI</span>${escapeHtml(brief)}</p>` : ''}
+          </div>
+        </div>
+      </div>`;
+  };
+
+  container.innerHTML = `
+    <div class="p-4 lg:p-8 max-w-5xl mx-auto animate-fade-in">
+      <button onclick="renderBrokers()" class="btn-ghost mb-4 -ml-2">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.75 19.5L8.25 12l7.5-7.5"/></svg>
+        Back to brokers
+      </button>
+      <div class="card mb-6">
+        <div class="flex items-start gap-4">
+          ${company && typeof renderCompanyLogo === 'function' ? renderCompanyLogo(company, 'xl') : `<div class="w-14 h-14 rounded-xl bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 flex items-center justify-center text-lg font-bold shrink-0">${escapeHtml((name || '?').slice(0, 2).toUpperCase())}</div>`}
+          <div class="flex-1 min-w-0">
+            <h1 class="text-2xl font-semibold">${escapeHtml(name)}</h1>
+            <div class="flex items-center gap-4 mt-2 text-sm flex-wrap">
+              <span class="text-surface-500">${firmContacts.length} contact${firmContacts.length !== 1 ? 's' : ''}</span>
+              ${website ? renderSiteLink(website, 'Website', false) : ''}
+              ${company ? `<button onclick="viewCompany('${company.id}')" class="text-brand-600 hover:underline">Open company →</button>` : ''}
+            </div>
+          </div>
+        </div>
+      </div>
+      <h2 class="text-base font-semibold mb-3">Contacts at ${escapeHtml(name)}</h2>
+      ${firmContacts.length ? `<div class="grid grid-cols-1 md:grid-cols-2 gap-4">${firmContacts.map(contactCard).join('')}</div>`
+        : `<div class="card text-center py-8 text-sm text-surface-400">No contacts at this firm yet.</div>`}
+    </div>`;
 }
 
 function _brokerSetView(v) {
   _brokerView = v;
   localStorage.setItem('pulse_broker_view', v);
-  _brokersRefresh();
+  _brokerFirmsRefresh();
 }
 
 /* ─── List/table row ─────────────────────────────────────────────────────────── */
@@ -547,12 +712,12 @@ async function _brokerDelete(brokerId) {
 /* ─── Filter / search helpers ────────────────────────────────────────────────── */
 function _brokerSetFilter(filter) {
   _brokerFilter = filter;
-  _brokersRefresh();
+  _brokerFirmsRefresh();
 }
 
 function _brokerSetSearch(val) {
   _brokerSearch = val;
-  _brokersRefresh();
+  _brokerFirmsRefresh();
 }
 
 /* ─── AI: Suggest Re-engagement Outreach ────────────────────────────────────── */
@@ -653,18 +818,6 @@ function _brokerAICopyDraft() {
 
 /* ─── Refresh ────────────────────────────────────────────────────────────────── */
 async function _brokersRefresh() {
-  let brokers = [];
-  try {
-    const all = await DB.getForUser(STORES.brokers, currentUser.id);
-    brokers = (all || []).sort((a, b) => {
-      const aL = a.lastContactDate || a.createdAt || '';
-      const bL = b.lastContactDate || b.createdAt || '';
-      return bL > aL ? 1 : bL < aL ? -1 : 0;
-    });
-  } catch (_) {}
-
-  const statsEl = document.getElementById('brokers-stats-row');
-  const mainEl  = document.getElementById('brokers-main');
-  if (statsEl) statsEl.innerHTML = _brokersStatsHtml(brokers);
-  if (mainEl)  mainEl.innerHTML  = _brokersMainHtml(brokers);
+  // Firm-first rebuild (the tab now groups individual broker contacts by firm).
+  await renderBrokers();
 }
