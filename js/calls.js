@@ -31,9 +31,13 @@ let _callRecCustomInstr  = localStorage.getItem('pulse_call_rec_custom_instr') |
 
 // ── Render Calls List ────────────────────────────────────────────
 
+let callsSearch = '';
+let callsRenderLimit = 40;
+const CALLS_PAGE_SIZE = 40;
+
 async function renderCalls() {
   const pageContent = document.getElementById('page-content');
-  pageContent.innerHTML = `<div class="p-4 lg:p-8 max-w-7xl mx-auto">${renderLoadingSkeleton(5)}</div>`;
+  pageContent.innerHTML = `<div class="p-4 lg:p-8 max-w-5xl mx-auto">${renderLoadingSkeleton(5)}</div>`;
 
   const [calls, contacts, companies, deals] = await Promise.all([
     DB.getForUser(STORES.calls, currentUser.id),
@@ -45,11 +49,26 @@ async function renderCalls() {
   const contactMap = buildMap(getActiveContacts(contacts));
   const companyMap = buildMap(companies);
   const dealMap = buildMap(deals);
-  const sortedCalls = sortByDate(calls, 'date');
+  let sortedCalls = sortByDate(calls, 'date');
+
+  // Search across participants, company, outcome, and summary text
+  if (callsSearch.trim()) {
+    const q = callsSearch.trim().toLowerCase();
+    sortedCalls = sortedCalls.filter(call => {
+      const pids = call.participantIds || (call.contactId ? [call.contactId] : []);
+      const names = pids.map(id => contactMap[id]?.fullName || '').join(' ').toLowerCase();
+      const comp = pids.map(id => companyMap[contactMap[id]?.companyId]?.name || '').join(' ').toLowerCase();
+      const summary = (call.cleanedNotes || call.aiSummary || call.notes || '').toLowerCase();
+      return names.includes(q) || comp.includes(q) || (call.outcome || '').toLowerCase().includes(q) ||
+             (call.title || '').toLowerCase().includes(q) || summary.includes(q);
+    });
+  }
+
+  const shown = sortedCalls.slice(0, callsRenderLimit);
 
   pageContent.innerHTML = `
-    <div class="p-4 lg:p-8 max-w-7xl mx-auto animate-fade-in">
-      ${renderPageHeader('Calls', `${calls.length} calls logged`, `
+    <div class="p-4 lg:p-8 max-w-5xl mx-auto animate-fade-in">
+      ${renderPageHeader('Calls', `${calls.length} call${calls.length !== 1 ? 's' : ''} logged`, `
         <button onclick="openMeetingRecorder()" class="btn-secondary flex items-center gap-2">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" /></svg>
           Record Meeting
@@ -60,83 +79,138 @@ async function renderCalls() {
         </button>
       `)}
 
-      ${sortedCalls.length === 0 ? renderEmptyState(
+      ${calls.length === 0 ? renderEmptyState(
         '<svg class="w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 002.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 01-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 00-1.091-.852H4.5A2.25 2.25 0 002.25 4.5v2.25z" /></svg>',
         'No calls logged yet',
         'Log your networking calls to track conversations and follow-ups',
         '<button onclick="openNewCallModal()" class="btn-primary">Log Your First Call</button>'
       ) : `
-        <div class="space-y-4">
-          ${sortedCalls.map(call => {
-            const participantIds = call.participantIds || (call.contactId ? [call.contactId] : []);
-            const participants = participantIds.map(id => contactMap[id]).filter(Boolean);
-            const primaryContact = participants[0];
-            const company = primaryContact ? companyMap[primaryContact.companyId] : null;
-            return `
-              <div class="card">
-                <div class="flex items-start gap-4">
-                  <div class="flex -space-x-2 flex-shrink-0">
-                    ${participants.length > 0
-                      ? participants.slice(0, 4).map(p =>
-                          `<div class="ring-2 ring-white dark:ring-surface-900 rounded-full">${renderAvatar(p.fullName, p.photoUrl, 'md', p.linkedInUrl)}</div>`
-                        ).join('')
-                      : '<div class="avatar avatar-md">?</div>'}
-                  </div>
-                  <div class="flex-1 min-w-0">
-                    <div class="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-3 mb-1">
-                      <span class="font-medium">
-                        ${participants.length > 1
-                          ? participants.map(p =>
-                              `<span class="cursor-pointer hover:text-brand-600" onclick="viewContact('${p.id}')">${escapeHtml(p.fullName)}</span>`
-                            ).join(', ')
-                          : primaryContact
-                            ? `<span class="cursor-pointer hover:text-brand-600" onclick="viewContact('${primaryContact.id}')">${escapeHtml(primaryContact.fullName)}</span>`
-                            : 'Unknown Contact'}
-                      </span>
-                      ${company ? `<span class="text-sm text-surface-500">${escapeHtml(company.name)}</span>` : ''}
-                      <span class="text-sm text-surface-400">${formatDateTime(call.date)}</span>
-                      ${call.duration ? `<span class="text-xs text-surface-400">${call.duration} min</span>` : ''}
-                    </div>
-                    ${call.outcome ? `<div class="mb-2"><span class="badge badge-blue">${escapeHtml(call.outcome)}</span>${call.dealId && dealMap[call.dealId] ? `<span class="badge ml-1" style="background:rgba(124,92,252,0.1);color:#7C5CFC;border:1px solid rgba(124,92,252,0.25)">${escapeHtml(dealMap[call.dealId].name)}</span>` : ''}</div>` : (call.dealId && dealMap[call.dealId] ? `<div class="mb-2"><span class="badge" style="background:rgba(124,92,252,0.1);color:#7C5CFC;border:1px solid rgba(124,92,252,0.25)">${escapeHtml(dealMap[call.dealId].name)}</span></div>` : '')}
-                    ${call.notes ? `<p class="text-sm text-surface-600 dark:text-surface-400 whitespace-pre-wrap">${escapeHtml(call.notes)}</p>` : ''}
-                    ${call.nextSteps ? `<p class="text-sm mt-2"><span class="font-medium text-surface-700 dark:text-surface-300">Next steps:</span> ${escapeHtml(call.nextSteps)}</p>` : ''}
-                    ${call.tasks && call.tasks.length > 0 ? `
-                      <div class="mt-3 pt-3 border-t border-surface-100 dark:border-surface-800 space-y-1.5">
-                        <p class="text-xs font-medium text-surface-500 uppercase tracking-wide mb-2">Action Items</p>
-                        ${call.tasks.map(t => `
-                          <div class="flex items-start gap-2 text-sm">
-                            <svg class="w-4 h-4 text-brand-500 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                            <span class="text-surface-700 dark:text-surface-300 flex-1">${escapeHtml(t.text)}</span>
-                            ${t.assignedToName ? `<span class="text-xs text-surface-400 whitespace-nowrap">&rarr; ${escapeHtml(t.assignedToName)}</span>` : ''}
-                            ${t.dueDate ? `<span class="text-xs text-surface-400 whitespace-nowrap">${formatDate(t.dueDate)}</span>` : ''}
-                          </div>
-                        `).join('')}
-                      </div>
-                    ` : ''}
-                    ${call.followUpDate ? `<p class="text-xs text-surface-500 mt-2">Follow-up: ${formatDate(call.followUpDate)}</p>` : ''}
-                  </div>
-                  <div class="flex-shrink-0 flex items-center gap-0.5">
-                    <button onclick="openEditCallModal('${call.id}')" title="Edit call"
-                      class="p-1.5 text-surface-400 hover:text-brand-600 transition-colors">
-                      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                      </svg>
-                    </button>
-                    <button onclick="deleteCall('${call.id}')" title="Delete call"
-                      class="p-1.5 text-surface-400 hover:text-red-500 transition-colors">
-                      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                      </svg>
-                    </button>
-                  </div>
-                </div>
-              </div>
-            `;
-          }).join('')}
+        <div class="relative mb-5 max-w-md">
+          <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-surface-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"/></svg>
+          <input type="text" placeholder="Search calls by person, company, or content…" value="${escapeHtml(callsSearch)}"
+            oninput="callsSearch=this.value; callsRenderLimit=CALLS_PAGE_SIZE; renderCalls()"
+            class="w-full pl-10 pr-4 py-2 text-sm bg-surface-100 dark:bg-surface-900 border-0 rounded-lg focus:ring-2 focus:ring-brand-500" />
         </div>
+
+        ${shown.length === 0 ? renderEmptyState(
+          '<svg class="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"/></svg>',
+          'No calls match your search', 'Try a different term', '') : `
+          <div class="space-y-2.5">
+            ${shown.map(call => _renderCallListItem(call, contactMap, companyMap, dealMap)).join('')}
+          </div>
+          ${sortedCalls.length > shown.length ? `
+            <div class="flex flex-col items-center gap-2 mt-6">
+              <p class="text-xs text-surface-400">Showing ${shown.length} of ${sortedCalls.length}</p>
+              <button onclick="callsRenderLimit+=CALLS_PAGE_SIZE; renderCalls()" class="btn-secondary btn-sm">Load more</button>
+            </div>` : ''}
+        `}
       `}
     </div>
   `;
+}
+
+// ── Premium collapsible call list item ───────────────────────────
+// Collapsed: one-line brief summary. Click to expand the full summary.
+function _renderCallListItem(call, contactMap, companyMap, dealMap) {
+  const participantIds = call.participantIds || (call.contactId ? [call.contactId] : []);
+  const participants = participantIds.map(id => contactMap[id]).filter(Boolean);
+  const primary = participants[0];
+  const company = primary ? companyMap[primary.companyId] : null;
+  const names = participants.length
+    ? participants.map(p => escapeHtml(p.fullName)).join(', ')
+    : (call.title ? escapeHtml(call.title) : 'Unknown contact');
+  const hasAI = !!(call.cleanedNotes || call.aiSummary || (call.keyInsights || []).length);
+  const deal = call.dealId && dealMap[call.dealId];
+
+  return `
+    <div class="card !p-0 overflow-hidden">
+      <div role="button" tabindex="0" onclick="_toggleCallCard('${call.id}')"
+        class="w-full text-left p-4 flex items-start gap-3.5 cursor-pointer hover:bg-surface-50 dark:hover:bg-surface-800/40 transition-colors">
+        <div class="flex -space-x-2 flex-shrink-0 pt-0.5">
+          ${participants.length
+            ? participants.slice(0, 3).map(p => `<div class="ring-2 ring-white dark:ring-surface-900 rounded-full">${renderAvatar(p.fullName, p.photoUrl, 'md', p.linkedInUrl)}</div>`).join('')
+            : '<div class="avatar avatar-md">?</div>'}
+        </div>
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center gap-2 flex-wrap">
+            <span class="font-semibold truncate">${names}</span>
+            ${company ? `<span class="text-xs text-surface-500">${escapeHtml(company.name)}</span>` : ''}
+            ${call.outcome ? `<span class="badge badge-blue">${escapeHtml(call.outcome)}</span>` : ''}
+            ${deal ? `<span class="badge" style="background:rgba(124,92,252,0.1);color:#7C5CFC;border:1px solid rgba(124,92,252,0.25)">${escapeHtml(deal.name)}</span>` : ''}
+          </div>
+          <div class="flex items-center gap-2 text-xs text-surface-400 mt-0.5 mb-1.5">
+            <span>${formatDateTime(call.date)}</span>
+            ${call.duration ? `<span>· ${call.duration} min</span>` : ''}
+            ${call.source === 'granola' ? '<span>· Granola</span>' : ''}
+            ${hasAI ? '<span class="inline-flex items-center gap-0.5 text-brand-500 font-medium"><svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z"/></svg>AI</span>' : ''}
+          </div>
+          <p class="text-sm text-surface-600 dark:text-surface-400 line-clamp-1">${_briefCallSummary(call)}</p>
+        </div>
+        <svg id="call-chev-${call.id}" class="w-5 h-5 text-surface-400 flex-shrink-0 transition-transform mt-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19.5 8.25l-7.5 7.5-7.5-7.5"/></svg>
+      </div>
+      <div id="call-details-${call.id}" class="hidden border-t border-surface-100 dark:border-surface-800 px-4 py-4">
+        ${_renderCallDetails(call, participants)}
+      </div>
+    </div>`;
+}
+
+function _briefCallSummary(call) {
+  const src = (call.cleanedNotes || call.aiSummary || call.notes || '').replace(/[#*>`]/g, '').replace(/\s+/g, ' ').trim();
+  if (!src) return '<span class="text-surface-400 italic">No summary yet — click to add notes</span>';
+  const m = src.match(/^.*?[.!?](\s|$)/);
+  let brief = (m ? m[0] : src).trim();
+  if (brief.length > 170) brief = brief.slice(0, 167).trim() + '…';
+  return escapeHtml(brief);
+}
+
+function _renderCallDetails(call, participants) {
+  const summary = (call.cleanedNotes || call.aiSummary || call.notes || '').trim();
+  const insights = (call.keyInsights || []).map(k => typeof k === 'string' ? k : (k.text || '')).filter(Boolean);
+  const aiActions = (call.actionItems || []).map(a => typeof a === 'string' ? a : (a.task || a.title || '')).filter(Boolean);
+  const tasks = (call.tasks || []).filter(t => t && t.text);
+  const flags = (call.redFlags || []).filter(Boolean);
+
+  const section = (title, body, color = 'surface') => `
+    <div class="mb-3">
+      <p class="text-xs font-semibold uppercase tracking-wide text-${color}-500 mb-1.5">${title}</p>
+      ${body}
+    </div>`;
+
+  let html = '';
+  html += summary
+    ? section('Summary', `<div class="text-sm text-surface-700 dark:text-surface-300 whitespace-pre-wrap leading-relaxed">${escapeHtml(summary)}</div>`)
+    : '<p class="text-sm text-surface-400 italic mb-3">No summary recorded for this call.</p>';
+
+  if (insights.length) html += section('Key Insights',
+    `<ul class="space-y-1">${insights.map(i => `<li class="flex gap-2 text-sm text-surface-700 dark:text-surface-300"><span class="text-brand-400 flex-shrink-0">•</span><span>${escapeHtml(i)}</span></li>`).join('')}</ul>`);
+
+  if (aiActions.length || tasks.length) html += section('Action Items',
+    `<ul class="space-y-1">
+      ${aiActions.map(a => `<li class="flex gap-2 text-sm text-surface-700 dark:text-surface-300"><span class="text-brand-500 flex-shrink-0">→</span><span>${escapeHtml(a)}</span></li>`).join('')}
+      ${tasks.map(t => `<li class="flex gap-2 text-sm text-surface-700 dark:text-surface-300"><span class="text-brand-500 flex-shrink-0">→</span><span class="flex-1">${escapeHtml(t.text)}${t.assignedToName ? ` <span class="text-xs text-surface-400">· ${escapeHtml(t.assignedToName)}</span>` : ''}${t.dueDate ? ` <span class="text-xs text-surface-400">· ${formatDate(t.dueDate)}</span>` : ''}</span></li>`).join('')}
+    </ul>`);
+
+  if (flags.length) html += section('Red Flags',
+    `<ul class="space-y-1">${flags.map(f => `<li class="flex gap-2 text-sm text-red-600 dark:text-red-400"><span class="flex-shrink-0">⚠</span><span>${escapeHtml(f)}</span></li>`).join('')}</ul>`, 'red');
+
+  if (call.nextSteps) html += section('Next Steps', `<p class="text-sm text-surface-700 dark:text-surface-300">${escapeHtml(call.nextSteps)}</p>`);
+  if (call.followUpDate) html += `<p class="text-xs text-surface-500 mb-3">Follow-up: ${formatDate(call.followUpDate)}</p>`;
+
+  html += `
+    <div class="flex items-center gap-2 pt-3 border-t border-surface-100 dark:border-surface-800">
+      <button onclick="event.stopPropagation(); openEditCallModal('${call.id}')" class="btn-secondary btn-sm">Edit</button>
+      <button onclick="event.stopPropagation(); deleteCall('${call.id}')" class="btn-ghost btn-sm text-red-500">Delete</button>
+      ${participants[0] ? `<button onclick="event.stopPropagation(); viewContact('${participants[0].id}')" class="btn-ghost btn-sm ml-auto">View contact →</button>` : ''}
+    </div>`;
+  return html;
+}
+
+function _toggleCallCard(id) {
+  const details = document.getElementById('call-details-' + id);
+  const chev = document.getElementById('call-chev-' + id);
+  if (!details) return;
+  const open = details.classList.toggle('hidden') === false;
+  if (chev) chev.style.transform = open ? 'rotate(180deg)' : '';
 }
 
 // ── Multi-Participant Picker ──────────────────────────────────────

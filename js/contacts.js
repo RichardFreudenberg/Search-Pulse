@@ -3,8 +3,10 @@
    ============================================ */
 
 let contactsViewMode = 'cards'; // table | cards
-// bucket: '' = all | a bucket key.  quick: '' | 'overdue' | 'priority'.  group: 'bucket' | 'none'
+// bucket: '' = all | a bucket key.  quick: '' | 'overdue' | 'priority' | 'reconnect'.  group: 'bucket' | 'none'
 let contactsFilters = { stage: '', tag: '', search: '', sort: 'name', bucket: '', quick: '', group: 'bucket' };
+const CONTACTS_PAGE_SIZE = 60;          // cards/rows rendered before "Load more" (scales to thousands)
+let contactsRenderLimit = CONTACTS_PAGE_SIZE;
 let _selectedCompanyId = null;      // ID of company selected/created in the contact picker
 let _cpCompanies = [];              // cached company list for the picker
 let _cpOutsideClickHandler = null;  // tracked so we never stack duplicate listeners
@@ -26,12 +28,15 @@ async function renderContacts() {
   const counts        = bucketCounts(activeContacts);
   const overdueCount  = activeContacts.filter(c => c.nextFollowUpDate && isOverdue(c.nextFollowUpDate)).length;
   const priorityCount = activeContacts.filter(c => isHighPriority(c)).length;
+  const reconnectList = getReconnectContacts(activeContacts);
+  const reconnectIds  = new Set(reconnectList.map(c => c.id));
 
   // ── Apply filters ──
   let filtered = [...activeContacts];
   if (contactsFilters.bucket) filtered = filtered.filter(c => getContactBucket(c) === contactsFilters.bucket);
-  if (contactsFilters.quick === 'overdue')  filtered = filtered.filter(c => c.nextFollowUpDate && isOverdue(c.nextFollowUpDate));
-  if (contactsFilters.quick === 'priority') filtered = filtered.filter(c => isHighPriority(c));
+  if (contactsFilters.quick === 'overdue')   filtered = filtered.filter(c => c.nextFollowUpDate && isOverdue(c.nextFollowUpDate));
+  if (contactsFilters.quick === 'priority')  filtered = filtered.filter(c => isHighPriority(c));
+  if (contactsFilters.quick === 'reconnect') filtered = filtered.filter(c => reconnectIds.has(c.id));
   if (contactsFilters.stage) filtered = filtered.filter(c => c.stage === contactsFilters.stage);
   if (contactsFilters.tag)   filtered = filtered.filter(c => (c.tags || []).includes(contactsFilters.tag));
   if (contactsFilters.search) {
@@ -97,12 +102,35 @@ async function renderContacts() {
         ${bucketPills}
       </div>
 
+      <!-- Reconnect overview (default view only) -->
+      ${(reconnectList.length && !contactsFilters.bucket && !contactsFilters.quick && !contactsFilters.search && !contactsFilters.stage) ? `
+        <div class="card mb-5 border-orange-200 dark:border-orange-900/40">
+          <div class="flex items-center justify-between mb-1">
+            <div class="flex items-center gap-2.5">
+              <span class="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-orange-100 dark:bg-orange-900/30 text-orange-600">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16.023 9.348h4.992V4.356M3.985 19.644V14.65h4.992m-9.97-3.348a8.001 8.001 0 0115.357-2M3.985 14.65a8.001 8.001 0 0015.357 2"/></svg>
+              </span>
+              <div>
+                <h2 class="text-sm font-bold">Reconnect</h2>
+                <p class="text-xs text-surface-500">${reconnectList.length} ${reconnectList.length === 1 ? 'relationship needs' : 'relationships need'} a touch — overdue or going cold</p>
+              </div>
+            </div>
+            ${reconnectList.length > 5 ? `<button onclick="_setContactQuick('reconnect')" class="text-xs font-medium text-orange-600 hover:text-orange-700">View all ${reconnectList.length} →</button>` : ''}
+          </div>
+          <div class="divide-y divide-surface-100 dark:divide-surface-800 -mb-1">
+            ${reconnectList.slice(0, 5).map(c => renderReconnectRow(c, companyMap[c.companyId])).join('')}
+          </div>
+        </div>
+      ` : ''}
+
       <!-- Quick views + toolbar -->
       <div class="flex flex-wrap items-center gap-2 mb-5">
         ${quickChip('overdue', 'Overdue follow-ups', overdueCount,
           '<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>', 'red')}
         ${quickChip('priority', 'High priority', priorityCount,
           '<svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20"><path d="M9.05 2.93c.3-.92 1.6-.92 1.9 0l1.36 4.18a1 1 0 00.95.69h4.4c.97 0 1.37 1.24.59 1.81l-3.56 2.59a1 1 0 00-.36 1.12l1.36 4.18c.3.92-.76 1.69-1.54 1.12l-3.56-2.59a1 1 0 00-1.18 0l-3.56 2.59c-.78.57-1.84-.2-1.54-1.12l1.36-4.18a1 1 0 00-.36-1.12L2.4 9.61c-.78-.57-.38-1.81.59-1.81h4.4a1 1 0 00.95-.69l1.36-4.18z"/></svg>', 'amber')}
+        ${quickChip('reconnect', 'Reconnect', reconnectList.length,
+          '<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16.023 9.348h4.992V4.356M3.985 19.644V14.65h4.992m-9.97-3.348a8.001 8.001 0 0115.357-2M3.985 14.65a8.001 8.001 0 0015.357 2"/></svg>', 'orange')}
 
         <div class="relative flex-1 min-w-[200px] max-w-sm ml-auto">
           <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-surface-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" /></svg>
@@ -148,32 +176,49 @@ async function renderContacts() {
         <div class="card p-0 overflow-x-auto">
           <table class="data-table">
             <thead><tr><th>Contact</th><th>Company</th><th>Bucket</th><th>Strength</th><th>Last Contact</th><th>Follow-up</th></tr></thead>
-            <tbody>${filtered.map(c => renderRelationshipRow(c, companyMap[c.companyId])).join('')}</tbody>
+            <tbody>${filtered.slice(0, contactsRenderLimit).map(c => renderRelationshipRow(c, companyMap[c.companyId])).join('')}</tbody>
           </table>
+          ${_renderContactsMore(filtered.length)}
         </div>
       ` : grouped
         ? RELATIONSHIP_BUCKETS.map(b => {
             const items = filtered.filter(c => getContactBucket(c) === b.key);
             if (!items.length) return '';
+            const shown = items.slice(0, 9);
             return `
               <div class="mb-6">
                 <div class="flex items-center gap-2 mb-3">
                   <span class="w-2.5 h-2.5 rounded-full bg-${b.color}-500"></span>
                   <h2 class="text-sm font-bold uppercase tracking-wide text-surface-600 dark:text-surface-300">${b.label}</h2>
                   <span class="text-xs text-surface-400">${items.length}</span>
-                  <button onclick="_setContactBucket('${b.key}')" class="text-xs text-brand-500 hover:text-brand-600 ml-1">View all →</button>
+                  ${items.length > shown.length ? `<button onclick="_setContactBucket('${b.key}')" class="text-xs text-brand-500 hover:text-brand-600 ml-1">View all ${items.length} →</button>` : ''}
                 </div>
                 <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-                  ${items.map(c => renderRelationshipCard(c, companyMap[c.companyId])).join('')}
+                  ${shown.map(c => renderRelationshipCard(c, companyMap[c.companyId])).join('')}
                 </div>
               </div>`;
           }).join('')
         : `<div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-            ${filtered.map(c => renderRelationshipCard(c, companyMap[c.companyId])).join('')}
-          </div>`}
+            ${filtered.slice(0, contactsRenderLimit).map(c => renderRelationshipCard(c, companyMap[c.companyId])).join('')}
+          </div>
+          ${_renderContactsMore(filtered.length)}`}
     </div>
   `;
 }
+
+/** Footer shown under capped lists: count + Load more. */
+function _renderContactsMore(total) {
+  if (total <= contactsRenderLimit) {
+    return total > CONTACTS_PAGE_SIZE ? `<p class="text-center text-xs text-surface-400 mt-4">Showing all ${total}</p>` : '';
+  }
+  const showing = Math.min(contactsRenderLimit, total);
+  return `
+    <div class="flex flex-col items-center gap-2 mt-6">
+      <p class="text-xs text-surface-400">Showing ${showing} of ${total} — narrow with a bucket, search, or filters</p>
+      <button onclick="_loadMoreContacts()" class="btn-secondary btn-sm">Load more</button>
+    </div>`;
+}
+function _loadMoreContacts() { contactsRenderLimit += CONTACTS_PAGE_SIZE; renderContacts(); }
 
 // ── Hub filter helpers ───────────────────────────────────────
 function _sortContacts(list, sort) {
@@ -193,10 +238,10 @@ function _sortContacts(list, sort) {
   }
   return arr;
 }
-function _setContactBucket(key) { contactsFilters.bucket = (contactsFilters.bucket === key ? '' : key); renderContacts(); }
-function _setContactQuick(key)  { contactsFilters.quick  = (contactsFilters.quick === key ? '' : key); renderContacts(); }
-function _toggleContactGroup()  { contactsFilters.group  = (contactsFilters.group === 'bucket' ? 'none' : 'bucket'); renderContacts(); }
-function _clearContactFilters() { contactsFilters = { stage: '', tag: '', search: '', sort: contactsFilters.sort, bucket: '', quick: '', group: contactsFilters.group }; renderContacts(); }
+function _setContactBucket(key) { contactsFilters.bucket = (contactsFilters.bucket === key ? '' : key); contactsRenderLimit = CONTACTS_PAGE_SIZE; renderContacts(); }
+function _setContactQuick(key)  { contactsFilters.quick  = (contactsFilters.quick === key ? '' : key); contactsRenderLimit = CONTACTS_PAGE_SIZE; renderContacts(); }
+function _toggleContactGroup()  { contactsFilters.group  = (contactsFilters.group === 'bucket' ? 'none' : 'bucket'); contactsRenderLimit = CONTACTS_PAGE_SIZE; renderContacts(); }
+function _clearContactFilters() { contactsFilters = { stage: '', tag: '', search: '', sort: contactsFilters.sort, bucket: '', quick: '', group: contactsFilters.group }; contactsRenderLimit = CONTACTS_PAGE_SIZE; renderContacts(); }
 
 async function openNewContactModal(prefill = {}) {
   const [companies, tags] = await Promise.all([

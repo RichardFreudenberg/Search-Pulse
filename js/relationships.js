@@ -18,6 +18,7 @@ const RELATIONSHIP_BUCKETS = [
   { key: 'advisors',    label: 'Advisors',              short: 'Advisor',     color: 'indigo',  order: 4 },
   { key: 'brokers',     label: 'Brokers',               short: 'Broker',      color: 'amber',   order: 5 },
   { key: 'targets',     label: 'Targets',               short: 'Target',      color: 'rose',    order: 6 },
+  { key: 'searchers',   label: 'Searchers',             short: 'Searcher',    color: 'cyan',    order: 7 },
   { key: 'unassigned',  label: 'Unassigned',            short: 'Unassigned',  color: 'gray',    order: 99 },
 ];
 
@@ -32,6 +33,7 @@ const _LEGACY_TYPE_TO_BUCKET = {
   'Seller / Business Owner':  'targets',
   'Broker / Intermediary':    'brokers',
   'Advisor / Mentor':         'advisors',
+  'Fellow Searcher':          'searchers',
 };
 
 /** Resolve a contact's bucket: explicit field, else derived from legacy type. */
@@ -46,6 +48,7 @@ function getContactBucket(contact) {
   if (lc.includes('seller') || lc.includes('owner') || lc.includes('target')) return 'targets';
   if (lc.includes('mentor'))                        return 'mentors';
   if (lc.includes('advisor'))                       return 'advisors';
+  if (lc.includes('search'))                        return 'searchers';
   return 'unassigned';
 }
 
@@ -207,4 +210,50 @@ function renderRelationshipRow(contact, company) {
       <td class="${overdue ? 'text-red-600 dark:text-red-400 font-medium' : ''}">${overdue ? 'Overdue · ' : ''}${fuText}</td>
     </tr>
   `;
+}
+
+// ── Reconnect: who needs a touch ─────────────────────────────
+/**
+ * Contacts that need reconnecting, ranked by urgency:
+ *   1) Overdue follow-ups (most overdue first)
+ *   2) Previously-engaged relationships that have gone cold/dormant
+ * Only includes stale contacts you've actually engaged before
+ * (have a lastContactDate) so it stays meaningful at scale.
+ */
+function getReconnectContacts(contacts) {
+  const scored = [];
+  (contacts || []).forEach(c => {
+    const overdue = c.nextFollowUpDate && _relIsOverdue(c.nextFollowUpDate);
+    const s = getRelationshipStrength(c);
+    const stale = !!c.lastContactDate && (s === 'dormant' || s === 'cold');
+    if (!overdue && !stale) return;
+    const overdueDays = overdue ? _relDaysSince(c.nextFollowUpDate) : 0;
+    const sinceLast   = _relDaysSince(c.lastContactDate || c.createdAt);
+    const score = (overdue ? 1e6 : 0) + overdueDays * 100 + (isFinite(sinceLast) ? Math.min(sinceLast, 3650) : 0);
+    scored.push({ c, score, overdue });
+  });
+  scored.sort((a, b) => b.score - a.score);
+  return scored.map(x => x.c);
+}
+
+/** Compact row for the Reconnect panel. */
+function renderReconnectRow(contact, company) {
+  const overdue = _relIsOverdue(contact.nextFollowUpDate);
+  const reason = overdue
+    ? `<span class="text-red-600 dark:text-red-400 font-medium">Follow-up overdue${contact.nextFollowUpDate ? ' · ' + (typeof formatFutureRelative === 'function' ? formatFutureRelative(contact.nextFollowUpDate) : '') : ''}</span>`
+    : `<span class="text-surface-500">Last contact ${contact.lastContactDate && typeof formatRelative === 'function' ? formatRelative(contact.lastContactDate) : 'a while ago'}</span>`;
+  return `
+    <div class="flex items-center gap-3 py-2.5 px-1 hover:bg-surface-50 dark:hover:bg-surface-800/50 rounded-lg cursor-pointer transition-colors" onclick="viewContact('${contact.id}')">
+      ${typeof renderAvatar === 'function' ? renderAvatar(contact.fullName, contact.photoUrl, 'sm', contact.linkedInUrl) : ''}
+      <div class="min-w-0 flex-1">
+        <div class="flex items-center gap-2">
+          <span class="font-medium text-sm truncate">${escapeHtml(contact.fullName)}</span>
+          ${renderBucketBadge(getContactBucket(contact))}
+        </div>
+        <div class="text-xs truncate">${company ? escapeHtml(company.name) + ' · ' : ''}${reason}</div>
+      </div>
+      <button onclick="event.stopPropagation(); openNewCallModal('${contact.id}')" class="btn-ghost btn-xs flex-shrink-0" title="Log a call / reconnect">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.6" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 002.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 01-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 00-1.091-.852H4.5A2.25 2.25 0 002.25 4.5v2.25z"/></svg>
+      </button>
+    </div>`;
 }
