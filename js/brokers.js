@@ -109,9 +109,9 @@ function _brokerFirmsMainHtml(firms) {
   return `
     <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5">
       <div class="flex items-center gap-3 flex-wrap">
-        <div class="relative">
+        <div class="relative w-64">
           <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-surface-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"/></svg>
-          <input type="text" id="broker-search-input" placeholder="Search firms or contacts…" value="${escapeHtml(_brokerSearch)}" oninput="_brokerSetSearch(this.value)" class="input-field pl-9 text-sm w-60"/>
+          <input type="text" id="broker-search-input" placeholder="Search firms or contacts…" value="${escapeHtml(_brokerSearch)}" oninput="_brokerSetSearch(this.value)" class="search-field"/>
         </div>
         <div class="flex gap-1.5">${chip('all', 'All', firms.length)}${chip('active', 'Active', activeCount)}${chip('inactive', 'Need Attention', firms.length - activeCount)}</div>
       </div>

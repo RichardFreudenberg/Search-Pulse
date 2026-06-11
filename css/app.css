@@ -3196,3 +3196,57 @@ h1.page-header-title { font-size: 22px !important; }
   margin-bottom: 16px;
 }
 
+/* =====================================================================
+   Premium polish pass — consistent depth, motion & focus across the app
+   (appended last so it intentionally refines the base components)
+   ===================================================================== */
+
+/* Cards: a whisper of resting depth in light mode + a tactile lift on hover.
+   Dark mode stays flat-with-hairline (shadows read poorly on dark). */
+.card {
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04), 0 1px 3px rgba(16, 24, 40, 0.03);
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
+}
+.dark .card { box-shadow: none; }
+
+.card-interactive { box-shadow: 0 1px 2px rgba(16, 24, 40, 0.05); }
+.card-interactive:hover {
+  transform: translateY(-2px);
+  border-color: var(--accent-border);
+  box-shadow: 0 12px 28px -10px rgba(16, 24, 40, 0.14), 0 4px 10px -4px rgba(16, 24, 40, 0.08);
+}
+.dark .card-interactive { box-shadow: none; }
+.dark .card-interactive:hover {
+  transform: translateY(-2px);
+  border-color: var(--accent-border);
+  box-shadow: 0 14px 32px -12px rgba(0, 0, 0, 0.6);
+}
+.card-interactive:active { transform: translateY(0); transition-duration: 0.05s; }
+
+/* Unified search field — one consistent look for every hub search bar. */
+.search-field {
+  width: 100%;
+  padding: 0.5rem 1rem 0.5rem 2.5rem;
+  font-size: 0.875rem;
+  border: 1px solid transparent;
+  border-radius: 0.625rem;
+  background: var(--bg-subtle, rgba(0, 0, 0, 0.035));
+  color: var(--text-primary);
+  transition: background 0.15s, border-color 0.15s, box-shadow 0.15s;
+  outline: none;
+}
+.search-field:focus {
+  background: var(--bg-card);
+  border-color: var(--accent-border);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.dark .search-field { background: rgba(255, 255, 255, 0.05); }
+.dark .search-field:focus { background: rgba(255, 255, 255, 0.03); }
+
+/* Table rows: smoother, more premium hover. */
+.data-table tbody tr.clickable { transition: background 0.12s ease; }
+.data-table tbody tr.clickable:active { transform: none; }
+
+/* Segment/filter pills & view toggles: crisper press feedback. */
+button:active { -webkit-tap-highlight-color: transparent; }
+
