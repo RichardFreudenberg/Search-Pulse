@@ -57,7 +57,8 @@ async function renderCompanies() {
                   <div class="flex items-center gap-3 mt-2 text-xs text-surface-500">
                     <span>${contactCounts[c.id] || 0} contacts</span>
                     ${c.size ? `<span>· ${escapeHtml(c.size)} employees</span>` : ''}
-                    ${c.website ? `<span>· <a href="${escapeHtml(c.website)}" target="_blank" class="text-brand-600 hover:underline" onclick="event.stopPropagation()">Website</a></span>` : ''}
+                    ${c.website ? `<span>· ${renderSiteLink(c.website)}</span>` : ''}
+                    ${c.linkedInUrl ? `<span>· ${renderSiteLink(c.linkedInUrl)}</span>` : ''}
                   </div>
                 </div>
               </div>
@@ -100,9 +101,11 @@ async function viewCompany(companyId) {
             <h1 class="text-2xl font-semibold">${escapeHtml(company.name)}</h1>
             ${company.industry ? `<p class="text-surface-500 mt-1">${escapeHtml(company.industry)}</p>` : ''}
             ${company.description ? `<p class="text-sm text-surface-600 dark:text-surface-400 mt-2">${escapeHtml(company.description)}</p>` : ''}
-            <div class="flex items-center gap-4 mt-3 text-sm text-surface-500">
+            <div class="flex items-center gap-4 mt-3 text-sm text-surface-500 flex-wrap">
               ${company.size ? `<span>${escapeHtml(company.size)} employees</span>` : ''}
-              ${company.website ? `<a href="${escapeHtml(company.website)}" target="_blank" class="text-brand-600 hover:underline">${escapeHtml(company.website)}</a>` : ''}
+              ${company.website ? renderSiteLink(company.website, company.website, false) : ''}
+              ${company.linkedInUrl ? renderSiteLink(company.linkedInUrl, null, false) : ''}
+              ${company.email ? `<a href="mailto:${escapeHtml(company.email)}" class="inline-flex items-center gap-1 text-brand-600 hover:underline"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.6" d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75"/></svg>${escapeHtml(company.email)}</a>` : ''}
             </div>
           </div>
           <button onclick="openEditCompanyModal('${company.id}')" class="btn-secondary btn-sm">Edit</button>
