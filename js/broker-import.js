@@ -82,12 +82,23 @@ function _brokerGet(row, mapping, key) {
   return col ? String(row[col] == null ? '' : row[col]).trim() : '';
 }
 
+// Does this string look like a company rather than a person's name?
+function _looksLikeCompany(s) {
+  if (!s) return false;
+  return /(\b(gmbh|ag|kg|ohg|mbh|ug|inc|llc|ltd|lp|plc|corp|company|co|partners?|advisors?|advisory|capital|group|holdings?|ventures?|associates?|consulting|consultants?|beratung|unternehmensberatung|kanzlei|beteiligung\w*|brokers?|brokerage|mergers?|m&a)\b)|&|\+/i.test(s);
+}
+
 function _brokerRowToRecord(row, mapping) {
-  const name = _brokerGet(row, mapping, 'name') ||
+  let name = _brokerGet(row, mapping, 'name') ||
     [_brokerGet(row, mapping, 'firstName'), _brokerGet(row, mapping, 'lastName')].filter(Boolean).join(' ').trim();
+  let firm = _brokerGet(row, mapping, 'firm');
+  // The list mixes firms and individuals. If the "name" is actually a company
+  // (and we have no separate firm), treat it as the firm — not a person.
+  if (name && !firm && _looksLikeCompany(name)) { firm = name; name = ''; }
+  // If the person name is identical to the firm, it's a firm-only entry.
+  if (name && firm && name.toLowerCase() === firm.toLowerCase()) name = '';
   return {
-    name,
-    firm:        _brokerGet(row, mapping, 'firm'),
+    name, firm,
     email:       _brokerGet(row, mapping, 'email').toLowerCase(),
     phone:       _brokerGet(row, mapping, 'phone'),
     location:    _brokerGet(row, mapping, 'location'),
@@ -96,33 +107,51 @@ function _brokerRowToRecord(row, mapping) {
   };
 }
 
+// Dedup keys — person entries keyed by email/name+firm; firm-only by firm name.
+function _brokerRecKey(rec) {
+  if (rec.name) return 'p:' + (rec.email || (rec.name.toLowerCase() + '|' + rec.firm.toLowerCase()));
+  return 'f:' + rec.firm.toLowerCase();
+}
+function _brokerExistingKey(b) {
+  const nm = (b.name || '').toLowerCase(), fm = (b.firm || '').toLowerCase();
+  if (nm && nm !== fm) return 'p:' + ((b.email || '').toLowerCase() || (nm + '|' + fm));
+  return 'f:' + (fm || nm);
+}
+
 function _brokerImportComputeCounts() {
   const { rows, mapping, existing } = _brokerImport;
-  const exBrokerEmails   = new Set(existing.brokers.map(b => (b.email || '').toLowerCase()).filter(Boolean));
-  const exBrokerNameFirm = new Set(existing.brokers.map(b => (b.name || '').toLowerCase() + '|' + (b.firm || '').toLowerCase()));
-  const exContactEmails  = new Set(existing.contacts.map(c => (c.email || '').toLowerCase()).filter(Boolean));
-  const exContactNames   = new Set(existing.contacts.map(c => (c.fullName || '').toLowerCase()).filter(Boolean));
-  const exCompanyNames   = new Set(existing.companies.map(c => (c.name || '').toLowerCase()).filter(Boolean));
+  const exBrokerKeys    = new Set(existing.brokers.map(_brokerExistingKey));
+  const exContactEmails = new Set(existing.contacts.map(c => (c.email || '').toLowerCase()).filter(Boolean));
+  const exContactNames  = new Set(existing.contacts.map(c => (c.fullName || '').toLowerCase()).filter(Boolean));
+  const exCompanyNames  = new Set(existing.companies.map(c => (c.name || '').toLowerCase()).filter(Boolean));
 
-  const seen = new Set();
+  const seenBroker = new Set();
   const newCompanySet = new Set();
+  const newContactSet = new Set();
   let newBrokers = 0, dupBrokers = 0, newContacts = 0, newCompanies = 0, invalid = 0;
 
   rows.forEach(r => {
     const rec = _brokerRowToRecord(r, mapping);
-    if (!rec.name) { invalid++; return; }
-    const dkey = rec.email || (rec.name.toLowerCase() + '|' + rec.firm.toLowerCase());
-    if (seen.has(dkey)) { dupBrokers++; return; }
-    seen.add(dkey);
-    const isDup = (rec.email && exBrokerEmails.has(rec.email)) ||
-                  exBrokerNameFirm.has(rec.name.toLowerCase() + '|' + rec.firm.toLowerCase());
-    if (isDup) { dupBrokers++; return; }
-    newBrokers++;
-    const cDup = (rec.email && exContactEmails.has(rec.email)) || exContactNames.has(rec.name.toLowerCase());
-    if (!cDup) newContacts++;
+    if (!rec.name && !rec.firm) { invalid++; return; }
+
+    // Firm → company (always, even for firm-only rows)
     if (rec.firm) {
       const fl = rec.firm.toLowerCase();
       if (!exCompanyNames.has(fl) && !newCompanySet.has(fl)) { newCompanies++; newCompanySet.add(fl); }
+    }
+
+    // Broker tracker entry (person or firm), de-duplicated
+    const bkey = _brokerRecKey(rec);
+    if (seenBroker.has(bkey) || exBrokerKeys.has(bkey)) { dupBrokers++; }
+    else {
+      seenBroker.add(bkey);
+      newBrokers++;
+      // Individual → contact
+      if (rec.name) {
+        const ckey = rec.email || rec.name.toLowerCase();
+        const cDup = (rec.email && exContactEmails.has(rec.email)) || exContactNames.has(rec.name.toLowerCase());
+        if (!cDup && !newContactSet.has(ckey)) { newContacts++; newContactSet.add(ckey); }
+      }
     }
   });
   return { total: rows.length, newBrokers, dupBrokers, newContacts, newCompanies, invalid };
@@ -137,7 +166,7 @@ function _brokerImportStatCard(n, label, color) {
 function _brokerImportRenderPreview() {
   const { headers, mapping, rows } = _brokerImport;
   const counts = _brokerImportComputeCounts();
-  const hasName = !!(mapping.name || mapping.firstName || mapping.lastName);
+  const hasName = !!(mapping.name || mapping.firstName || mapping.lastName || mapping.firm);
 
   const fieldRow = f => `
     <div class="flex items-center gap-2">
@@ -157,13 +186,14 @@ function _brokerImportRenderPreview() {
     </div>
 
     <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
-      ${_brokerImportStatCard(counts.newBrokers, 'New brokers', 'brand')}
-      ${_brokerImportStatCard(counts.newContacts, 'New contacts', 'emerald')}
-      ${_brokerImportStatCard(counts.newCompanies, 'New companies', 'violet')}
+      ${_brokerImportStatCard(counts.newBrokers, 'Broker entries', 'brand')}
+      ${_brokerImportStatCard(counts.newContacts, 'Contacts (people)', 'emerald')}
+      ${_brokerImportStatCard(counts.newCompanies, 'Companies (firms)', 'violet')}
       ${_brokerImportStatCard(counts.dupBrokers, 'Duplicates skipped', 'amber')}
     </div>
-    ${counts.invalid ? `<p class="text-xs text-amber-600 mb-3">${counts.invalid} row(s) have no name and will be skipped.</p>` : ''}
-    ${!hasName ? `<p class="text-xs text-red-500 mb-3">Map a <b>Name</b> column (or First + Last name) to continue.</p>` : ''}
+    <p class="text-[11px] text-surface-400 mb-3">Rows that look like a firm become <b>companies</b>; rows with a person's name become <b>contacts</b> (Brokers bucket) linked to their firm. Both feed the Broker Tracker.</p>
+    ${counts.invalid ? `<p class="text-xs text-amber-600 mb-3">${counts.invalid} empty row(s) will be skipped.</p>` : ''}
+    ${!hasName ? `<p class="text-xs text-red-500 mb-3">Map a <b>Name</b> (or First/Last) and/or <b>Firm</b> column to continue.</p>` : ''}
 
     <div class="flex justify-between items-center mt-4">
       <button onclick="openBrokerImport()" class="btn-ghost text-surface-500 text-sm">← Choose another file</button>
@@ -189,68 +219,77 @@ async function brokerImportRun() {
       if (c.email) contactByEmail[c.email.toLowerCase()] = c;
       if (c.fullName) contactByName[c.fullName.toLowerCase()] = c;
     });
-    const brokerEmails   = new Set(existing.brokers.map(b => (b.email || '').toLowerCase()).filter(Boolean));
-    const brokerNameFirm = new Set(existing.brokers.map(b => (b.name || '').toLowerCase() + '|' + (b.firm || '').toLowerCase()));
+    const exBrokerKeys = new Set(existing.brokers.map(_brokerExistingKey));
 
-    // De-duplicate rows (within file + against existing brokers)
+    // Parse + de-duplicate rows (within file + against existing brokers)
     const seen = new Set();
     const toCreate = [];
+    const allFirms = new Set();
     rows.forEach(r => {
       const rec = _brokerRowToRecord(r, mapping);
-      if (!rec.name) return;
-      const dkey = rec.email || (rec.name.toLowerCase() + '|' + rec.firm.toLowerCase());
-      if (seen.has(dkey)) return;
-      seen.add(dkey);
-      const isDup = (rec.email && brokerEmails.has(rec.email)) ||
-                    brokerNameFirm.has(rec.name.toLowerCase() + '|' + rec.firm.toLowerCase());
-      if (isDup) return;
+      if (!rec.name && !rec.firm) return;
+      if (rec.firm) allFirms.add(rec.firm);
+      const k = _brokerRecKey(rec);
+      if (seen.has(k) || exBrokerKeys.has(k)) return;
+      seen.add(k);
       toCreate.push(rec);
     });
 
     const now = new Date().toISOString();
     let createdBrokers = 0, createdContacts = 0, createdCompanies = 0;
 
-    // 1) Companies (unique firms first, so contacts/brokers can link to them)
-    for (const rec of toCreate) {
-      if (!rec.firm) continue;
-      const fl = rec.firm.toLowerCase();
+    // 1) Companies for EVERY firm referenced (even firm-only rows / dup people)
+    for (const firm of allFirms) {
+      const fl = firm.toLowerCase();
       if (!companyByName[fl]) {
         const co = await DB.add(STORES.companies, {
-          userId: currentUser.id, name: rec.firm, industry: rec.specialties || '',
-          location: rec.location || '', source: 'broker-import', createdAt: now,
+          userId: currentUser.id, name: firm, source: 'broker-import', createdAt: now,
         });
         companyByName[fl] = co.id;
         createdCompanies++;
       }
     }
 
-    // 2) Contacts (bucket: Brokers) + broker records, linked together
+    // 2) Individuals → contacts; each entry → a broker tracker record, linked
     for (const rec of toCreate) {
       const companyId = rec.firm ? (companyByName[rec.firm.toLowerCase()] || null) : null;
 
-      let contact = (rec.email && contactByEmail[rec.email]) || contactByName[rec.name.toLowerCase()];
-      if (!contact) {
-        contact = await DB.add(STORES.contacts, {
-          userId: currentUser.id, fullName: rec.name, email: rec.email || '', phone: rec.phone || '',
-          location: rec.location || '', companyId: companyId || null, bucket: 'brokers',
-          relationshipType: 'Broker / Intermediary', stage: (typeof STAGES !== 'undefined' && STAGES[0]) || '',
-          tags: [], notes: rec.notes || '', source: 'broker-import',
-          lastContactDate: null, nextFollowUpDate: null, archived: false,
+      if (rec.name) {
+        // Real person → contact (Brokers bucket) + broker record
+        let contact = (rec.email && contactByEmail[rec.email]) || contactByName[rec.name.toLowerCase()];
+        if (!contact) {
+          contact = await DB.add(STORES.contacts, {
+            userId: currentUser.id, fullName: rec.name, email: rec.email || '', phone: rec.phone || '',
+            location: rec.location || '', companyId: companyId || null, bucket: 'brokers',
+            relationshipType: 'Broker / Intermediary', stage: (typeof STAGES !== 'undefined' && STAGES[0]) || '',
+            tags: [], notes: rec.notes || '', source: 'broker-import',
+            lastContactDate: null, nextFollowUpDate: null, archived: false,
+          });
+          if (rec.email) contactByEmail[rec.email] = contact;
+          contactByName[rec.name.toLowerCase()] = contact;
+          createdContacts++;
+        }
+        await DB.add(STORES.brokers, {
+          id: generateId(), userId: currentUser.id,
+          name: rec.name, firm: rec.firm || '', email: rec.email || '', phone: rec.phone || '',
+          location: rec.location || '', specialties: rec.specialties || '', notes: rec.notes || '',
+          dealsIntroduced: 0, relationshipRating: 0,
+          contactId: contact.id, companyId: companyId || null,
+          source: 'broker-import', createdAt: now, updatedAt: now,
         });
-        if (rec.email) contactByEmail[rec.email] = contact;
-        contactByName[rec.name.toLowerCase()] = contact;
-        createdContacts++;
+        createdBrokers++;
+      } else if (rec.firm) {
+        // Firm-only entry → broker record for the firm (no contact), linked to company
+        await DB.add(STORES.brokers, {
+          id: generateId(), userId: currentUser.id,
+          name: rec.firm, firm: '', email: '', phone: rec.phone || '',
+          location: rec.location || '', specialties: rec.specialties || '', notes: rec.notes || '',
+          dealsIntroduced: 0, relationshipRating: 0,
+          contactId: null, companyId: companyId || null, isFirm: true,
+          source: 'broker-import', createdAt: now, updatedAt: now,
+        });
+        createdBrokers++;
       }
-
-      await DB.add(STORES.brokers, {
-        id: generateId(), userId: currentUser.id,
-        name: rec.name, firm: rec.firm || '', email: rec.email || '', phone: rec.phone || '',
-        location: rec.location || '', specialties: rec.specialties || '', notes: rec.notes || '',
-        dealsIntroduced: 0, relationshipRating: 0,
-        contactId: contact.id, companyId: companyId || null,
-        source: 'broker-import', createdAt: now, updatedAt: now,
-      });
-      createdBrokers++;
     }
 
     if (typeof _brokersRefresh === 'function') await _brokersRefresh();
