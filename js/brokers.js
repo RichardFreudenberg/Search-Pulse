@@ -57,6 +57,10 @@ async function renderBrokers() {
         <svg class="w-4 h-4 text-brand-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z"/></svg>
         Find Websites
       </button>
+      <button onclick="brokerDescribeFirmsAI()" class="btn-secondary btn-sm" title="Use AI to research & write a short description for firms missing one">
+        <svg class="w-4 h-4 text-brand-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25"/></svg>
+        Describe Firms
+      </button>
       <button onclick="openBrokerImport()" class="btn-secondary btn-sm">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5"/></svg>
         Import Excel
@@ -303,6 +307,44 @@ async function brokerFindWebsitesAI() {
     showToast(`AI added ${updated} website${updated !== 1 ? 's' : ''}${updated < missing.length ? ` (${missing.length - updated} still unknown)` : ''}`, 'success');
   } catch (err) {
     showToast('Could not find websites: ' + (err.message || 'error'), 'error');
+  }
+}
+
+/* ─── AI: research & describe broker firms (for searchable summaries) ────────── */
+async function brokerDescribeFirmsAI() {
+  showToast('Researching & describing firms with AI…', 'info');
+  try {
+    const [contacts, companies] = await Promise.all([
+      DB.getForUser(STORES.contacts, currentUser.id),
+      DB.getForUser(STORES.companies, currentUser.id),
+    ]);
+    const bucketOf = c => (typeof getContactBucket === 'function' ? getContactBucket(c) : c.bucket);
+    const brokerCompanyIds = new Set(contacts.filter(c => !c.archived && bucketOf(c) === 'brokers').map(c => c.companyId).filter(Boolean));
+    const targets = companies.filter(c => brokerCompanyIds.has(c.id) && !(c.description || '').trim());
+    if (!targets.length) { showToast('All broker firms already have a description', 'success'); return; }
+    let updated = 0;
+    for (let i = 0; i < targets.length; i += 15) {
+      const group = targets.slice(i, i + 15);
+      const list = group.map((c, idx) => `${idx + 1}. ${c.name}${c.industry ? ' — ' + c.industry : ''}${c.website ? ' — ' + c.website : ''}`).join('\n');
+      let raw = '';
+      try {
+        raw = await callAI(
+          'You describe German advisory / broker / legal / tax firms for a search-fund CRM. For each firm write a concise 1-2 sentence ENGLISH description of what they do and their professional category, explicitly using common ENGLISH profession words so it is searchable: "lawyers" (Rechtsanwälte/Kanzlei), "tax advisors" (Steuerberater), "auditors", "notaries", "M&A advisors", "business broker", "corporate finance advisors", "management consultants".',
+          `Return ONLY a JSON array [{"name":"...","description":"..."}] for these firms (keep the name exactly):\n${list}`,
+          2000, 0.2
+        );
+      } catch (_) { continue; }
+      let arr = [];
+      try { arr = JSON.parse(raw.replace(/^```(?:json)?/i, '').replace(/```$/i, '').trim()); } catch (_) {}
+      for (const it of (arr || [])) {
+        const c = group.find(x => (x.name || '').toLowerCase() === String(it && it.name || '').toLowerCase());
+        if (c && it.description) { c.description = String(it.description).trim(); await DB.put(STORES.companies, c); updated++; }
+      }
+    }
+    await renderBrokers();
+    showToast(`AI described ${updated} firm${updated !== 1 ? 's' : ''}`, 'success');
+  } catch (err) {
+    showToast('Could not describe firms: ' + (err.message || 'error'), 'error');
   }
 }
 
