@@ -198,8 +198,16 @@ function _brokerImportRenderPreview() {
     <h3 class="text-base font-semibold mb-1">Map columns &amp; review</h3>
     <p class="text-sm text-surface-500 mb-4">${escapeHtml(_brokerImport.fileName)} · ${rows.length} rows. Adjust the column mapping if anything looks off.</p>
 
-    <div class="grid sm:grid-cols-2 gap-2.5 mb-5">
+    <div class="grid sm:grid-cols-2 gap-2.5 mb-4">
       ${_BROKER_IMPORT_FIELDS.map(fieldRow).join('')}
+    </div>
+
+    <p class="text-xs font-medium text-surface-500 mb-1">Preview of your file (first 3 rows) — use this to map the columns correctly:</p>
+    <div class="overflow-x-auto border border-surface-200 dark:border-surface-700 rounded-lg mb-5">
+      <table class="text-xs w-full">
+        <thead><tr>${headers.map(h => `<th class="px-2 py-1.5 text-left bg-surface-50 dark:bg-surface-800 font-semibold whitespace-nowrap">${escapeHtml(h)}</th>`).join('')}</tr></thead>
+        <tbody>${rows.slice(0, 3).map(r => `<tr>${headers.map(h => `<td class="px-2 py-1 border-t border-surface-100 dark:border-surface-800 whitespace-nowrap max-w-[180px] truncate" title="${escapeHtml(String(r[h] == null ? '' : r[h]))}">${escapeHtml(String(r[h] == null ? '' : r[h]))}</td>`).join('')}</tr>`).join('')}</tbody>
+      </table>
     </div>
 
     <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
