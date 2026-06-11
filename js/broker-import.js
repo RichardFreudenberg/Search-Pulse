@@ -67,13 +67,29 @@ function brokerImportHandleFile(input) {
 
 function _brokerAutoMap(headers) {
   const map = {};
-  _BROKER_IMPORT_FIELDS.forEach(f => {
-    const found = headers.find(h => {
-      const lc = String(h).toLowerCase().trim();
-      return f.hints.some(hint => lc.includes(hint));
-    });
-    map[f.key] = found || '';
+  const claimed = new Set();
+  const find = (hints, exclude) => headers.find(h => {
+    if (claimed.has(h)) return false;
+    const lc = String(h).toLowerCase().trim();
+    if (exclude && exclude.some(x => lc.includes(x))) return false;
+    return hints.some(hint => lc.includes(hint));
   });
+  const claim = (k, h) => { map[k] = h || ''; if (h) claimed.add(h); };
+
+  // Firm FIRST, so a header like "Company Name" maps to the company — not the person.
+  claim('firm', find(['firma', 'company', 'firm', 'brokerage', 'makler', 'kanzlei', 'unternehmen', 'gesellschaft', 'organisation', 'organization', 'büro']));
+  // Person name: explicit person headers first; then a bare "name" excluding firm-ish words.
+  claim('name', find(['contact person', 'ansprechpartner', 'contact name', 'contactname', 'berater', 'contact', 'person', 'full name', 'inhaber', 'geschäftsführer'], ['firm', 'firma', 'company']) ||
+                find(['name'], ['firm', 'firma', 'company', 'file', 'user', 'sign']));
+  claim('firstName',   find(['first name', 'firstname', 'vorname', 'given name']));
+  claim('lastName',    find(['last name', 'lastname', 'nachname', 'surname', 'family name']));
+  claim('email',       find(['email', 'e-mail', 'e mail', 'mail']));
+  claim('phone',       find(['phone', 'telephone', 'mobile', 'tel', 'telefon', 'handy', 'number']));
+  claim('location',    find(['location', 'city', 'region', 'ort', 'stadt', 'standort', 'address', 'adresse']));
+  claim('specialties', find(['specialt', 'industry', 'industries', 'sector', 'focus', 'branche', 'fokus', 'schwerpunkt']));
+  claim('notes',       find(['note', 'comment', 'remark', 'bemerkung', 'kommentar', 'info']));
+
+  _BROKER_IMPORT_FIELDS.forEach(f => { if (!(f.key in map)) map[f.key] = ''; });
   return map;
 }
 
@@ -222,6 +238,14 @@ async function brokerImportRun() {
     });
     const exBrokerKeys = new Set(existing.brokers.map(_brokerExistingKey));
 
+    // Firm-level placeholder brokers (no person yet) we can upgrade into the named contact.
+    const firmBrokerByCompany = {};
+    existing.brokers.forEach(b => {
+      if ((b.isFirm || !b.contactId) && b.companyId && !firmBrokerByCompany[b.companyId]) {
+        firmBrokerByCompany[b.companyId] = { id: b.id, used: false };
+      }
+    });
+
     // Parse + de-duplicate rows (within file + against existing brokers)
     const seen = new Set();
     const toCreate = [];
@@ -237,7 +261,7 @@ async function brokerImportRun() {
     });
 
     const now = new Date().toISOString();
-    let createdBrokers = 0, createdContacts = 0, createdCompanies = 0;
+    let createdBrokers = 0, createdContacts = 0, createdCompanies = 0, upgradedBrokers = 0;
 
     // 1) Companies for EVERY firm referenced (even firm-only rows / dup people)
     for (const firm of allFirms) {
@@ -270,15 +294,29 @@ async function brokerImportRun() {
           contactByName[rec.name.toLowerCase()] = contact;
           createdContacts++;
         }
-        await DB.add(STORES.brokers, {
-          id: generateId(), userId: currentUser.id,
-          name: rec.name, firm: rec.firm || '', email: rec.email || '', phone: rec.phone || '',
-          location: rec.location || '', specialties: rec.specialties || '', notes: rec.notes || '',
-          dealsIntroduced: 0, relationshipRating: 0,
-          contactId: contact.id, companyId: companyId || null,
-          source: 'broker-import', createdAt: now, updatedAt: now,
-        });
-        createdBrokers++;
+        // If a firm-level placeholder broker already exists for this company,
+        // upgrade it into this named person instead of creating a duplicate.
+        const slot = companyId && firmBrokerByCompany[companyId];
+        if (slot && !slot.used) {
+          await DB.put(STORES.brokers, {
+            id: slot.id, userId: currentUser.id,
+            name: rec.name, firm: rec.firm || '', email: rec.email || '', phone: rec.phone || '',
+            location: rec.location || '', contactId: contact.id, companyId,
+            isFirm: false, source: 'broker-import', updatedAt: now,
+          });
+          slot.used = true;
+          upgradedBrokers++;
+        } else {
+          await DB.add(STORES.brokers, {
+            id: generateId(), userId: currentUser.id,
+            name: rec.name, firm: rec.firm || '', email: rec.email || '', phone: rec.phone || '',
+            location: rec.location || '', specialties: rec.specialties || '', notes: rec.notes || '',
+            dealsIntroduced: 0, relationshipRating: 0,
+            contactId: contact.id, companyId: companyId || null,
+            source: 'broker-import', createdAt: now, updatedAt: now,
+          });
+          createdBrokers++;
+        }
       } else if (rec.firm) {
         // Firm-only entry → broker record for the firm (no contact), linked to company
         await DB.add(STORES.brokers, {
@@ -294,7 +332,7 @@ async function brokerImportRun() {
     }
 
     if (typeof _brokersRefresh === 'function') await _brokersRefresh();
-    showToast(`Imported ${createdBrokers} brokers · ${createdContacts} new contacts · ${createdCompanies} new companies`, 'success');
+    showToast(`Imported: ${createdContacts} contacts · ${createdCompanies} companies · ${createdBrokers + upgradedBrokers} broker entries${upgradedBrokers ? ` (${upgradedBrokers} firms linked to a person)` : ''}`, 'success');
     _brokerImport = { rows: null, headers: null, mapping: null, existing: null, fileName: '' };
   } catch (err) {
     console.error('[BrokerImport] failed:', err);
