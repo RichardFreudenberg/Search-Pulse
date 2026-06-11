@@ -2,8 +2,9 @@
    Nexus CRM — Contacts Management
    ============================================ */
 
-let contactsViewMode = 'table'; // table | cards
-let contactsFilters = { stage: '', tag: '', search: '', sort: 'name' };
+let contactsViewMode = 'cards'; // table | cards
+// bucket: '' = all | a bucket key.  quick: '' | 'overdue' | 'priority'.  group: 'bucket' | 'none'
+let contactsFilters = { stage: '', tag: '', search: '', sort: 'name', bucket: '', quick: '', group: 'bucket' };
 let _selectedCompanyId = null;      // ID of company selected/created in the contact picker
 let _cpCompanies = [];              // cached company list for the picker
 let _cpOutsideClickHandler = null;  // tracked so we never stack duplicate listeners
@@ -21,42 +22,64 @@ async function renderContacts() {
   const activeContacts = getActiveContacts(contacts);
   const companyMap = buildMap(companies);
 
-  // Apply filters
+  // ── Counts for the segment bar + quick views (computed before filtering) ──
+  const counts        = bucketCounts(activeContacts);
+  const overdueCount  = activeContacts.filter(c => c.nextFollowUpDate && isOverdue(c.nextFollowUpDate)).length;
+  const priorityCount = activeContacts.filter(c => isHighPriority(c)).length;
+
+  // ── Apply filters ──
   let filtered = [...activeContacts];
-  if (contactsFilters.stage) {
-    filtered = filtered.filter(c => c.stage === contactsFilters.stage);
-  }
-  if (contactsFilters.tag) {
-    filtered = filtered.filter(c => (c.tags || []).includes(contactsFilters.tag));
-  }
+  if (contactsFilters.bucket) filtered = filtered.filter(c => getContactBucket(c) === contactsFilters.bucket);
+  if (contactsFilters.quick === 'overdue')  filtered = filtered.filter(c => c.nextFollowUpDate && isOverdue(c.nextFollowUpDate));
+  if (contactsFilters.quick === 'priority') filtered = filtered.filter(c => isHighPriority(c));
+  if (contactsFilters.stage) filtered = filtered.filter(c => c.stage === contactsFilters.stage);
+  if (contactsFilters.tag)   filtered = filtered.filter(c => (c.tags || []).includes(contactsFilters.tag));
   if (contactsFilters.search) {
     const q = contactsFilters.search.toLowerCase();
     filtered = filtered.filter(c =>
-      c.fullName.toLowerCase().includes(q) ||
+      (c.fullName || '').toLowerCase().includes(q) ||
       (c.title || '').toLowerCase().includes(q) ||
       (c.email || '').toLowerCase().includes(q) ||
+      (c.relationshipType || '').toLowerCase().includes(q) ||
+      (c.notes || '').toLowerCase().includes(q) ||
+      (c.aiSummary || '').toLowerCase().includes(q) ||
+      getBucketMeta(getContactBucket(c)).label.toLowerCase().includes(q) ||
       (companyMap[c.companyId]?.name || '').toLowerCase().includes(q)
     );
   }
 
-  // Sort
-  if (contactsFilters.sort === 'name') {
-    filtered.sort((a, b) => a.fullName.localeCompare(b.fullName));
-  } else if (contactsFilters.sort === 'recent') {
-    filtered.sort((a, b) => new Date(b.lastContactDate || 0) - new Date(a.lastContactDate || 0));
-  } else if (contactsFilters.sort === 'follow-up') {
-    filtered.sort((a, b) => {
-      if (!a.nextFollowUpDate) return 1;
-      if (!b.nextFollowUpDate) return -1;
-      return new Date(a.nextFollowUpDate) - new Date(b.nextFollowUpDate);
-    });
-  } else if (contactsFilters.sort === 'added') {
-    filtered.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-  }
+  filtered = _sortContacts(filtered, contactsFilters.sort);
+
+  // ── Segment bar (All + each non-empty bucket) ──
+  const segPill = (key, label, count, color) => {
+    const active = contactsFilters.bucket === key;
+    const dot = color ? `<span class="w-1.5 h-1.5 rounded-full bg-${color}-500"></span>` : '';
+    return `<button onclick="_setContactBucket('${key}')"
+      class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-all border ${active
+        ? 'bg-surface-900 text-white border-surface-900 dark:bg-white dark:text-surface-900 dark:border-white shadow-sm'
+        : 'bg-white dark:bg-surface-900 text-surface-600 dark:text-surface-300 border-surface-200 dark:border-surface-700 hover:border-surface-300 dark:hover:border-surface-600'}">
+      ${dot}${label}<span class="${active ? 'opacity-70' : 'text-surface-400'}">${count}</span></button>`;
+  };
+  const bucketPills = RELATIONSHIP_BUCKETS
+    .filter(b => b.key !== 'unassigned' || counts[b.key] > 0)
+    .map(b => segPill(b.key, b.label, counts[b.key] || 0, b.color)).join('');
+
+  const quickChip = (key, label, count, icon, color) => {
+    if (!count) return '';
+    const active = contactsFilters.quick === key;
+    return `<button onclick="_setContactQuick('${key}')"
+      class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-all border ${active
+        ? `bg-${color}-600 text-white border-${color}-600 shadow-sm`
+        : `bg-${color}-50 dark:bg-${color}-900/20 text-${color}-700 dark:text-${color}-300 border-${color}-200 dark:border-${color}-800 hover:bg-${color}-100`}">
+      ${icon}${label}<span class="opacity-80">${count}</span></button>`;
+  };
+
+  const grouped = contactsFilters.group === 'bucket' && !contactsFilters.bucket && !contactsFilters.quick &&
+                  contactsViewMode === 'cards';
 
   pageContent.innerHTML = `
     <div class="p-4 lg:p-8 max-w-7xl mx-auto animate-fade-in">
-      ${renderPageHeader('Contacts', `${activeContacts.length} contacts`, `
+      ${renderPageHeader('Relationships', `${activeContacts.length} contacts · ${companies.length} companies`, `
         <button onclick="openRelationshipHealthModal()" class="btn-secondary" title="AI-powered relationship health check">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M21 8.25c0-2.485-2.099-4.5-4.688-4.5-1.935 0-3.597 1.126-4.312 2.733-.715-1.607-2.377-2.733-4.313-2.733C5.1 3.75 3 5.765 3 8.25c0 7.22 9 12 9 12s9-4.78 9-12z" /></svg>
           Relationship Health
@@ -67,34 +90,50 @@ async function renderContacts() {
         </button>
       `)}
 
-      <!-- Filters -->
-      <div class="flex flex-wrap items-center gap-3 mb-6">
-        <div class="relative flex-1 min-w-[200px] max-w-sm">
+      <!-- Bucket segment bar -->
+      <div class="flex items-center gap-2 overflow-x-auto pb-1 mb-3 -mx-1 px-1">
+        ${segPill('', 'All', activeContacts.length, '')}
+        <span class="w-px h-5 bg-surface-200 dark:bg-surface-700 flex-shrink-0"></span>
+        ${bucketPills}
+      </div>
+
+      <!-- Quick views + toolbar -->
+      <div class="flex flex-wrap items-center gap-2 mb-5">
+        ${quickChip('overdue', 'Overdue follow-ups', overdueCount,
+          '<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>', 'red')}
+        ${quickChip('priority', 'High priority', priorityCount,
+          '<svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20"><path d="M9.05 2.93c.3-.92 1.6-.92 1.9 0l1.36 4.18a1 1 0 00.95.69h4.4c.97 0 1.37 1.24.59 1.81l-3.56 2.59a1 1 0 00-.36 1.12l1.36 4.18c.3.92-.76 1.69-1.54 1.12l-3.56-2.59a1 1 0 00-1.18 0l-3.56 2.59c-.78.57-1.84-.2-1.54-1.12l1.36-4.18a1 1 0 00-.36-1.12L2.4 9.61c-.78-.57-.38-1.81.59-1.81h4.4a1 1 0 00.95-.69l1.36-4.18z"/></svg>', 'amber')}
+
+        <div class="relative flex-1 min-w-[200px] max-w-sm ml-auto">
           <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-surface-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" /></svg>
-          <input type="text" placeholder="Search contacts…" value="${escapeHtml(contactsFilters.search)}"
+          <input type="text" placeholder="Search name, company, role, notes…" value="${escapeHtml(contactsFilters.search)}"
             oninput="contactsFilters.search=this.value; renderContacts()"
-            class="w-full pl-10 pr-4 py-2 text-sm bg-surface-100 dark:bg-surface-900 border-0 rounded focus:ring-2 focus:ring-brand-500" />
+            class="w-full pl-10 pr-4 py-2 text-sm bg-surface-100 dark:bg-surface-900 border-0 rounded-lg focus:ring-2 focus:ring-brand-500" />
         </div>
-        <select onchange="contactsFilters.stage=this.value; renderContacts()" class="input-field w-auto text-sm" style="max-width: 180px">
+        <select onchange="contactsFilters.stage=this.value; renderContacts()" class="input-field w-auto text-sm" style="max-width: 160px">
           <option value="">All stages</option>
           ${STAGES.map(s => `<option value="${s}" ${contactsFilters.stage === s ? 'selected' : ''}>${s}</option>`).join('')}
         </select>
-        <select onchange="contactsFilters.tag=this.value; renderContacts()" class="input-field w-auto text-sm" style="max-width: 180px">
-          <option value="">All tags</option>
-          ${tags.map(t => `<option value="${t.name}" ${contactsFilters.tag === t.name ? 'selected' : ''}>${t.name}</option>`).join('')}
-        </select>
-        <select onchange="contactsFilters.sort=this.value; renderContacts()" class="input-field w-auto text-sm" style="max-width: 180px">
+        <select onchange="contactsFilters.sort=this.value; renderContacts()" class="input-field w-auto text-sm" style="max-width: 170px">
           <option value="name" ${contactsFilters.sort === 'name' ? 'selected' : ''}>Name A–Z</option>
           <option value="recent" ${contactsFilters.sort === 'recent' ? 'selected' : ''}>Last contacted</option>
           <option value="follow-up" ${contactsFilters.sort === 'follow-up' ? 'selected' : ''}>Follow-up date</option>
+          <option value="strength" ${contactsFilters.sort === 'strength' ? 'selected' : ''}>Strength</option>
+          <option value="priority" ${contactsFilters.sort === 'priority' ? 'selected' : ''}>Priority</option>
           <option value="added" ${contactsFilters.sort === 'added' ? 'selected' : ''}>Recently added</option>
         </select>
+        <button onclick="_toggleContactGroup()" title="Group by relationship bucket"
+          class="px-3 py-2 rounded-lg text-sm font-medium border transition-colors ${contactsFilters.group === 'bucket'
+            ? 'bg-brand-50 dark:bg-brand-900/20 text-brand-700 dark:text-brand-300 border-brand-200 dark:border-brand-800'
+            : 'border-surface-200 dark:border-surface-700 text-surface-500 hover:bg-surface-100 dark:hover:bg-surface-800'}">
+          <svg class="w-4 h-4 inline -mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3.75 6h16.5M3.75 12h16.5m-16.5 6h16.5"/></svg>
+        </button>
         <div class="flex border border-surface-200 dark:border-surface-700 rounded-lg overflow-hidden">
-          <button onclick="contactsViewMode='table'; renderContacts()" class="p-2 ${contactsViewMode === 'table' ? 'bg-surface-200 dark:bg-surface-700' : 'hover:bg-surface-100 dark:hover:bg-surface-800'}">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3.75 5.25h16.5m-16.5 4.5h16.5m-16.5 4.5h16.5m-16.5 4.5h16.5" /></svg>
-          </button>
           <button onclick="contactsViewMode='cards'; renderContacts()" class="p-2 ${contactsViewMode === 'cards' ? 'bg-surface-200 dark:bg-surface-700' : 'hover:bg-surface-100 dark:hover:bg-surface-800'}">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" /></svg>
+          </button>
+          <button onclick="contactsViewMode='table'; renderContacts()" class="p-2 ${contactsViewMode === 'table' ? 'bg-surface-200 dark:bg-surface-700' : 'hover:bg-surface-100 dark:hover:bg-surface-800'}">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3.75 5.25h16.5m-16.5 4.5h16.5m-16.5 4.5h16.5m-16.5 4.5h16.5" /></svg>
           </button>
         </div>
       </div>
@@ -102,35 +141,62 @@ async function renderContacts() {
       <!-- Content -->
       ${filtered.length === 0 ? renderEmptyState(
         '<svg class="w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z" /></svg>',
-        contactsFilters.search || contactsFilters.stage || contactsFilters.tag ? 'No contacts match your filters' : 'No contacts yet',
-        contactsFilters.search || contactsFilters.stage || contactsFilters.tag ? 'Try adjusting your filters' : 'Add your first contact to get started',
-        contactsFilters.search || contactsFilters.stage || contactsFilters.tag ? '' : '<button onclick="openNewContactModal()" class="btn-primary">Add Contact</button>'
+        (contactsFilters.search || contactsFilters.bucket || contactsFilters.quick || contactsFilters.stage || contactsFilters.tag) ? 'No relationships match your filters' : 'No contacts yet',
+        (contactsFilters.search || contactsFilters.bucket || contactsFilters.quick || contactsFilters.stage || contactsFilters.tag) ? 'Try adjusting your filters or clearing the bucket.' : 'Add your first contact to get started',
+        (contactsFilters.search || contactsFilters.bucket || contactsFilters.quick || contactsFilters.stage || contactsFilters.tag) ? '<button onclick="_clearContactFilters()" class="btn-secondary">Clear filters</button>' : '<button onclick="openNewContactModal()" class="btn-primary">Add Contact</button>'
       ) : contactsViewMode === 'table' ? `
         <div class="card p-0 overflow-x-auto">
           <table class="data-table">
-            <thead>
-              <tr>
-                <th>Contact</th>
-                <th>Company</th>
-                <th>Stage</th>
-                <th>Last Contact</th>
-                <th>Follow-up</th>
-                <th>Tags</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${filtered.map(c => renderContactRow(c, companyMap[c.companyId])).join('')}
-            </tbody>
+            <thead><tr><th>Contact</th><th>Company</th><th>Bucket</th><th>Strength</th><th>Last Contact</th><th>Follow-up</th></tr></thead>
+            <tbody>${filtered.map(c => renderRelationshipRow(c, companyMap[c.companyId])).join('')}</tbody>
           </table>
         </div>
-      ` : `
-        <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-          ${filtered.map(c => renderContactCard(c, companyMap[c.companyId])).join('')}
-        </div>
-      `}
+      ` : grouped
+        ? RELATIONSHIP_BUCKETS.map(b => {
+            const items = filtered.filter(c => getContactBucket(c) === b.key);
+            if (!items.length) return '';
+            return `
+              <div class="mb-6">
+                <div class="flex items-center gap-2 mb-3">
+                  <span class="w-2.5 h-2.5 rounded-full bg-${b.color}-500"></span>
+                  <h2 class="text-sm font-bold uppercase tracking-wide text-surface-600 dark:text-surface-300">${b.label}</h2>
+                  <span class="text-xs text-surface-400">${items.length}</span>
+                  <button onclick="_setContactBucket('${b.key}')" class="text-xs text-brand-500 hover:text-brand-600 ml-1">View all →</button>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                  ${items.map(c => renderRelationshipCard(c, companyMap[c.companyId])).join('')}
+                </div>
+              </div>`;
+          }).join('')
+        : `<div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+            ${filtered.map(c => renderRelationshipCard(c, companyMap[c.companyId])).join('')}
+          </div>`}
     </div>
   `;
 }
+
+// ── Hub filter helpers ───────────────────────────────────────
+function _sortContacts(list, sort) {
+  const arr = [...list];
+  if (sort === 'name')        arr.sort((a, b) => (a.fullName || '').localeCompare(b.fullName || ''));
+  else if (sort === 'recent') arr.sort((a, b) => new Date(b.lastContactDate || 0) - new Date(a.lastContactDate || 0));
+  else if (sort === 'follow-up') arr.sort((a, b) => {
+    if (!a.nextFollowUpDate) return 1;
+    if (!b.nextFollowUpDate) return -1;
+    return new Date(a.nextFollowUpDate) - new Date(b.nextFollowUpDate);
+  });
+  else if (sort === 'added')  arr.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+  else if (sort === 'strength') arr.sort((a, b) => getStrengthMeta(getRelationshipStrength(a)).order - getStrengthMeta(getRelationshipStrength(b)).order);
+  else if (sort === 'priority') {
+    const rank = c => (c.priority === 'high' ? 0 : c.priority === 'medium' ? 1 : 2);
+    arr.sort((a, b) => rank(a) - rank(b) || (a.fullName || '').localeCompare(b.fullName || ''));
+  }
+  return arr;
+}
+function _setContactBucket(key) { contactsFilters.bucket = (contactsFilters.bucket === key ? '' : key); renderContacts(); }
+function _setContactQuick(key)  { contactsFilters.quick  = (contactsFilters.quick === key ? '' : key); renderContacts(); }
+function _toggleContactGroup()  { contactsFilters.group  = (contactsFilters.group === 'bucket' ? 'none' : 'bucket'); renderContacts(); }
+function _clearContactFilters() { contactsFilters = { stage: '', tag: '', search: '', sort: contactsFilters.sort, bucket: '', quick: '', group: contactsFilters.group }; renderContacts(); }
 
 async function openNewContactModal(prefill = {}) {
   const [companies, tags] = await Promise.all([
@@ -285,9 +351,27 @@ async function openNewContactModal(prefill = {}) {
             </select>
           </div>
         </div>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+          <div>
+            <label class="block text-sm font-medium text-surface-600 dark:text-surface-400 mb-1">Relationship Bucket</label>
+            <select id="contact-bucket" class="input-field">
+              <option value="">— Auto-detect from type —</option>
+              ${RELATIONSHIP_BUCKETS.filter(b => b.key !== 'unassigned').map(b => `<option value="${b.key}" ${prefill.bucket === b.key ? 'selected' : ''}>${b.label}</option>`).join('')}
+            </select>
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-surface-600 dark:text-surface-400 mb-1">Priority</label>
+            <select id="contact-priority" class="input-field">
+              <option value="">Normal</option>
+              <option value="high"   ${prefill.priority === 'high'   ? 'selected' : ''}>High</option>
+              <option value="medium" ${prefill.priority === 'medium' ? 'selected' : ''}>Medium</option>
+              <option value="low"    ${prefill.priority === 'low'    ? 'selected' : ''}>Low</option>
+            </select>
+          </div>
+        </div>
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
-            <label class="block text-sm font-medium text-surface-600 dark:text-surface-400 mb-1">Relationship Type</label>
+            <label class="block text-sm font-medium text-surface-600 dark:text-surface-400 mb-1">Sub-role / Type <span class="text-xs font-normal text-surface-400">(optional)</span></label>
             <select id="contact-relationship-type" class="input-field">
               <option value="">— Select type —</option>
               ${['Broker / Intermediary','Seller / Business Owner','LP / Investor','Advisor / Mentor','Operator / Executive','Investment Banker','Fellow Searcher','Attorney / Accountant','Other'].map(t => `<option value="${t}" ${(prefill.relationshipType||'')=== t?'selected':''}>${t}</option>`).join('')}
@@ -961,6 +1045,8 @@ async function saveNewContact() {
     photoUrl: document.getElementById('contact-photo').value.trim(),
     stage: document.getElementById('contact-stage').value,
     relationshipType: document.getElementById('contact-relationship-type')?.value || '',
+    bucket: document.getElementById('contact-bucket')?.value || null,
+    priority: document.getElementById('contact-priority')?.value || null,
     campaignId: document.getElementById('contact-campaign-id')?.value || null,
     tags: getTagInputValues('contact-tags'),
     notes: document.getElementById('contact-notes').value.trim(),
@@ -1303,8 +1389,26 @@ async function openEditContactModal(contactId) {
             </select>
           </div>
         </div>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label class="block text-sm font-medium text-surface-600 dark:text-surface-400 mb-1">Relationship Bucket</label>
+            <select id="edit-contact-bucket" class="input-field">
+              <option value="">— Auto-detect from type —</option>
+              ${RELATIONSHIP_BUCKETS.filter(b => b.key !== 'unassigned').map(b => `<option value="${b.key}" ${contact.bucket === b.key ? 'selected' : ''}>${b.label}</option>`).join('')}
+            </select>
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-surface-600 dark:text-surface-400 mb-1">Priority</label>
+            <select id="edit-contact-priority" class="input-field">
+              <option value="">Normal</option>
+              <option value="high"   ${contact.priority === 'high'   ? 'selected' : ''}>High</option>
+              <option value="medium" ${contact.priority === 'medium' ? 'selected' : ''}>Medium</option>
+              <option value="low"    ${contact.priority === 'low'    ? 'selected' : ''}>Low</option>
+            </select>
+          </div>
+        </div>
         <div>
-          <label class="block text-sm font-medium text-surface-600 dark:text-surface-400 mb-1">Relationship Type</label>
+          <label class="block text-sm font-medium text-surface-600 dark:text-surface-400 mb-1">Sub-role / Type <span class="text-xs font-normal text-surface-400">(optional)</span></label>
           <select id="edit-contact-relationship-type" class="input-field">
             <option value="">— Select type —</option>
             ${['Broker / Intermediary','Seller / Business Owner','LP / Investor','Advisor / Mentor','Operator / Executive','Investment Banker','Fellow Searcher','Attorney / Accountant','Other'].map(t => `<option value="${t}" ${(contact.relationshipType||'')=== t?'selected':''}>${t}</option>`).join('')}
@@ -1353,6 +1457,8 @@ async function openEditContactModal(contactId) {
     contact.photoUrl = document.getElementById('edit-contact-photo').value.trim();
     contact.stage = newStage;
     contact.relationshipType = document.getElementById('edit-contact-relationship-type')?.value || contact.relationshipType || '';
+    contact.bucket = document.getElementById('edit-contact-bucket')?.value || null;
+    contact.priority = document.getElementById('edit-contact-priority')?.value || null;
     contact.tags = getTagInputValues('edit-contact-tags');
     const followUp = document.getElementById('edit-contact-followup').value;
     contact.nextFollowUpDate = followUp ? new Date(followUp).toISOString() : null;
