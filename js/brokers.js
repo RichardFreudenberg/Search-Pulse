@@ -131,7 +131,13 @@ function _brokersMainHtml(brokers) {
         </div>
         <div class="flex gap-1.5">${chips}</div>
       </div>
-      <button onclick="openAddBrokerModal()" class="btn-primary btn-sm shrink-0">+ Add Broker</button>
+      <div class="flex gap-2 shrink-0">
+        <button onclick="openBrokerImport()" class="btn-secondary btn-sm" title="Bulk-import a broker list from Excel — auto-dedupes and creates contacts + companies">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5"/></svg>
+          Import Excel
+        </button>
+        <button onclick="openAddBrokerModal()" class="btn-primary btn-sm">+ Add Broker</button>
+      </div>
     </div>
     ${emptyState}`;
 }
