@@ -14,7 +14,8 @@
 const RELATIONSHIP_BUCKETS = [
   { key: 'investors',   label: 'Investors',             short: 'Investor',    color: 'emerald', order: 1 },
   { key: 'prospective', label: 'Prospective Investors', short: 'Prospective', color: 'teal',    order: 2 },
-  { key: 'mentors',     label: 'Mentors',               short: 'Mentor',      color: 'violet',  order: 3 },
+  { key: 'pevc',        label: 'PE / VC',               short: 'PE/VC',       color: 'fuchsia', order: 3 },
+  { key: 'mentors',     label: 'Mentors',               short: 'Mentor',      color: 'violet',  order: 4 },
   { key: 'advisors',    label: 'Advisors',              short: 'Advisor',     color: 'indigo',  order: 4 },
   { key: 'brokers',     label: 'Brokers',               short: 'Broker',      color: 'amber',   order: 5 },
   { key: 'targets',     label: 'Targets',               short: 'Target',      color: 'rose',    order: 6 },
@@ -49,6 +50,7 @@ function getContactBucket(contact) {
   if (lc.includes('mentor'))                        return 'mentors';
   if (lc.includes('advisor'))                       return 'advisors';
   if (lc.includes('search'))                        return 'searchers';
+  if (/\b(pe|vc)\b/.test(lc) || lc.includes('venture') || lc.includes('private equity')) return 'pevc';
   return 'unassigned';
 }
 
@@ -71,6 +73,22 @@ function renderBucketBadge(bucketKey) {
   const b = getBucketMeta(bucketKey);
   return `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold ${_bucketBadgeClass(b.color)}">
     <span class="w-1.5 h-1.5 rounded-full bg-${b.color}-500"></span>${b.short}</span>`;
+}
+
+/**
+ * Inline bucket <select> for one-click (re)classification. Works for ALL
+ * buckets — saves immediately via _quickSetContactBucket(). `from` tells the
+ * handler which view to re-render ('hub' or 'detail').
+ */
+function renderBucketSelect(contactId, currentKey, from) {
+  const cur = currentKey && currentKey !== 'unassigned' ? currentKey : '';
+  const opts = RELATIONSHIP_BUCKETS.filter(b => b.key !== 'unassigned')
+    .map(b => `<option value="${b.key}" ${cur === b.key ? 'selected' : ''}>${b.label}</option>`).join('');
+  const placeholder = cur ? '' : '<option value="">+ Classify…</option>';
+  return `<select onclick="event.stopPropagation()" onchange="event.stopPropagation(); _quickSetContactBucket('${contactId}', this.value, '${from || 'hub'}')"
+    class="text-[11px] font-semibold rounded-full border ${cur ? 'border-transparent ' + _bucketBadgeClass(getBucketMeta(cur).color) : 'border-dashed border-surface-300 dark:border-surface-600 text-surface-500'} px-2 py-0.5 focus:ring-1 focus:ring-brand-500 cursor-pointer">
+    ${placeholder}${opts}
+  </select>`;
 }
 
 // ── Relationship strength (cold / warm / active / developing / dormant) ──
@@ -153,7 +171,7 @@ function renderRelationshipCard(contact, company) {
               </h3>
               <p class="text-sm text-surface-500 truncate">${escapeHtml(contact.title || (subRole || '—'))}</p>
             </div>
-            ${renderBucketBadge(bucket)}
+            ${bucket === 'unassigned' ? renderBucketSelect(contact.id, '', 'hub') : renderBucketBadge(bucket)}
           </div>
 
           ${company ? `

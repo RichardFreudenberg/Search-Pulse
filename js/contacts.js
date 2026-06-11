@@ -220,6 +220,17 @@ function _renderContactsMore(total) {
 }
 function _loadMoreContacts() { contactsRenderLimit += CONTACTS_PAGE_SIZE; renderContacts(); }
 
+// One-click (re)classification from a card or the contact detail page.
+async function _quickSetContactBucket(contactId, bucketKey, from) {
+  const contact = await DB.get(STORES.contacts, contactId);
+  if (!contact) { showToast('Contact not found', 'error'); return; }
+  contact.bucket = bucketKey || null;
+  await DB.put(STORES.contacts, contact);
+  showToast(bucketKey ? `Moved to ${getBucketMeta(bucketKey).label}` : 'Bucket cleared', 'success');
+  if (from === 'detail' && typeof viewContact === 'function') viewContact(contactId);
+  else renderContacts();
+}
+
 // ── Hub filter helpers ───────────────────────────────────────
 function _sortContacts(list, sort) {
   const arr = [...list];
@@ -1176,7 +1187,7 @@ async function viewContact(contactId) {
             <div class="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 mb-1">
               <h1 class="text-2xl font-semibold truncate">${escapeHtml(contact.fullName)}</h1>
               <div class="flex items-center gap-2 flex-wrap">
-                ${typeof renderBucketBadge === 'function' ? renderBucketBadge(getContactBucket(contact)) : ''}
+                ${typeof renderBucketSelect === 'function' ? renderBucketSelect(contact.id, getContactBucket(contact), 'detail') : ''}
                 ${typeof renderStrengthChip === 'function' ? renderStrengthChip(contact) : ''}
                 ${renderStageBadge(contact.stage)}
               </div>
