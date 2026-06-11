@@ -164,11 +164,30 @@ async function syncOutlook(opts = {}) {
     const contacts = getActiveContacts(await DB.getForUser(STORES.contacts, currentUser.id));
     const result = await _processEmailData(inbox.value || [], sent.value || [], contacts, selfEmail);
 
-    await _saveOutlookCfg({ lastSyncAt: new Date().toISOString(), lastSyncMatched: result.matched });
+    // Transparent recent-activity feed (newest messages, matched to a contact or not)
+    const byEmailLc = {};
+    contacts.forEach(c => { if (c.email) byEmailLc[c.email.trim().toLowerCase()] = c; });
+    const recentRaw = [];
+    (inbox.value || []).forEach(m => {
+      const addr = m.from?.emailAddress?.address?.toLowerCase();
+      if (!addr || addr === selfEmail) return;
+      recentRaw.push({ dir: 'in', email: addr, name: m.from?.emailAddress?.name || addr, subject: m.subject || '', at: m.receivedDateTime || m.sentDateTime || null });
+    });
+    (sent.value || []).forEach(m => {
+      const r0 = (m.toRecipients || [])[0]?.emailAddress;
+      const addr = r0?.address?.toLowerCase();
+      if (!addr || addr === selfEmail) return;
+      recentRaw.push({ dir: 'out', email: addr, name: r0?.name || addr, subject: m.subject || '', at: m.sentDateTime || null });
+    });
+    recentRaw.sort((a, b) => new Date(b.at || 0) - new Date(a.at || 0));
+    const recentActivity = recentRaw.slice(0, 30).map(r => ({ ...r, isContact: !!byEmailLc[r.email] }));
+    const newSenders = recentActivity.filter(r => !r.isContact).length;
+
+    await _saveOutlookCfg({ lastSyncAt: new Date().toISOString(), lastSyncMatched: result.matched, recentActivity });
     if (silent) {
       if (result.needsReply) showToast(`Auto-synced inbox — ${result.needsReply} awaiting your reply`, 'info');
     } else {
-      showToast(`Synced — ${result.matched} contact${result.matched !== 1 ? 's' : ''} updated, ${result.needsReply} awaiting your reply`, 'success');
+      showToast(`Synced ${recentActivity.length} recent emails — ${result.matched} contacts updated, ${newSenders} new sender${newSenders !== 1 ? 's' : ''}`, 'success');
     }
     // Only repaint the hub if the user is actually looking at it
     if (currentPage === 'email') renderEmailHub();
@@ -389,6 +408,27 @@ function renderEmailStatusChip(contact) {
     Awaiting reply</span>`;
 }
 
+// Create a contact from a recent sender/recipient, then re-sync to attach
+// their email history + reply status.
+async function addContactFromEmail(email, name) {
+  email = (email || '').trim().toLowerCase();
+  if (!email) return;
+  const all = await DB.getForUser(STORES.contacts, currentUser.id);
+  const existing = all.find(c => (c.email || '').toLowerCase() === email);
+  if (existing) { showToast('Already a contact', 'info'); if (typeof viewContact === 'function') viewContact(existing.id); return; }
+  const fullName = (name && name.trim() && name.trim().toLowerCase() !== email)
+    ? name.trim()
+    : email.split('@')[0].replace(/[._-]+/g, ' ').replace(/\b\w/g, m => m.toUpperCase());
+  await DB.add(STORES.contacts, {
+    userId: currentUser.id, fullName, email,
+    companyId: null, bucket: null, relationshipType: '',
+    stage: (typeof STAGES !== 'undefined' && STAGES[0]) || '',
+    tags: [], notes: 'Added from email', lastContactDate: null, nextFollowUpDate: null, archived: false,
+  });
+  showToast(`Added ${fullName} — syncing their emails…`, 'success');
+  syncOutlook(); // re-sync so their history + status attach immediately
+}
+
 // ── Email briefing panel (contact detail page) ───────────────
 function renderContactEmailPanel(contact) {
   if (!contact || !contact.email) return '';
@@ -501,6 +541,28 @@ async function renderEmailHub() {
             : `<div class="card text-center py-8 text-sm text-surface-400">Nothing pending</div>`}
         </div>
       </div>
+
+      ${(cfg.recentActivity && cfg.recentActivity.length) ? `
+        <div class="mt-8">
+          <div class="flex items-center gap-2 mb-3">
+            <h2 class="text-sm font-bold">Recent emails</h2>
+            <span class="text-xs text-surface-400">last ${cfg.recentActivity.length} · newest first · everything the sync pulled</span>
+          </div>
+          <div class="card p-0 divide-y divide-surface-100 dark:divide-surface-800">
+            ${cfg.recentActivity.map(r => `
+              <div class="flex items-center gap-3 px-4 py-2.5">
+                <span class="text-[11px] font-semibold w-8 flex-shrink-0 ${r.dir === 'in' ? 'text-emerald-600' : 'text-surface-400'}">${r.dir === 'in' ? 'IN' : 'OUT'}</span>
+                <div class="min-w-0 flex-1">
+                  <div class="text-sm truncate"><span class="font-medium">${escapeHtml(r.name || r.email)}</span> <span class="text-xs text-surface-400">${escapeHtml(r.email)}</span></div>
+                  <div class="text-xs text-surface-500 truncate">${escapeHtml(r.subject || '(no subject)')}</div>
+                </div>
+                <span class="text-[11px] text-surface-400 flex-shrink-0 whitespace-nowrap">${r.at ? (typeof formatRelative === 'function' ? formatRelative(r.at) : '') : ''}</span>
+                ${r.isContact
+                  ? `<span class="text-[11px] text-surface-400 flex-shrink-0">contact</span>`
+                  : `<button data-email="${escapeHtml(r.email)}" data-name="${escapeHtml(r.name || '')}" onclick="addContactFromEmail(this.dataset.email, this.dataset.name)" class="btn-secondary btn-xs flex-shrink-0">+ Add</button>`}
+              </div>`).join('')}
+          </div>
+        </div>` : ''}
 
       <p class="text-xs text-surface-400 mt-8 text-center">
         Read-only. Pulls your last ${_EMAIL_PAGE_SIZE} inbox + sent messages and matches them to contacts by email.
