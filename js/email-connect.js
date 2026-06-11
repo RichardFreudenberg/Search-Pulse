@@ -172,6 +172,14 @@ async function syncOutlook(opts = {}) {
     }
     // Only repaint the hub if the user is actually looking at it
     if (currentPage === 'email') renderEmailHub();
+
+    // Generate/refresh AI briefings for changed contacts in the background,
+    // then repaint so cards show the latest "what we last discussed".
+    _refreshBriefs(result.touched, token, selfEmail)
+      .then(n => { if (n && (currentPage === 'email' || currentPage === 'contacts')) {
+        (currentPage === 'email' ? renderEmailHub : renderContacts)();
+      }})
+      .catch(() => {});
   } catch (err) {
     console.error('[Outlook] sync failed:', err);
     if (!silent) showToast('Sync failed: ' + (err.errorMessage || err.message || 'unknown error'), 'error');
@@ -287,6 +295,7 @@ async function _processEmailData(inboxMsgs, sentMsgs, contacts, selfEmail) {
 
   const byId = buildMap(contacts);
   const writes = [];
+  const touched = [];
   let needsReply = 0;
   Object.keys(agg).forEach(cid => {
     const a = agg[cid];
@@ -308,10 +317,62 @@ async function _processEmailData(inboxMsgs, sentMsgs, contacts, selfEmail) {
     if (newest && (!c.lastContactDate || new Date(newest) > new Date(c.lastContactDate))) {
       c.lastContactDate = newest;
     }
+    touched.push({ c, newestAt: a.lastAt || 0 });
     writes.push(DB.put(STORES.contacts, c));
   });
   await Promise.all(writes);
-  return { matched: writes.length, needsReply };
+  return { matched: writes.length, needsReply, touched };
+}
+
+// ── AI relationship briefing (cached on the contact) ─────────
+async function _generateContactBrief(contact, token, selfEmail) {
+  const msgs = await _outlookFetchThread(contact.email, token, 12);
+  if (!msgs.length) return null;
+  const transcript = _outlookThreadToText(msgs, selfEmail);
+  const summary = (await callAI(
+    `You brief a busy search-fund investor on a relationship using their email history with ${contact.fullName}${contact.title ? ' (' + contact.title + ')' : ''}. Only use what is actually in the emails.`,
+    `In 2-4 short sentences, brief me: what we last discussed, the current status, and any open item or who owes the next reply. Write it as a tight card snippet — plain prose, no headings, no bullet characters.\n\nEMAIL CONVERSATION (oldest first):\n\n${transcript}`,
+    400, 0.3
+  )).trim();
+  const newest = msgs.reduce((mx, m) => Math.max(mx, new Date(m.receivedDateTime || m.sentDateTime || 0).getTime()), 0);
+  return { summary, msgCount: msgs.length, updatedAt: new Date().toISOString(), basedOnAt: newest ? new Date(newest).toISOString() : null };
+}
+
+// Refresh briefings for contacts with NEW email activity (capped per run).
+async function _refreshBriefs(touched, token, selfEmail) {
+  const BRIEF_CAP = 12;
+  const due = (touched || [])
+    .filter(t => t.c && t.c.email && t.newestAt && (!t.c.emailBrief || !t.c.emailBrief.basedOnAt || new Date(t.c.emailBrief.basedOnAt).getTime() < t.newestAt))
+    .sort((a, b) => b.newestAt - a.newestAt)
+    .slice(0, BRIEF_CAP);
+  for (const t of due) {
+    try {
+      const brief = await _generateContactBrief(t.c, token, selfEmail);
+      if (brief) { t.c.emailBrief = brief; await DB.put(STORES.contacts, t.c); }
+    } catch (e) { console.warn('[Outlook] brief failed for', t.c.email, e && (e.errorMessage || e.message)); }
+  }
+  return due.length;
+}
+
+// Manual single-contact briefing refresh (from a button on the contact page).
+async function refreshContactBrief(contactId) {
+  const contact = await DB.get(STORES.contacts, contactId);
+  if (!contact?.email) { showToast('This contact has no email address', 'warning'); return; }
+  const cfg = await _outlookCfg();
+  if (!cfg.clientId || !cfg.account) { showToast('Connect Outlook on the Inbox page first', 'warning'); return; }
+  showToast('Building briefing…', 'info');
+  try {
+    await _getMsal(cfg.clientId, cfg.tenantId);
+    const token = await _outlookToken();
+    const brief = await _generateContactBrief(contact, token, (cfg.account || '').toLowerCase());
+    if (!brief) { showToast('No emails found for this contact', 'warning'); return; }
+    contact.emailBrief = brief;
+    await DB.put(STORES.contacts, contact);
+    showToast('Briefing updated', 'success');
+    if (typeof viewContact === 'function') viewContact(contactId);
+  } catch (err) {
+    showToast('Could not build briefing: ' + (err.errorMessage || err.message || 'error'), 'error');
+  }
 }
 
 // ── Email status chip (used on contact cards / detail) ───────
@@ -326,6 +387,50 @@ function renderEmailStatusChip(contact) {
   return `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-surface-100 dark:bg-surface-800 text-surface-500" title="You emailed last — awaiting their reply">
     <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
     Awaiting reply</span>`;
+}
+
+// ── Email briefing panel (contact detail page) ───────────────
+function renderContactEmailPanel(contact) {
+  if (!contact || !contact.email) return '';
+  const es = contact.emailStats || {};
+  const brief = contact.emailBrief;
+  const fmt = d => d ? (typeof formatRelative === 'function' ? formatRelative(d) : d) : null;
+  const lastIn = fmt(es.lastInboundAt);
+  const lastOut = fmt(es.lastOutboundAt);
+  const statusChip = (typeof renderEmailStatusChip === 'function') ? renderEmailStatusChip(contact) : '';
+  const touch = [];
+  if (lastIn)  touch.push(`<span><span class="text-surface-400">Last received</span> ${lastIn}</span>`);
+  if (lastOut) touch.push(`<span><span class="text-surface-400">Last sent</span> ${lastOut}</span>`);
+  if (es.lastSubject) touch.push(`<span class="truncate max-w-xs"><span class="text-surface-400">Subject</span> ${escapeHtml(es.lastSubject)}</span>`);
+
+  return `
+    <div class="card mb-6">
+      <div class="flex items-center justify-between gap-3 mb-3">
+        <div class="flex items-center gap-2 flex-wrap">
+          <span class="inline-flex items-center justify-center w-7 h-7 rounded-lg bg-brand-50 dark:bg-brand-900/20 text-brand-600">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75"/></svg>
+          </span>
+          <h3 class="text-sm font-bold">Email briefing</h3>
+          ${statusChip}
+        </div>
+        <div class="flex items-center gap-1.5 flex-shrink-0">
+          <button onclick="openEmailAIMenu('${contact.id}')" class="btn-ghost btn-xs text-brand-600" title="Summarize, draft a reply, or talking points">AI actions</button>
+          <button onclick="refreshContactBrief('${contact.id}')" class="btn-ghost btn-xs" title="Re-read the thread and refresh the briefing">↻ Refresh</button>
+        </div>
+      </div>
+
+      ${brief && brief.summary ? `
+        <p class="text-sm text-surface-700 dark:text-surface-200 leading-relaxed whitespace-pre-line">${escapeHtml(brief.summary)}</p>
+        <p class="text-[11px] text-surface-400 mt-2">AI briefing${brief.msgCount ? ' · ' + brief.msgCount + ' emails' : ''}${brief.updatedAt ? ' · updated ' + fmt(brief.updatedAt) : ''}</p>
+      ` : `
+        <div class="text-sm text-surface-500 flex items-center justify-between gap-3 flex-wrap">
+          <span>${(lastIn || lastOut) ? 'No AI briefing yet for this conversation.' : 'No synced email yet for this contact.'}</span>
+          <button onclick="refreshContactBrief('${contact.id}')" class="btn-secondary btn-sm">Generate briefing</button>
+        </div>
+      `}
+
+      ${touch.length ? `<div class="flex flex-wrap gap-x-4 gap-y-1 mt-3 pt-3 border-t border-surface-100 dark:border-surface-800 text-xs text-surface-600 dark:text-surface-300">${touch.join('')}</div>` : ''}
+    </div>`;
 }
 
 // ── Email hub page ───────────────────────────────────────────

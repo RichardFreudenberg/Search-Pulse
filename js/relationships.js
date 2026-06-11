@@ -158,7 +158,7 @@ function renderRelationshipCard(contact, company) {
   const fuText   = contact.nextFollowUpDate ? (typeof formatFutureRelative === 'function' ? formatFutureRelative(contact.nextFollowUpDate) : contact.nextFollowUpDate) : null;
   const lastText = contact.lastContactDate ? (typeof formatRelative === 'function' ? formatRelative(contact.lastContactDate) : '') : null;
   const subRole  = contact.relationshipType || '';
-  const aiSnippet = (contact.aiSummary || '').trim();
+  const aiSnippet = ((contact.emailBrief && contact.emailBrief.summary) || contact.aiSummary || '').trim();
 
   return `
     <div class="card card-interactive group relative overflow-hidden" onclick="viewContact('${contact.id}')">

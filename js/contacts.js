@@ -1253,6 +1253,8 @@ async function viewContact(contactId) {
         </div>
       </div>
 
+      ${typeof renderContactEmailPanel === 'function' ? renderContactEmailPanel(contact) : ''}
+
       <!-- Tabs -->
       <div class="tab-group mb-6">
         <button class="tab-item active" onclick="showContactTab(this, 'notes-tab')">Notes</button>
