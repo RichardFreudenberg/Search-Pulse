@@ -16,8 +16,10 @@ const _BROKER_IMPORT_FIELDS = [
   { key: 'firm',        label: 'Firm / Company', hints: ['firm', 'company', 'brokerage', 'firma', 'unternehmen', 'organisation', 'organization', 'makler', 'büro'] },
   { key: 'email',       label: 'Email',          hints: ['email', 'e-mail', 'e mail', 'mail address', 'mail'] },
   { key: 'phone',       label: 'Phone',          hints: ['phone', 'telephone', 'mobile', 'tel', 'telefon', 'handy', 'number'] },
+  { key: 'title',       label: 'Title / Position', hints: ['position', 'title', 'rolle', 'funktion', 'job'] },
+  { key: 'linkedInUrl', label: 'Website / LinkedIn', hints: ['linkedin', 'website', 'url', 'homepage', 'webseite', 'web'] },
   { key: 'location',    label: 'Location',       hints: ['location', 'city', 'region', 'ort', 'stadt', 'standort', 'address', 'adresse'] },
-  { key: 'specialties', label: 'Specialties',    hints: ['specialt', 'industry', 'industries', 'sector', 'focus', 'branche', 'fokus', 'schwerpunkt'] },
+  { key: 'specialties', label: 'Specialties',    hints: ['specialt', 'industry', 'industries', 'sector', 'focus', 'branche', 'fokus', 'schwerpunkt', 'type', 'typ'] },
   { key: 'notes',       label: 'Notes',          hints: ['note', 'comment', 'remark', 'bemerkung', 'kommentar', 'info'] },
 ];
 
@@ -76,17 +78,21 @@ function _brokerAutoMap(headers) {
   });
   const claim = (k, h) => { map[k] = h || ''; if (h) claimed.add(h); };
 
-  // Firm FIRST, so a header like "Company Name" maps to the company — not the person.
-  claim('firm', find(['firma', 'company', 'firm', 'brokerage', 'makler', 'kanzlei', 'unternehmen', 'gesellschaft', 'organisation', 'organization', 'büro']));
-  // Person name: explicit person headers first; then a bare "name" excluding firm-ish words.
-  claim('name', find(['contact person', 'ansprechpartner', 'contact name', 'contactname', 'berater', 'contact', 'person', 'full name', 'inhaber', 'geschäftsführer'], ['firm', 'firma', 'company']) ||
-                find(['name'], ['firm', 'firma', 'company', 'file', 'user', 'sign']));
+  // First/Last name → person (handle separate-column lists like First Name / Last Name).
   claim('firstName',   find(['first name', 'firstname', 'vorname', 'given name']));
   claim('lastName',    find(['last name', 'lastname', 'nachname', 'surname', 'family name']));
-  claim('email',       find(['email', 'e-mail', 'e mail', 'mail']));
+  // Website / LinkedIn into its own field BEFORE firm, so "Company LinkedIn/URL" doesn't become the firm.
+  claim('linkedInUrl', find(['linkedin', 'website', 'webseite', 'homepage', 'url', ' web']));
+  // Firm: include "entity"; EXCLUDE url/linkedin headers so the URL column isn't taken as the firm.
+  claim('firm', find(['firma', 'entity', 'company', 'firm', 'brokerage', 'makler', 'kanzlei', 'unternehmen', 'gesellschaft', 'organisation', 'organization', 'büro'], ['linkedin', 'url', 'website']));
+  // Person name (single column): explicit person headers; bare "name" excluding firm/entity words.
+  claim('name', find(['contact person', 'ansprechpartner', 'contact name', 'contactname', 'berater', 'inhaber', 'geschäftsführer'], ['firm', 'firma', 'company', 'entity']) ||
+                find(['name'], ['firm', 'firma', 'company', 'entity', 'file', 'user', 'sign', 'first', 'last']));
+  claim('title',       find(['position', 'title', 'rolle', 'funktion', 'job']));
+  claim('email',       find(['email', 'e-mail', 'e mail', 'mail'], ['2nd', 'second', 'alt', 'cc']));
   claim('phone',       find(['phone', 'telephone', 'mobile', 'tel', 'telefon', 'handy', 'number']));
   claim('location',    find(['location', 'city', 'region', 'ort', 'stadt', 'standort', 'address', 'adresse']));
-  claim('specialties', find(['specialt', 'industry', 'industries', 'sector', 'focus', 'branche', 'fokus', 'schwerpunkt']));
+  claim('specialties', find(['specialt', 'industry', 'industries', 'sector', 'focus', 'branche', 'fokus', 'schwerpunkt', 'type', 'typ']));
   claim('notes',       find(['note', 'comment', 'remark', 'bemerkung', 'kommentar', 'info']));
 
   _BROKER_IMPORT_FIELDS.forEach(f => { if (!(f.key in map)) map[f.key] = ''; });
@@ -113,14 +119,30 @@ function _brokerRowToRecord(row, mapping) {
   if (name && !firm && _looksLikeCompany(name)) { firm = name; name = ''; }
   // If the person name is identical to the firm, it's a firm-only entry.
   if (name && firm && name.toLowerCase() === firm.toLowerCase()) name = '';
+  const email = _brokerGet(row, mapping, 'email').toLowerCase();
+  let linkedInUrl = _brokerGet(row, mapping, 'linkedInUrl');
+  // A real homepage URL stays as website; a linkedin.com URL stays as linkedIn.
+  const isLinkedIn = /linkedin\.com/i.test(linkedInUrl);
   return {
-    name, firm,
-    email:       _brokerGet(row, mapping, 'email').toLowerCase(),
+    name, firm, email,
     phone:       _brokerGet(row, mapping, 'phone'),
+    title:       _brokerGet(row, mapping, 'title'),
     location:    _brokerGet(row, mapping, 'location'),
     specialties: _brokerGet(row, mapping, 'specialties'),
     notes:       _brokerGet(row, mapping, 'notes'),
+    linkedInUrl: isLinkedIn ? linkedInUrl : '',
+    website:     (!isLinkedIn && linkedInUrl) ? linkedInUrl : _brokerWebsiteFromEmail(email),
   };
+}
+
+// Real website from a non-generic email domain (e.g. x@lueders-warneboldt.de → https://www.lueders-warneboldt.de)
+const _BROKER_GENERIC_EMAIL = new Set(['gmail.com','googlemail.com','gmx.de','gmx.net','web.de','t-online.de','outlook.com','hotmail.com','hotmail.de','yahoo.com','yahoo.de','icloud.com','me.com','aol.com']);
+function _brokerWebsiteFromEmail(email) {
+  email = (email || '').trim().toLowerCase();
+  if (!email.includes('@')) return '';
+  const dom = email.split('@')[1].trim();
+  if (!dom || !dom.includes('.') || _BROKER_GENERIC_EMAIL.has(dom)) return '';
+  return 'https://www.' + dom;
 }
 
 // Dedup keys — person entries keyed by email/name+firm; firm-only by firm name.
@@ -257,11 +279,18 @@ async function brokerImportRun() {
     // Parse + de-duplicate rows (within file + against existing brokers)
     const seen = new Set();
     const toCreate = [];
-    const allFirms = new Set();
+    const firmInfo = {}; // firmLower -> { name, website, linkedInUrl, location, specialties }
     rows.forEach(r => {
       const rec = _brokerRowToRecord(r, mapping);
       if (!rec.name && !rec.firm) return;
-      if (rec.firm) allFirms.add(rec.firm);
+      if (rec.firm) {
+        const fl = rec.firm.toLowerCase();
+        const fi = firmInfo[fl] || (firmInfo[fl] = { name: rec.firm });
+        if (!fi.website && rec.website) fi.website = rec.website;
+        if (!fi.linkedInUrl && rec.linkedInUrl) fi.linkedInUrl = rec.linkedInUrl;
+        if (!fi.location && rec.location) fi.location = rec.location;
+        if (!fi.specialties && rec.specialties) fi.specialties = rec.specialties;
+      }
       const k = _brokerRecKey(rec);
       if (seen.has(k) || exBrokerKeys.has(k)) return;
       seen.add(k);
@@ -271,12 +300,14 @@ async function brokerImportRun() {
     const now = new Date().toISOString();
     let createdBrokers = 0, createdContacts = 0, createdCompanies = 0, upgradedBrokers = 0;
 
-    // 1) Companies for EVERY firm referenced (even firm-only rows / dup people)
-    for (const firm of allFirms) {
-      const fl = firm.toLowerCase();
+    // 1) Companies for EVERY firm referenced (with website/LinkedIn/industry/location)
+    for (const fl in firmInfo) {
       if (!companyByName[fl]) {
+        const fi = firmInfo[fl];
         const co = await DB.add(STORES.companies, {
-          userId: currentUser.id, name: firm, source: 'broker-import', createdAt: now,
+          userId: currentUser.id, name: fi.name, industry: fi.specialties || '',
+          location: fi.location || '', website: fi.website || '', linkedInUrl: fi.linkedInUrl || '',
+          source: 'broker-import', createdAt: now,
         });
         companyByName[fl] = co.id;
         createdCompanies++;
@@ -292,7 +323,8 @@ async function brokerImportRun() {
         let contact = (rec.email && contactByEmail[rec.email]) || contactByName[rec.name.toLowerCase()];
         if (!contact) {
           contact = await DB.add(STORES.contacts, {
-            userId: currentUser.id, fullName: rec.name, email: rec.email || '', phone: rec.phone || '',
+            userId: currentUser.id, fullName: rec.name, title: rec.title || '',
+            email: rec.email || '', phone: rec.phone || '', linkedInUrl: rec.linkedInUrl || '',
             location: rec.location || '', companyId: companyId || null, bucket: 'brokers',
             relationshipType: 'Broker / Intermediary', stage: (typeof STAGES !== 'undefined' && STAGES[0]) || '',
             tags: [], notes: rec.notes || '', source: 'broker-import',
@@ -319,6 +351,7 @@ async function brokerImportRun() {
             id: generateId(), userId: currentUser.id,
             name: rec.name, firm: rec.firm || '', email: rec.email || '', phone: rec.phone || '',
             location: rec.location || '', specialties: rec.specialties || '', notes: rec.notes || '',
+            website: rec.website || '', linkedInUrl: rec.linkedInUrl || '',
             dealsIntroduced: 0, relationshipRating: 0,
             contactId: contact.id, companyId: companyId || null,
             source: 'broker-import', createdAt: now, updatedAt: now,
@@ -331,6 +364,7 @@ async function brokerImportRun() {
           id: generateId(), userId: currentUser.id,
           name: rec.firm, firm: '', email: '', phone: rec.phone || '',
           location: rec.location || '', specialties: rec.specialties || '', notes: rec.notes || '',
+          website: rec.website || '', linkedInUrl: rec.linkedInUrl || '',
           dealsIntroduced: 0, relationshipRating: 0,
           contactId: null, companyId: companyId || null, isFirm: true,
           source: 'broker-import', createdAt: now, updatedAt: now,

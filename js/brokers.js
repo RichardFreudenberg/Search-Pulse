@@ -6,6 +6,7 @@
 let _brokerFilter   = 'all'; // 'all' | 'active' | 'inactive'
 let _brokerSearch   = '';
 let _brokerEditingId = null; // for safe modal save onclick
+let _brokerView     = localStorage.getItem('pulse_broker_view') || 'cards'; // 'cards' | 'list'
 
 /* ─── renderBrokers ──────────────────────────────────────────────────────────── */
 async function renderBrokers() {
@@ -40,6 +41,81 @@ async function renderBrokers() {
       ${_brokersMainHtml(brokers)}
     </div>
   </div>`;
+}
+
+function _brokerSetView(v) {
+  _brokerView = v;
+  localStorage.setItem('pulse_broker_view', v);
+  _brokersRefresh();
+}
+
+/* ─── List/table row ─────────────────────────────────────────────────────────── */
+function _brokerRowHtml(b, thirtyDaysAgo) {
+  const isActive = b.lastContactDate && b.lastContactDate >= thirtyDaysAgo;
+  const daysSince = b.lastContactDate ? Math.floor((Date.now() - new Date(b.lastContactDate)) / 86400000) : null;
+  const status = isActive
+    ? '<span class="badge bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400 text-[11px]">Active</span>'
+    : daysSince !== null
+      ? `<span class="badge bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400 text-[11px]">${daysSince}d ago</span>`
+      : '<span class="badge bg-surface-100 text-surface-500 dark:bg-surface-700 text-[11px]">Not contacted</span>';
+  const site = b.website || b.linkedInUrl;
+  return `
+    <tr>
+      <td>
+        <div class="font-medium">${escapeHtml(b.name || 'Unknown')}</div>
+        ${b.email ? `<a href="mailto:${escapeHtml(b.email)}" class="text-xs text-brand-600 hover:underline">${escapeHtml(b.email)}</a>` : ''}
+      </td>
+      <td class="text-sm">${escapeHtml(b.firm || '—')}</td>
+      <td>${site ? (typeof renderSiteLink === 'function' ? renderSiteLink(site, b.website ? 'Website' : 'LinkedIn', false) : '') : '—'}</td>
+      <td class="text-sm text-surface-500">${b.lastContactDate ? formatRelative(b.lastContactDate) : '—'}</td>
+      <td>${status}</td>
+      <td class="text-right whitespace-nowrap">
+        <button onclick="openLogBrokerContactModal('${b.id}')" class="btn-ghost btn-xs text-brand-600">Log</button>
+        <button onclick="openEditBrokerModal('${b.id}')" class="btn-ghost btn-xs">Edit</button>
+      </td>
+    </tr>`;
+}
+
+/* ─── AI: find real websites for brokers (not LinkedIn) ──────────────────────── */
+async function brokerFindWebsitesAI() {
+  showToast('Finding websites with AI…', 'info');
+  try {
+    const all = await DB.getForUser(STORES.brokers, currentUser.id);
+    const missing = all.filter(b => !(b.website || '').trim() && (b.firm || b.name));
+    if (!missing.length) { showToast('All brokers already have a website', 'success'); return; }
+    const companies = await DB.getForUser(STORES.companies, currentUser.id);
+    const coById = buildMap(companies);
+    let updated = 0;
+    for (let i = 0; i < missing.length; i += 20) {
+      const group = missing.slice(i, i + 20);
+      const list = group.map((b, idx) => `${idx + 1}. ${b.firm || b.name}`).join('\n');
+      let raw = '';
+      try {
+        raw = await callAI(
+          'You are a research assistant for a search-fund investor. For each German M&A advisory / business broker firm, give its official company website (homepage) — NOT a LinkedIn URL. If you are not confident, use an empty string.',
+          `Return ONLY a JSON array like [{"firm":"...","website":"https://..."}] for these firms (keep the firm text exactly, website must be the firm's own domain, never linkedin.com):\n${list}`,
+          1500, 0.2
+        );
+      } catch (_) { continue; }
+      let arr = [];
+      try { arr = JSON.parse(raw.replace(/^```(?:json)?/i, '').replace(/```$/i, '').trim()); } catch (_) {}
+      for (const item of (arr || [])) {
+        const site = (item && item.website || '').trim();
+        if (!site || /linkedin\.com/i.test(site)) continue;
+        const b = group.find(x => (x.firm || x.name || '').toLowerCase() === String(item.firm || '').toLowerCase());
+        if (!b) continue;
+        b.website = /^https?:\/\//i.test(site) ? site : 'https://' + site;
+        await DB.put(STORES.brokers, b);
+        updated++;
+        const co = b.companyId && coById[b.companyId];
+        if (co && !(co.website || '').trim()) { co.website = b.website; await DB.put(STORES.companies, co); }
+      }
+    }
+    await _brokersRefresh();
+    showToast(`AI added ${updated} website${updated !== 1 ? 's' : ''}${updated < missing.length ? ` (${missing.length - updated} still unknown)` : ''}`, 'success');
+  } catch (err) {
+    showToast('Could not find websites: ' + (err.message || 'error'), 'error');
+  }
 }
 
 /* ─── Stats row ─────────────────────────────────────────────────────────────── */
@@ -113,10 +189,16 @@ function _brokersMainHtml(brokers) {
     <div class="py-12 text-center">
       <p class="text-sm text-surface-500">No brokers match this filter.</p>
       <button onclick="_brokerSetFilter('all')" class="text-sm text-brand-600 mt-2">Clear filter</button>
+    </div>` : (_brokerView === 'list' ? `
+    <div class="card p-0 overflow-x-auto">
+      <table class="data-table">
+        <thead><tr><th>Broker</th><th>Firm</th><th>Website</th><th>Last Contact</th><th>Status</th><th></th></tr></thead>
+        <tbody>${filtered.map(b => _brokerRowHtml(b, thirtyDaysAgo)).join('')}</tbody>
+      </table>
     </div>` : `
     <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
       ${filtered.map(b => _brokerCardHtml(b, thirtyDaysAgo)).join('')}
-    </div>`;
+    </div>`);
 
   return `
     <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5">
@@ -131,7 +213,19 @@ function _brokersMainHtml(brokers) {
         </div>
         <div class="flex gap-1.5">${chips}</div>
       </div>
-      <div class="flex gap-2 shrink-0">
+      <div class="flex gap-2 shrink-0 items-center">
+        <div class="flex border border-surface-200 dark:border-surface-700 rounded-lg overflow-hidden">
+          <button onclick="_brokerSetView('cards')" class="p-2 ${_brokerView === 'cards' ? 'bg-surface-200 dark:bg-surface-700' : 'hover:bg-surface-100 dark:hover:bg-surface-800'}" title="Card view">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z"/></svg>
+          </button>
+          <button onclick="_brokerSetView('list')" class="p-2 ${_brokerView === 'list' ? 'bg-surface-200 dark:bg-surface-700' : 'hover:bg-surface-100 dark:hover:bg-surface-800'}" title="List view">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3.75 5.25h16.5m-16.5 4.5h16.5m-16.5 4.5h16.5m-16.5 4.5h16.5"/></svg>
+          </button>
+        </div>
+        <button onclick="brokerFindWebsitesAI()" class="btn-secondary btn-sm" title="Use AI to find each broker firm's real website">
+          <svg class="w-4 h-4 text-brand-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z"/></svg>
+          Find Websites
+        </button>
         <button onclick="openBrokerImport()" class="btn-secondary btn-sm" title="Bulk-import a broker list from Excel — auto-dedupes and creates contacts + companies">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5"/></svg>
           Import Excel
@@ -199,7 +293,7 @@ function _brokerCardHtml(b, thirtyDaysAgo) {
       <!-- Meta -->
       <div class="space-y-1 mb-3 text-xs text-surface-500">
         ${b.email ? `<div class="flex items-center gap-1.5 truncate"><svg class="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75"/></svg><a href="mailto:${escapeHtml(b.email)}" class="truncate text-brand-600 hover:underline">${escapeHtml(b.email)}</a></div>` : ''}
-        ${(b.linkedInUrl || b.website) ? `<div class="flex items-center gap-1.5">${typeof renderSiteLink === 'function' ? renderSiteLink(b.linkedInUrl || b.website, null, false) : ''}</div>` : ''}
+        ${(b.website || b.linkedInUrl) ? `<div class="flex items-center gap-1.5">${typeof renderSiteLink === 'function' ? renderSiteLink(b.website || b.linkedInUrl, b.website ? 'Website' : 'LinkedIn', false) : ''}</div>` : ''}
         ${b.phone ? `<div class="flex items-center gap-1.5"><svg class="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 002.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 01-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 00-1.091-.852H4.5A2.25 2.25 0 002.25 4.5v2.25z"/></svg>${escapeHtml(b.phone)}</div>` : ''}
         ${b.location ? `<div class="flex items-center gap-1.5"><svg class="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 10.5a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1115 0z"/></svg>${escapeHtml(b.location)}</div>` : ''}
         ${b.dealsIntroduced ? `<div class="flex items-center gap-1.5"><svg class="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M20.25 14.15v4.25c0 1.094-.787 2.036-1.872 2.18-2.087.277-4.216.42-6.378.42s-4.291-.143-6.378-.42c-1.085-.144-1.872-1.086-1.872-2.18v-4.25m16.5 0a2.18 2.18 0 00.75-1.661V8.706c0-1.081-.768-2.015-1.837-2.175a48.114 48.114 0 00-3.413-.387m4.5 8.006c-.194.165-.42.295-.673.38A23.978 23.978 0 0112 15.75c-2.648 0-5.195-.429-7.577-1.22a2.016 2.016 0 01-.673-.38m0 0A2.18 2.18 0 013 12.489V8.706c0-1.081.768-2.015 1.837-2.175a48.111 48.111 0 013.413-.387m7.5 0V5.25A2.25 2.25 0 0013.5 3h-3a2.25 2.25 0 00-2.25 2.25v.894m7.5 0a48.667 48.667 0 00-7.5 0M12 12.75h.008v.008H12v-.008z"/></svg>${b.dealsIntroduced} deal${b.dealsIntroduced !== 1 ? 's' : ''} introduced</div>` : ''}
