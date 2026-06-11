@@ -1033,6 +1033,11 @@ async function saveNewContact() {
   }
   _selectedCompanyId = null; // clear after use
 
+  // Persist the EFFECTIVE bucket: explicit choice, else derived from the sub-role.
+  const _newRelType   = document.getElementById('contact-relationship-type')?.value || '';
+  const _newBucketSel = document.getElementById('contact-bucket')?.value || '';
+  const _newEffBucket = _newBucketSel || getContactBucket({ relationshipType: _newRelType });
+
   const contact = await DB.add(STORES.contacts, {
     userId: currentUser.id,
     fullName: name,
@@ -1044,8 +1049,8 @@ async function saveNewContact() {
     linkedInUrl: document.getElementById('contact-linkedin').value.trim(),
     photoUrl: document.getElementById('contact-photo').value.trim(),
     stage: document.getElementById('contact-stage').value,
-    relationshipType: document.getElementById('contact-relationship-type')?.value || '',
-    bucket: document.getElementById('contact-bucket')?.value || null,
+    relationshipType: _newRelType,
+    bucket: (_newEffBucket && _newEffBucket !== 'unassigned') ? _newEffBucket : null,
     priority: document.getElementById('contact-priority')?.value || null,
     campaignId: document.getElementById('contact-campaign-id')?.value || null,
     tags: getTagInputValues('contact-tags'),
@@ -1123,9 +1128,13 @@ async function viewContact(contactId) {
         <div class="flex flex-col sm:flex-row items-start gap-5">
           ${renderAvatar(contact.fullName, contact.photoUrl, 'xl', contact.linkedInUrl)}
           <div class="flex-1 min-w-0">
-            <div class="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4 mb-1">
+            <div class="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 mb-1">
               <h1 class="text-2xl font-semibold truncate">${escapeHtml(contact.fullName)}</h1>
-              ${renderStageBadge(contact.stage)}
+              <div class="flex items-center gap-2 flex-wrap">
+                ${typeof renderBucketBadge === 'function' ? renderBucketBadge(getContactBucket(contact)) : ''}
+                ${typeof renderStrengthChip === 'function' ? renderStrengthChip(contact) : ''}
+                ${renderStageBadge(contact.stage)}
+              </div>
             </div>
             <div class="flex items-center gap-2 text-surface-500 mb-3">
               ${contact.title ? `<span>${escapeHtml(contact.title)}</span>` : ''}
@@ -1394,7 +1403,7 @@ async function openEditContactModal(contactId) {
             <label class="block text-sm font-medium text-surface-600 dark:text-surface-400 mb-1">Relationship Bucket</label>
             <select id="edit-contact-bucket" class="input-field">
               <option value="">— Auto-detect from type —</option>
-              ${RELATIONSHIP_BUCKETS.filter(b => b.key !== 'unassigned').map(b => `<option value="${b.key}" ${contact.bucket === b.key ? 'selected' : ''}>${b.label}</option>`).join('')}
+              ${RELATIONSHIP_BUCKETS.filter(b => b.key !== 'unassigned').map(b => `<option value="${b.key}" ${getContactBucket(contact) === b.key ? 'selected' : ''}>${b.label}</option>`).join('')}
             </select>
           </div>
           <div>
@@ -1457,7 +1466,12 @@ async function openEditContactModal(contactId) {
     contact.photoUrl = document.getElementById('edit-contact-photo').value.trim();
     contact.stage = newStage;
     contact.relationshipType = document.getElementById('edit-contact-relationship-type')?.value || contact.relationshipType || '';
-    contact.bucket = document.getElementById('edit-contact-bucket')?.value || null;
+    // Persist the EFFECTIVE bucket: explicit choice, else derived from the
+    // (just-updated) sub-role. Stores null only when genuinely unassigned, so
+    // the cards/grouping always match what was assigned.
+    const _selBucket = document.getElementById('edit-contact-bucket')?.value || '';
+    const _effBucket = _selBucket || getContactBucket({ relationshipType: contact.relationshipType });
+    contact.bucket = (_effBucket && _effBucket !== 'unassigned') ? _effBucket : null;
     contact.priority = document.getElementById('edit-contact-priority')?.value || null;
     contact.tags = getTagInputValues('edit-contact-tags');
     const followUp = document.getElementById('edit-contact-followup').value;
