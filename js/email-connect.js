@@ -153,8 +153,8 @@ async function syncOutlook(opts = {}) {
     const token = await _outlookToken(silent);
     const selfEmail = (cfg.account || _activeOutlookAccount()?.username || '').toLowerCase();
 
-    const inboxUrl = `${GRAPH_BASE}/me/mailFolders/inbox/messages?$select=from,receivedDateTime,subject,isRead,conversationId&$top=${_EMAIL_PAGE_SIZE}&$orderby=receivedDateTime desc`;
-    const sentUrl  = `${GRAPH_BASE}/me/mailFolders/sentitems/messages?$select=toRecipients,sentDateTime,subject,conversationId&$top=${_EMAIL_PAGE_SIZE}&$orderby=sentDateTime desc`;
+    const inboxUrl = `${GRAPH_BASE}/me/mailFolders/inbox/messages?$select=from,toRecipients,ccRecipients,receivedDateTime,subject,isRead,conversationId&$top=${_EMAIL_PAGE_SIZE}&$orderby=receivedDateTime desc`;
+    const sentUrl  = `${GRAPH_BASE}/me/mailFolders/sentitems/messages?$select=toRecipients,ccRecipients,bccRecipients,sentDateTime,subject,conversationId&$top=${_EMAIL_PAGE_SIZE}&$orderby=sentDateTime desc`;
 
     const [inbox, sent] = await Promise.all([
       _graphGet(token, inboxUrl),
@@ -285,30 +285,49 @@ async function _processEmailData(inboxMsgs, sentMsgs, contacts, selfEmail) {
   const byEmail = {};
   contacts.forEach(c => { if (c.email) byEmail[c.email.trim().toLowerCase()] = c; });
 
+  const MAX_RECIPIENTS = 25; // above this, treat as a blast/newsletter and skip CC matching
+  const addrsOf = list => (list || []).map(r => r.emailAddress?.address?.toLowerCase()).filter(Boolean);
+
   const agg = {}; // contactId -> { inbound, outbound, lastAt, lastSubject, lastDir }
   const touch = cid => (agg[cid] || (agg[cid] = { inbound: 0, outbound: 0, lastAt: 0, lastSubject: '', lastDir: null }));
 
   (inboxMsgs || []).forEach(m => {
-    const addr = m.from?.emailAddress?.address?.toLowerCase();
-    if (!addr || addr === selfEmail) return;
-    const c = byEmail[addr]; if (!c) return;
     const t = new Date(m.receivedDateTime || m.sentDateTime || 0).getTime();
     if (!t) return;
-    const a = touch(c.id);
-    if (t > a.inbound) a.inbound = t;
-    if (t > a.lastAt) { a.lastAt = t; a.lastSubject = m.subject || '(no subject)'; a.lastDir = 'in'; }
+    const subject = m.subject || '(no subject)';
+    const fromAddr = m.from?.emailAddress?.address?.toLowerCase();
+    const recips = [...addrsOf(m.toRecipients), ...addrsOf(m.ccRecipients)];
+
+    // 1) The sender wrote to you → inbound (you may owe a reply)
+    if (fromAddr && fromAddr !== selfEmail && byEmail[fromAddr]) {
+      const a = touch(byEmail[fromAddr].id);
+      if (t > a.inbound) a.inbound = t;
+      if (t > a.lastAt) { a.lastAt = t; a.lastSubject = subject; a.lastDir = 'in'; }
+    }
+    // 2) Contacts also on the thread (To/CC) where someone else sent → neutral
+    //    touchpoint: updates recency/strength but doesn't imply a pending reply.
+    if (recips.length <= MAX_RECIPIENTS) recips.forEach(addr => {
+      if (addr === selfEmail || addr === fromAddr) return;
+      const c = byEmail[addr]; if (!c) return;
+      const a = touch(c.id);
+      if (t > a.lastAt) { a.lastAt = t; a.lastSubject = subject; a.lastDir = 'cc'; }
+    });
   });
 
   (sentMsgs || []).forEach(m => {
     const t = new Date(m.sentDateTime || 0).getTime();
     if (!t) return;
-    (m.toRecipients || []).forEach(r => {
-      const addr = r.emailAddress?.address?.toLowerCase();
+    const subject = m.subject || '(no subject)';
+    const to = addrsOf(m.toRecipients);
+    const ccbcc = [...addrsOf(m.ccRecipients), ...addrsOf(m.bccRecipients)];
+    // You always count To; include CC/BCC unless it's a blast.
+    const recipients = (to.length + ccbcc.length) <= MAX_RECIPIENTS ? [...to, ...ccbcc] : to;
+    recipients.forEach(addr => {
       if (!addr || addr === selfEmail) return;
       const c = byEmail[addr]; if (!c) return;
       const a = touch(c.id);
       if (t > a.outbound) a.outbound = t;
-      if (t > a.lastAt) { a.lastAt = t; a.lastSubject = m.subject || '(no subject)'; a.lastDir = 'out'; }
+      if (t > a.lastAt) { a.lastAt = t; a.lastSubject = subject; a.lastDir = 'out'; }
     });
   });
 
