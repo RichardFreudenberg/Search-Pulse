@@ -5,6 +5,7 @@
 let contactsViewMode = 'cards'; // table | cards
 // bucket: '' = all | a bucket key.  quick: '' | 'overdue' | 'priority' | 'reconnect'.  group: 'bucket' | 'none'
 let contactsFilters = { stage: '', tag: '', search: '', sort: 'name', bucket: '', quick: '', group: 'bucket' };
+let _contactsCache = null; // { contacts, companies, tags } — so search/filter re-render without a DB re-fetch
 const CONTACTS_PAGE_SIZE = 60;          // cards/rows rendered before "Load more" (scales to thousands)
 let contactsRenderLimit = CONTACTS_PAGE_SIZE;
 let _selectedCompanyId = null;      // ID of company selected/created in the contact picker
@@ -20,7 +21,22 @@ async function renderContacts() {
     DB.getForUser(STORES.companies, currentUser.id),
     DB.getForUser(STORES.tags, currentUser.id),
   ]);
+  _contactsCache = { contacts, companies, tags };
+  _contactsPaint();
+}
 
+// Re-render the hub from cached data (no DB re-fetch, no skeleton flash) and
+// preserve search-box focus + caret — used by search / filter / sort / view so
+// typing never loses focus after a single character.
+function _contactsPaint() {
+  const pageContent = document.getElementById('page-content');
+  if (!pageContent) return;
+  if (!_contactsCache) { renderContacts(); return; }
+  const _ae = document.activeElement;
+  const _wasSearch = _ae && _ae.id === 'contacts-search-input';
+  const _caret = _wasSearch ? _ae.selectionStart : null;
+
+  const { contacts, companies, tags } = _contactsCache;
   const activeContacts = getActiveContacts(contacts);
   const companyMap = buildMap(companies);
 
@@ -134,15 +150,15 @@ async function renderContacts() {
 
         <div class="relative flex-1 min-w-[200px] max-w-sm ml-auto">
           <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-surface-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" /></svg>
-          <input type="text" placeholder="Search name, company, role, notes…" value="${escapeHtml(contactsFilters.search)}"
-            oninput="contactsFilters.search=this.value; renderContacts()"
+          <input type="text" id="contacts-search-input" placeholder="Search name, company, role, notes…" value="${escapeHtml(contactsFilters.search)}"
+            oninput="contactsFilters.search=this.value; _contactsPaint()"
             class="w-full pl-10 pr-4 py-2 text-sm bg-surface-100 dark:bg-surface-900 border-0 rounded-lg focus:ring-2 focus:ring-brand-500" />
         </div>
-        <select onchange="contactsFilters.stage=this.value; renderContacts()" class="input-field w-auto text-sm" style="max-width: 160px">
+        <select onchange="contactsFilters.stage=this.value; _contactsPaint()" class="input-field w-auto text-sm" style="max-width: 160px">
           <option value="">All stages</option>
           ${STAGES.map(s => `<option value="${s}" ${contactsFilters.stage === s ? 'selected' : ''}>${s}</option>`).join('')}
         </select>
-        <select onchange="contactsFilters.sort=this.value; renderContacts()" class="input-field w-auto text-sm" style="max-width: 170px">
+        <select onchange="contactsFilters.sort=this.value; _contactsPaint()" class="input-field w-auto text-sm" style="max-width: 170px">
           <option value="name" ${contactsFilters.sort === 'name' ? 'selected' : ''}>Name A–Z</option>
           <option value="recent" ${contactsFilters.sort === 'recent' ? 'selected' : ''}>Last contacted</option>
           <option value="follow-up" ${contactsFilters.sort === 'follow-up' ? 'selected' : ''}>Follow-up date</option>
@@ -157,10 +173,10 @@ async function renderContacts() {
           <svg class="w-4 h-4 inline -mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3.75 6h16.5M3.75 12h16.5m-16.5 6h16.5"/></svg>
         </button>
         <div class="flex border border-surface-200 dark:border-surface-700 rounded-lg overflow-hidden">
-          <button onclick="contactsViewMode='cards'; renderContacts()" class="p-2 ${contactsViewMode === 'cards' ? 'bg-surface-200 dark:bg-surface-700' : 'hover:bg-surface-100 dark:hover:bg-surface-800'}">
+          <button onclick="contactsViewMode='cards'; _contactsPaint()" class="p-2 ${contactsViewMode === 'cards' ? 'bg-surface-200 dark:bg-surface-700' : 'hover:bg-surface-100 dark:hover:bg-surface-800'}">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" /></svg>
           </button>
-          <button onclick="contactsViewMode='table'; renderContacts()" class="p-2 ${contactsViewMode === 'table' ? 'bg-surface-200 dark:bg-surface-700' : 'hover:bg-surface-100 dark:hover:bg-surface-800'}">
+          <button onclick="contactsViewMode='table'; _contactsPaint()" class="p-2 ${contactsViewMode === 'table' ? 'bg-surface-200 dark:bg-surface-700' : 'hover:bg-surface-100 dark:hover:bg-surface-800'}">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3.75 5.25h16.5m-16.5 4.5h16.5m-16.5 4.5h16.5m-16.5 4.5h16.5" /></svg>
           </button>
         </div>
@@ -204,6 +220,10 @@ async function renderContacts() {
           ${_renderContactsMore(filtered.length)}`}
     </div>
   `;
+  if (_wasSearch) {
+    const inp = document.getElementById('contacts-search-input');
+    if (inp) { inp.focus(); try { inp.setSelectionRange(_caret, _caret); } catch (_) {} }
+  }
 }
 
 /** Footer shown under capped lists: count + Load more. */
@@ -218,7 +238,7 @@ function _renderContactsMore(total) {
       <button onclick="_loadMoreContacts()" class="btn-secondary btn-sm">Load more</button>
     </div>`;
 }
-function _loadMoreContacts() { contactsRenderLimit += CONTACTS_PAGE_SIZE; renderContacts(); }
+function _loadMoreContacts() { contactsRenderLimit += CONTACTS_PAGE_SIZE; _contactsPaint(); }
 
 // One-click (re)classification from a card or the contact detail page.
 async function _quickSetContactBucket(contactId, bucketKey, from) {
@@ -249,10 +269,10 @@ function _sortContacts(list, sort) {
   }
   return arr;
 }
-function _setContactBucket(key) { contactsFilters.bucket = (contactsFilters.bucket === key ? '' : key); contactsRenderLimit = CONTACTS_PAGE_SIZE; renderContacts(); }
-function _setContactQuick(key)  { contactsFilters.quick  = (contactsFilters.quick === key ? '' : key); contactsRenderLimit = CONTACTS_PAGE_SIZE; renderContacts(); }
-function _toggleContactGroup()  { contactsFilters.group  = (contactsFilters.group === 'bucket' ? 'none' : 'bucket'); contactsRenderLimit = CONTACTS_PAGE_SIZE; renderContacts(); }
-function _clearContactFilters() { contactsFilters = { stage: '', tag: '', search: '', sort: contactsFilters.sort, bucket: '', quick: '', group: contactsFilters.group }; contactsRenderLimit = CONTACTS_PAGE_SIZE; renderContacts(); }
+function _setContactBucket(key) { contactsFilters.bucket = (contactsFilters.bucket === key ? '' : key); contactsRenderLimit = CONTACTS_PAGE_SIZE; _contactsPaint(); }
+function _setContactQuick(key)  { contactsFilters.quick  = (contactsFilters.quick === key ? '' : key); contactsRenderLimit = CONTACTS_PAGE_SIZE; _contactsPaint(); }
+function _toggleContactGroup()  { contactsFilters.group  = (contactsFilters.group === 'bucket' ? 'none' : 'bucket'); contactsRenderLimit = CONTACTS_PAGE_SIZE; _contactsPaint(); }
+function _clearContactFilters() { contactsFilters = { stage: '', tag: '', search: '', sort: contactsFilters.sort, bucket: '', quick: '', group: contactsFilters.group }; contactsRenderLimit = CONTACTS_PAGE_SIZE; _contactsPaint(); }
 
 async function openNewContactModal(prefill = {}) {
   const [companies, tags] = await Promise.all([

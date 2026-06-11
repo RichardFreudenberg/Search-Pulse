@@ -8,66 +8,98 @@ function companyTypeOptions(selected = '') {
   return COMPANY_TYPES.map(t => `<option value="${t}"${selected === t ? ' selected' : ''}>${t}</option>`).join('');
 }
 
+let companiesSearch = '';
+let _companiesCache = null;
+
 async function renderCompanies() {
   const pageContent = document.getElementById('page-content');
   pageContent.innerHTML = `<div class="p-4 lg:p-8 max-w-7xl mx-auto">${renderLoadingSkeleton(5)}</div>`;
-
   const [allCompanies, contacts] = await Promise.all([
     DB.getForUser(STORES.companies, currentUser.id),
     DB.getForUser(STORES.contacts, currentUser.id),
   ]);
+  _companiesCache = { allCompanies, contacts };
+  _companiesPaint();
+}
 
+// Re-render from cache (no DB re-fetch) so the search box keeps focus while typing.
+function _companiesPaint() {
+  const pageContent = document.getElementById('page-content');
+  if (!pageContent) return;
+  if (!_companiesCache) { renderCompanies(); return; }
+  const _ae = document.activeElement;
+  const _wasSearch = _ae && _ae.id === 'companies-search-input';
+  const _caret = _wasSearch ? _ae.selectionStart : null;
+
+  const { allCompanies, contacts } = _companiesCache;
   // Pipeline-fetched companies live in Company Scout, not here
-  const companies = allCompanies.filter(c => c.source !== 'pipeline');
-
+  const allCos = allCompanies.filter(c => c.source !== 'pipeline');
   const activeContacts = getActiveContacts(contacts);
-
-  // Count contacts per company
   const contactCounts = {};
-  activeContacts.forEach(c => {
-    if (c.companyId) contactCounts[c.companyId] = (contactCounts[c.companyId] || 0) + 1;
-  });
+  activeContacts.forEach(c => { if (c.companyId) contactCounts[c.companyId] = (contactCounts[c.companyId] || 0) + 1; });
 
+  const q = companiesSearch.trim().toLowerCase();
+  let companies = allCos.filter(c => !q ||
+    (c.name || '').toLowerCase().includes(q) ||
+    (c.industry || '').toLowerCase().includes(q) ||
+    (c.description || '').toLowerCase().includes(q) ||
+    (c.location || '').toLowerCase().includes(q) ||
+    (c.website || '').toLowerCase().includes(q));
   companies.sort((a, b) => a.name.localeCompare(b.name));
+
+  const grid = `
+    <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+      ${companies.map(c => `
+        <div class="card card-interactive" onclick="viewCompany('${c.id}')">
+          <div class="flex items-start gap-3">
+            ${renderCompanyLogo(c, 'lg')}
+            <div class="min-w-0 flex-1">
+              <h3 class="font-medium truncate">${escapeHtml(c.name)}</h3>
+              ${c.industry ? `<p class="text-xs text-surface-500">${escapeHtml(c.industry)}</p>` : ''}
+              ${c.description ? `<p class="text-sm text-surface-600 dark:text-surface-400 mt-1 line-clamp-2">${escapeHtml(truncate(c.description, 100))}</p>` : ''}
+              <div class="flex items-center gap-3 mt-2 text-xs text-surface-500">
+                <span>${contactCounts[c.id] || 0} contacts</span>
+                ${c.size ? `<span>· ${escapeHtml(c.size)} employees</span>` : ''}
+                ${c.website ? `<span>· ${renderSiteLink(c.website)}</span>` : ''}
+                ${c.linkedInUrl ? `<span>· ${renderSiteLink(c.linkedInUrl)}</span>` : ''}
+              </div>
+            </div>
+          </div>
+        </div>
+      `).join('')}
+    </div>`;
 
   pageContent.innerHTML = `
     <div class="p-4 lg:p-8 max-w-7xl mx-auto animate-fade-in">
-      ${renderPageHeader('Companies', `${companies.length} companies`, `
+      ${renderPageHeader('Companies', `${allCos.length} companies`, `
         <button onclick="openNewCompanyModal()" class="btn-primary">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.5v15m7.5-7.5h-15" /></svg>
           New Company
         </button>
       `)}
 
-      ${companies.length === 0 ? renderEmptyState(
+      ${allCos.length === 0 ? '' : `
+        <div class="relative max-w-sm mb-5">
+          <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-surface-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"/></svg>
+          <input type="text" id="companies-search-input" placeholder="Search name, industry, description, location…" value="${escapeHtml(companiesSearch)}"
+            oninput="companiesSearch=this.value; _companiesPaint()"
+            class="w-full pl-10 pr-4 py-2 text-sm bg-surface-100 dark:bg-surface-900 border-0 rounded-lg focus:ring-2 focus:ring-brand-500" />
+        </div>`}
+
+      ${allCos.length === 0 ? renderEmptyState(
         '<svg class="w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3.75 21h16.5M4.5 3h15M5.25 3v18m13.5-18v18M9 6.75h1.5m-1.5 3h1.5m-1.5 3h1.5m3-6H15m-1.5 3H15m-1.5 3H15M9 21v-3.375c0-.621.504-1.125 1.125-1.125h3.75c.621 0 1.125.504 1.125 1.125V21" /></svg>',
         'No companies yet',
         'Companies will appear here as you add contacts',
         '<button onclick="openNewCompanyModal()" class="btn-primary">Add Company</button>'
-      ) : `
-        <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-          ${companies.map(c => `
-            <div class="card card-interactive" onclick="viewCompany('${c.id}')">
-              <div class="flex items-start gap-3">
-                ${renderCompanyLogo(c, 'lg')}
-                <div class="min-w-0 flex-1">
-                  <h3 class="font-medium truncate">${escapeHtml(c.name)}</h3>
-                  ${c.industry ? `<p class="text-xs text-surface-500">${escapeHtml(c.industry)}</p>` : ''}
-                  ${c.description ? `<p class="text-sm text-surface-600 dark:text-surface-400 mt-1 line-clamp-2">${escapeHtml(truncate(c.description, 100))}</p>` : ''}
-                  <div class="flex items-center gap-3 mt-2 text-xs text-surface-500">
-                    <span>${contactCounts[c.id] || 0} contacts</span>
-                    ${c.size ? `<span>· ${escapeHtml(c.size)} employees</span>` : ''}
-                    ${c.website ? `<span>· ${renderSiteLink(c.website)}</span>` : ''}
-                    ${c.linkedInUrl ? `<span>· ${renderSiteLink(c.linkedInUrl)}</span>` : ''}
-                  </div>
-                </div>
-              </div>
-            </div>
-          `).join('')}
-        </div>
-      `}
+      ) : companies.length === 0
+        ? `<div class="card text-center py-10 text-sm text-surface-500">No companies match "${escapeHtml(companiesSearch)}".</div>`
+        : grid}
     </div>
   `;
+  if (_wasSearch) {
+    const inp = document.getElementById('companies-search-input');
+    if (inp) { inp.focus(); try { inp.setSelectionRange(_caret, _caret); } catch (_) {} }
+  }
 }
 
 async function viewCompany(companyId) {
