@@ -29,3 +29,6 @@ pipeline/__pycache__/
 pipeline/connectors/__pycache__/
 pipeline/parsing/__pycache__/
 pipeline/db/__pycache__/
+
+# Local data backups (may contain PII) — never commit
+pipeline/backups/

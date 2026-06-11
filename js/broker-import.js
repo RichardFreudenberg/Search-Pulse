@@ -113,6 +113,7 @@ function _brokerRecKey(rec) {
   return 'f:' + rec.firm.toLowerCase();
 }
 function _brokerExistingKey(b) {
+  if (b.isFirm) return 'f:' + (b.name || b.firm || '').toLowerCase();
   const nm = (b.name || '').toLowerCase(), fm = (b.firm || '').toLowerCase();
   if (nm && nm !== fm) return 'p:' + ((b.email || '').toLowerCase() || (nm + '|' + fm));
   return 'f:' + (fm || nm);
