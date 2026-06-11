@@ -49,21 +49,29 @@ async function _saveOutlookCfg(patch) {
 }
 
 // ── MSAL instance ────────────────────────────────────────────
-async function _getMsal(clientId) {
+async function _getMsal(clientId, tenantId) {
   if (typeof msal === 'undefined' || !msal.PublicClientApplication) {
     throw new Error('Microsoft sign-in library failed to load. Check your connection and refresh.');
   }
-  if (_msalApp && _msalClientId === clientId) return _msalApp;
+  // Single-tenant apps must use a tenant-specific authority; /common only works
+  // for multi-tenant apps (otherwise AADSTS50194). If a Tenant ID (or domain) is
+  // provided, target it directly; otherwise fall back to /organizations.
+  const tid = (tenantId || '').trim();
+  const authority = tid
+    ? 'https://login.microsoftonline.com/' + tid
+    : 'https://login.microsoftonline.com/organizations'; // any work/school tenant
+  const cacheKey = clientId + '|' + tid;
+  if (_msalApp && _msalClientId === cacheKey) return _msalApp;
   _msalApp = new msal.PublicClientApplication({
     auth: {
       clientId,
-      authority: 'https://login.microsoftonline.com/common', // work/school + personal
+      authority,
       redirectUri: window.location.origin,
     },
     cache: { cacheLocation: 'localStorage', storeAuthStateInCookie: false },
   });
   if (typeof _msalApp.initialize === 'function') await _msalApp.initialize(); // MSAL v3
-  _msalClientId = clientId;
+  _msalClientId = cacheKey;
   return _msalApp;
 }
 
@@ -78,16 +86,18 @@ function _activeOutlookAccount() {
 // ── Connect / Disconnect ─────────────────────────────────────
 async function connectOutlook() {
   const input = document.getElementById('outlook-client-id');
+  const tenantInput = document.getElementById('outlook-tenant-id');
   const cfg = await _outlookCfg();
   const clientId = ((input && input.value.trim()) || cfg.clientId || '').trim();
+  const tenantId = ((tenantInput && tenantInput.value.trim()) || cfg.tenantId || '').trim();
   if (!clientId) { showToast('Paste your Microsoft App (client) ID first', 'warning'); input?.focus(); return; }
 
   try {
     showToast('Opening Microsoft sign-in…', 'info');
-    const app = await _getMsal(clientId);
+    const app = await _getMsal(clientId, tenantId);
     const resp = await app.loginPopup({ scopes: OUTLOOK_SCOPES, prompt: 'select_account' });
     app.setActiveAccount(resp.account);
-    await _saveOutlookCfg({ clientId, account: resp.account?.username || '', connectedAt: new Date().toISOString() });
+    await _saveOutlookCfg({ clientId, tenantId, account: resp.account?.username || '', connectedAt: new Date().toISOString() });
     showToast(`Connected as ${resp.account?.username || 'Microsoft account'}`, 'success');
     await syncOutlook();
   } catch (err) {
@@ -137,7 +147,7 @@ async function syncOutlook() {
   if (btn) { btn.disabled = true; btn.dataset.label = btn.innerHTML; btn.innerHTML = 'Syncing…'; }
 
   try {
-    await _getMsal(cfg.clientId);
+    await _getMsal(cfg.clientId, cfg.tenantId);
     const token = await _outlookToken();
     const selfEmail = (cfg.account || _activeOutlookAccount()?.username || '').toLowerCase();
 
@@ -248,7 +258,7 @@ async function renderEmailHub() {
   const connected = !!cfg.clientId && !!cfg.account;
 
   // Re-hydrate MSAL silently so "connected" survives refreshes
-  if (cfg.clientId) { try { await _getMsal(cfg.clientId); } catch (_) {} }
+  if (cfg.clientId) { try { await _getMsal(cfg.clientId, cfg.tenantId); } catch (_) {} }
 
   if (!connected) { pageContent.innerHTML = _emailSetupView(cfg); return; }
 
@@ -355,7 +365,7 @@ function _emailSetupView(cfg) {
             <li>Under <b>Redirect URI</b>, choose <b>Single-page application (SPA)</b> and enter:
               <code class="block mt-1 px-2 py-1 rounded bg-white dark:bg-surface-900 border border-surface-200 dark:border-surface-700 text-xs select-all">${origin}</code></li>
             <li><b>API permissions → Add → Microsoft Graph → Delegated</b>: add <code class="text-xs">Mail.Read</code> and <code class="text-xs">User.Read</code>.</li>
-            <li>Copy the <b>Application (client) ID</b> and paste it below.</li>
+            <li>From the app's <b>Overview</b> page, copy the <b>Application (client) ID</b> and the <b>Directory (tenant) ID</b> and paste them below.</li>
           </ol>
         </div>
 
@@ -363,6 +373,12 @@ function _emailSetupView(cfg) {
         <input type="text" id="outlook-client-id" value="${escapeHtml(cfg.clientId || '')}"
           placeholder="00000000-0000-0000-0000-000000000000"
           class="input-field font-mono text-sm mb-4" />
+
+        <label class="block text-sm font-medium text-surface-600 dark:text-surface-400 mb-1">Directory (tenant) ID</label>
+        <input type="text" id="outlook-tenant-id" value="${escapeHtml(cfg.tenantId || '')}"
+          placeholder="your-tenant-id (or domain, e.g. rf-nachfolge.de)"
+          class="input-field font-mono text-sm mb-1" />
+        <p class="text-xs text-surface-400 mb-4">Required for single-tenant apps. Find it on the app's Overview page, next to the client ID. You can also paste your domain (e.g. <code>rf-nachfolge.de</code>).</p>
 
         <div class="flex items-center gap-3">
           <button onclick="connectOutlook()" class="btn-primary">
