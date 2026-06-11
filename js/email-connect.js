@@ -118,7 +118,7 @@ async function disconnectOutlook() {
   });
 }
 
-async function _outlookToken() {
+async function _outlookToken(silent) {
   const app = _msalApp;
   const account = _activeOutlookAccount();
   if (!app || !account) throw new Error('Not connected');
@@ -126,6 +126,7 @@ async function _outlookToken() {
     const r = await app.acquireTokenSilent({ scopes: OUTLOOK_SCOPES, account });
     return r.accessToken;
   } catch (e) {
+    if (silent) throw e; // never pop up during automatic background sync
     const r = await app.acquireTokenPopup({ scopes: OUTLOOK_SCOPES });
     return r.accessToken;
   }
@@ -138,17 +139,18 @@ async function _graphGet(token, url) {
 }
 
 // ── Sync ─────────────────────────────────────────────────────
-async function syncOutlook() {
+async function syncOutlook(opts = {}) {
+  const silent = !!opts.silent;
   if (_emailSyncing) return;
   const cfg = await _outlookCfg();
-  if (!cfg.clientId) { showToast('Connect Outlook first', 'warning'); return; }
+  if (!cfg.clientId) { if (!silent) showToast('Connect Outlook first', 'warning'); return; }
   _emailSyncing = true;
   const btn = document.getElementById('outlook-sync-btn');
   if (btn) { btn.disabled = true; btn.dataset.label = btn.innerHTML; btn.innerHTML = 'Syncing…'; }
 
   try {
     await _getMsal(cfg.clientId, cfg.tenantId);
-    const token = await _outlookToken();
+    const token = await _outlookToken(silent);
     const selfEmail = (cfg.account || _activeOutlookAccount()?.username || '').toLowerCase();
 
     const inboxUrl = `${GRAPH_BASE}/me/mailFolders/inbox/messages?$select=from,receivedDateTime,subject,isRead,conversationId&$top=${_EMAIL_PAGE_SIZE}&$orderby=receivedDateTime desc`;
@@ -163,15 +165,92 @@ async function syncOutlook() {
     const result = await _processEmailData(inbox.value || [], sent.value || [], contacts, selfEmail);
 
     await _saveOutlookCfg({ lastSyncAt: new Date().toISOString(), lastSyncMatched: result.matched });
-    showToast(`Synced — ${result.matched} contact${result.matched !== 1 ? 's' : ''} updated, ${result.needsReply} awaiting your reply`, 'success');
-    renderEmailHub();
+    if (silent) {
+      if (result.needsReply) showToast(`Auto-synced inbox — ${result.needsReply} awaiting your reply`, 'info');
+    } else {
+      showToast(`Synced — ${result.matched} contact${result.matched !== 1 ? 's' : ''} updated, ${result.needsReply} awaiting your reply`, 'success');
+    }
+    // Only repaint the hub if the user is actually looking at it
+    if (currentPage === 'email') renderEmailHub();
   } catch (err) {
     console.error('[Outlook] sync failed:', err);
-    showToast('Sync failed: ' + (err.errorMessage || err.message || 'unknown error'), 'error');
+    if (!silent) showToast('Sync failed: ' + (err.errorMessage || err.message || 'unknown error'), 'error');
   } finally {
     _emailSyncing = false;
     if (btn) { btn.disabled = false; if (btn.dataset.label) btn.innerHTML = btn.dataset.label; }
   }
+}
+
+// ── Auto-sync scheduler (twice daily, no server) ─────────────
+// Runs while Pulse is open, and catches up the moment you open Pulse after a
+// slot has passed. Cannot wake a closed tab — that needs the server build.
+const OUTLOOK_SYNC_HOURS_DEFAULT = [8, 17]; // 8am + 5pm local time
+let _outlookAutoTimer = null;
+
+function _outlookSyncHours(cfg) {
+  const h = cfg && Array.isArray(cfg.syncHours) && cfg.syncHours.length ? cfg.syncHours : OUTLOOK_SYNC_HOURS_DEFAULT;
+  return [...h].sort((a, b) => a - b);
+}
+
+/** Most recent scheduled slot boundary at/just before `now` (today or yesterday). */
+function _outlookLastSlot(cfg, now) {
+  const hours = _outlookSyncHours(cfg);
+  const today = hours.map(h => { const d = new Date(now); d.setHours(h, 0, 0, 0); return d; }).filter(d => d <= now);
+  if (today.length) return today[today.length - 1];
+  // none today yet → yesterday's last slot
+  const y = new Date(now); y.setDate(y.getDate() - 1); y.setHours(hours[hours.length - 1], 0, 0, 0);
+  return y;
+}
+
+function _outlookAutoDue(cfg, now) {
+  if (!cfg || cfg.autoSync === false) return false;       // opt-out
+  if (!cfg.clientId || !cfg.account) return false;
+  const slot = _outlookLastSlot(cfg, now);
+  return !cfg.lastSyncAt || new Date(cfg.lastSyncAt) < slot;
+}
+
+/** Next scheduled slot after `now` (for display). */
+function _outlookNextSlot(cfg, now) {
+  const hours = _outlookSyncHours(cfg);
+  for (const h of hours) { const d = new Date(now); d.setHours(h, 0, 0, 0); if (d > now) return d; }
+  const d = new Date(now); d.setDate(d.getDate() + 1); d.setHours(hours[0], 0, 0, 0); return d;
+}
+
+async function maybeAutoSyncOutlook() {
+  if (typeof currentUser === 'undefined' || !currentUser) return;   // not logged in
+  if (_emailSyncing) return;
+  let cfg;
+  try { cfg = await _outlookCfg(); } catch { return; }
+  if (!_outlookAutoDue(cfg, new Date())) return;
+  try {
+    await _getMsal(cfg.clientId, cfg.tenantId);
+    await syncOutlook({ silent: true });
+  } catch (err) {
+    console.warn('[Outlook] auto-sync skipped:', err && (err.errorMessage || err.message));
+  }
+}
+
+function outlookAutoSyncInit() {
+  if (_outlookAutoTimer) return;
+  // Check every 15 min while open; also when the tab regains focus.
+  _outlookAutoTimer = setInterval(maybeAutoSyncOutlook, 15 * 60 * 1000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) maybeAutoSyncOutlook(); });
+  // First check shortly after load (give auth + currentUser time to settle).
+  setTimeout(maybeAutoSyncOutlook, 8000);
+}
+
+async function toggleOutlookAutoSync() {
+  const cfg = await _outlookCfg();
+  const enabled = cfg.autoSync !== false;        // default on
+  await _saveOutlookCfg({ autoSync: !enabled });
+  showToast(!enabled ? 'Auto-sync on (8am & 5pm)' : 'Auto-sync off', 'success');
+  renderEmailHub();
+}
+
+// Kick off the scheduler once the script is loaded.
+if (typeof window !== 'undefined') {
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', outlookAutoSyncInit);
+  else outlookAutoSyncInit();
 }
 
 // Match messages to contacts; persist per-contact email stats + lastContactDate.
@@ -273,10 +352,16 @@ async function renderEmailHub() {
     .sort((a, b) => new Date(a.emailStats.lastOutboundAt || 0) - new Date(b.emailStats.lastOutboundAt || 0)); // oldest waits first
 
   const lastSync = cfg.lastSyncAt ? (typeof formatRelative === 'function' ? formatRelative(cfg.lastSyncAt) : cfg.lastSyncAt) : 'never';
+  const autoOn   = cfg.autoSync !== false; // default on
+  const nextStr  = _outlookNextSlot(cfg, new Date()).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 
   pageContent.innerHTML = `
     <div class="p-4 lg:p-8 max-w-5xl mx-auto animate-fade-in">
-      ${renderPageHeader('Inbox', `Connected as ${escapeHtml(cfg.account)} · last sync ${lastSync}`, `
+      ${renderPageHeader('Inbox', `Connected as ${escapeHtml(cfg.account)} · last sync ${lastSync}${autoOn ? ` · next ~${nextStr}` : ''}`, `
+        <button onclick="toggleOutlookAutoSync()" class="btn-secondary" title="Automatic sync at 8am and 5pm whenever Pulse is open">
+          <span class="inline-block w-2 h-2 rounded-full mr-1.5 ${autoOn ? 'bg-green-500' : 'bg-surface-400'}"></span>
+          Auto-sync ${autoOn ? 'on' : 'off'}
+        </button>
         <button id="outlook-sync-btn" onclick="syncOutlook()" class="btn-primary">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16.023 9.348h4.992V4.356M3.985 19.644V14.65h4.992m-9.97-3.348a8.001 8.001 0 0115.357-2M3.985 14.65a8.001 8.001 0 0015.357 2"/></svg>
           Sync now
@@ -314,7 +399,10 @@ async function renderEmailHub() {
 
       <p class="text-xs text-surface-400 mt-8 text-center">
         Read-only. Pulls your last ${_EMAIL_PAGE_SIZE} inbox + sent messages and matches them to contacts by email.
-        Email activity also updates each contact's relationship strength.
+        Email activity also updates each contact's relationship strength.<br>
+        ${autoOn
+          ? `Auto-sync runs around <b>8am</b> and <b>5pm</b> while Pulse is open, and catches up the next time you open Pulse after a slot. It can't sync a fully closed browser — ask to add server-side background sync for that.`
+          : `Auto-sync is off — emails update only when you click <b>Sync now</b>.`}
       </p>
     </div>
   `;
