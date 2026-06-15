@@ -414,6 +414,60 @@ function createHorizontalBarChart(canvasId, labels, data, options = {}) {
   if (options.onClickLabel) canvas.style.cursor = 'pointer';
 }
 
+// ── Sparkline (tiny inline trend for KPI cards) ────────────────────────────
+function createSparkline(canvasId, data, color = '#2563eb') {
+  destroyChart(canvasId);
+  const canvas = document.getElementById(canvasId);
+  if (!canvas || !data || !data.length) return;
+  const parent = canvas.parentElement;
+  if (parent) parent.style.position = 'relative';
+  const ctx = canvas.getContext('2d');
+  const grad = ctx.createLinearGradient(0, 0, 0, 40);
+  grad.addColorStop(0, color + '40');
+  grad.addColorStop(1, color + '00');
+  _chartInstances[canvasId] = new Chart(canvas, {
+    type: 'line',
+    data: {
+      labels: data.map((_, i) => i),
+      datasets: [{
+        data,
+        borderColor: color,
+        backgroundColor: grad,
+        borderWidth: 2,
+        fill: true,
+        tension: 0.4,
+        pointRadius: 0,
+        pointHoverRadius: 3,
+        pointBackgroundColor: color,
+      }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: { duration: 450, easing: 'easeOutQuart' },
+      plugins: { legend: { display: false }, tooltip: { enabled: false } },
+      scales: { x: { display: false }, y: { display: false, beginAtZero: true } },
+      elements: { line: { borderJoinStyle: 'round', capBezierPoints: true } },
+    },
+  });
+}
+
+// ── Utility: count items per week over the last N weeks ────────────────────
+function countByWeek(items, dateField, n) {
+  const now = new Date();
+  const startOfWeek = (d) => { const x = new Date(d); x.setHours(0, 0, 0, 0); x.setDate(x.getDate() - x.getDay()); return x.getTime(); };
+  const thisWeek = startOfWeek(now);
+  return Array.from({ length: n }, (_, i) => {
+    const wkStart = thisWeek - (n - 1 - i) * 7 * 86400000;
+    const wkEnd = wkStart + 7 * 86400000;
+    return (items || []).filter(it => {
+      if (!it[dateField]) return false;
+      const t = new Date(it[dateField]).getTime();
+      return t >= wkStart && t < wkEnd;
+    }).length;
+  });
+}
+
 // ── Utility: last N month labels ──────────────────────────────────────────
 function getLastNMonthLabels(n) {
   const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];

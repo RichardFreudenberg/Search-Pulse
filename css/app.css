@@ -3279,3 +3279,7 @@ button:active { -webkit-tap-highlight-color: transparent; }
 /* Chart card headers — a touch more premium spacing */
 .card-title { font-size: 14px; font-weight: 600; letter-spacing: -0.01em; }
 
+/* KPI sparkline — subtle inline trend at the bottom of the card */
+.kpi-spark { height: 34px; margin: 14px -8px -4px; position: relative; }
+.kpi-spark canvas { width: 100% !important; }
+

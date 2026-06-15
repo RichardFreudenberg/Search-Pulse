@@ -74,9 +74,11 @@ const _DASH_ICONS = {
   building: '<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.6" d="M3.75 21h16.5M4.5 3h15M5.25 3v18m13.5-18v18M9 6.75h1.5m-1.5 3h1.5m-1.5 3h1.5m3-6H15m-1.5 3H15m-1.5 3H15M9 21v-3.375c0-.621.504-1.125 1.125-1.125h3.75c.621 0 1.125.504 1.125 1.125V21"/></svg>',
   check:    '<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.6" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>',
   users:    '<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.6" d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z"/></svg>',
+  mail:     '<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.6" d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75"/></svg>',
+  reconnect:'<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.6" d="M16.023 9.348h4.992V4.356M3.985 19.644V14.65h4.992m-9.97-3.348a8.001 8.001 0 0115.357-2M3.985 14.65a8.001 8.001 0 0015.357 2"/></svg>',
 };
 
-function renderKpiCard({ label, value, delta, up, icon, color = 'brand', click }) {
+function renderKpiCard({ label, value, delta, up, icon, color = 'brand', click, sparkId }) {
   return `
     <div class="kpi-card${click ? ' card-interactive' : ''}"${click ? ` onclick="${click}" role="button" tabindex="0" title="Click for details"` : ''}>
       <div class="kpi-top">
@@ -85,6 +87,7 @@ function renderKpiCard({ label, value, delta, up, icon, color = 'brand', click }
       </div>
       <div class="kpi-value">${value}</div>
       <div class="kpi-label-pro">${escapeHtml(label)}</div>
+      ${sparkId ? `<div class="kpi-spark"><canvas id="${sparkId}"></canvas></div>` : ''}
     </div>`;
 }
 
@@ -464,6 +467,24 @@ async function renderDashboard() {
   const callMonthData = typeof countByMonth === 'function' ? countByMonth(calls, 'date', 6) : [];
   const contactMonthData = typeof countByMonth === 'function' ? countByMonth(activeContacts, 'createdAt', 6) : [];
 
+  // ── KPI sparkline series + actionable signal counts ──
+  const dealsAddedByMonth = typeof countByMonth === 'function' ? countByMonth(allDeals, 'createdAt', 6) : [];
+  const callsByWeek = typeof countByWeek === 'function' ? countByWeek(calls, 'date', 8) : [];
+  const pipelineByMonth = (() => {
+    const now = new Date();
+    return Array.from({ length: 6 }, (_, i) => {
+      const d = new Date(now.getFullYear(), now.getMonth() - (5 - i), 1);
+      return allDeals.reduce((s, dl) => {
+        if (!dl.createdAt || !dl.askingPrice) return s;
+        const dt = new Date(dl.createdAt);
+        return (dt.getFullYear() === d.getFullYear() && dt.getMonth() === d.getMonth()) ? s + dl.askingPrice / 1e6 : s;
+      }, 0);
+    });
+  })();
+  const _newContactsThisMonth = contactMonthData.length ? contactMonthData[contactMonthData.length - 1] : 0;
+  const _replyDue = activeContacts.filter(c => c.emailStats && c.emailStats.awaiting === 'you').length;
+  const _goingCold = typeof getReconnectContacts === 'function' ? getReconnectContacts(activeContacts).length : stale;
+
   // Greeting computation
   const _hour = new Date().getHours();
   const _greetingWord = _hour < 12 ? 'Good morning' : _hour < 17 ? 'Good afternoon' : 'Good evening';
@@ -482,15 +503,31 @@ async function renderDashboard() {
   const overviewHtml = `
     <div class="kpi-grid">
       ${[
-        { label: 'Pipeline Value',   value: fmtVal(pipelineValue), icon: _DASH_ICONS.money, color: 'emerald',
-          delta: activeDeals.length > 0 ? `${activeDeals.length} active deal${activeDeals.length !== 1 ? 's' : ''}` : null, up: true, click: "showDrilldown('deals-active')" },
-        { label: 'Active Deals',     value: activeDeals.length,    icon: _DASH_ICONS.deals, color: 'brand',
-          delta: hotDeals.length > 0 ? `${hotDeals.length} hot` : (allDeals.length > 0 ? `${allDeals.length} total` : null), up: true, click: "showDrilldown('deals-active')" },
-        { label: 'Follow-ups Due',   value: _dueTodayCount,        icon: _DASH_ICONS.clock, color: overdueFollowUps.length > 0 ? 'amber' : 'green',
-          delta: overdueFollowUps.length > 0 ? `${overdueFollowUps.length} overdue` : 'all on track', up: overdueFollowUps.length === 0, click: "showDrilldown('contacts-overdue')" },
-        { label: 'Calls This Week',  value: _callsThisWeek,        icon: _DASH_ICONS.phone, color: 'violet',
-          delta: calls.length > 0 ? `${calls.length} total` : null, up: true, click: "showDrilldown('calls-all')" },
+        { label: 'Pipeline Value',  value: fmtVal(pipelineValue), icon: _DASH_ICONS.money, color: 'emerald',
+          delta: activeDeals.length > 0 ? `${activeDeals.length} active` : null, up: true, click: "showDrilldown('deals-active')", sparkId: 'spk-pipeline' },
+        { label: 'Active Deals',    value: activeDeals.length,    icon: _DASH_ICONS.deals, color: 'brand',
+          delta: hotDeals.length > 0 ? `${hotDeals.length} hot` : (allDeals.length > 0 ? `${allDeals.length} total` : null), up: true, click: "showDrilldown('deals-active')", sparkId: 'spk-deals' },
+        { label: 'New Contacts',    value: activeContacts.length, icon: _DASH_ICONS.users, color: 'violet',
+          delta: _newContactsThisMonth > 0 ? `${_newContactsThisMonth} this month` : null, up: true, click: "showDrilldown('contacts-all')", sparkId: 'spk-contacts' },
+        { label: 'Calls This Week', value: _callsThisWeek,        icon: _DASH_ICONS.phone, color: 'sky',
+          delta: calls.length > 0 ? `${calls.length} total` : null, up: true, click: "showDrilldown('calls-all')", sparkId: 'spk-calls' },
       ].map(renderKpiCard).join('')}
+    </div>
+
+    <!-- Needs Attention — actionable signals (follow-ups + email) -->
+    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+      <button class="card card-interactive flex items-center gap-3.5 text-left" onclick="showDrilldown('contacts-overdue')">
+        <span class="kpi-icon kpi-icon-${overdueFollowUps.length > 0 ? 'red' : 'green'}">${_DASH_ICONS.clock}</span>
+        <div class="min-w-0"><div class="text-2xl font-bold leading-none">${overdueFollowUps.length}</div><div class="text-xs text-surface-500 mt-1">Overdue follow-ups</div></div>
+      </button>
+      <button class="card card-interactive flex items-center gap-3.5 text-left" onclick="navigate('email')">
+        <span class="kpi-icon kpi-icon-${_replyDue > 0 ? 'amber' : 'green'}">${_DASH_ICONS.mail}</span>
+        <div class="min-w-0"><div class="text-2xl font-bold leading-none">${_replyDue}</div><div class="text-xs text-surface-500 mt-1">Awaiting your reply</div></div>
+      </button>
+      <button class="card card-interactive flex items-center gap-3.5 text-left" onclick="contactsFilters.quick='reconnect'; navigate('contacts')">
+        <span class="kpi-icon kpi-icon-${_goingCold > 0 ? 'amber' : 'green'}">${_DASH_ICONS.reconnect}</span>
+        <div class="min-w-0"><div class="text-2xl font-bold leading-none">${_goingCold}</div><div class="text-xs text-surface-500 mt-1">Going cold — reconnect</div></div>
+      </button>
     </div>
 
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
@@ -705,6 +742,14 @@ async function renderDashboard() {
           maxBarThickness: 22,
           onClickLabel: (label) => showDrilldown('deals-stage', encodeURIComponent(label)),
         });
+      }
+
+      // KPI sparklines
+      if (typeof createSparkline === 'function') {
+        createSparkline('spk-pipeline', pipelineByMonth, '#059669');
+        createSparkline('spk-deals', dealsAddedByMonth, '#2563eb');
+        createSparkline('spk-contacts', contactMonthData, '#7c3aed');
+        createSparkline('spk-calls', callsByWeek, '#0284c7');
       }
     });
   }
