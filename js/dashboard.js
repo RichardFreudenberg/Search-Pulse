@@ -64,6 +64,30 @@ let dashboardEditMode = false;
 let draggedWidget = null;
 let currentDashboardTab = 'overview'; // 'overview' | 'crm' | 'deals'
 
+// ── Premium KPI card (used across all dashboard tabs) ──
+const _DASH_ICONS = {
+  deals:    '<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.6" d="M20.25 14.15v4.25c0 1.094-.787 2.036-1.872 2.18-2.087.277-4.216.42-6.378.42s-4.291-.143-6.378-.42c-1.085-.144-1.872-1.086-1.872-2.18v-4.25m16.5 0a2.18 2.18 0 00.75-1.661V8.706c0-1.081-.768-2.015-1.837-2.175a48.114 48.114 0 00-3.413-.387m4.5 8.006c-.194.165-.42.295-.673.38A23.978 23.978 0 0112 15.75c-2.648 0-5.195-.429-7.577-1.22a2.016 2.016 0 01-.673-.38m0 0A2.18 2.18 0 013 12.489V8.706c0-1.081.768-2.015 1.837-2.175a48.111 48.111 0 013.413-.387m7.5 0V5.25A2.25 2.25 0 0013.5 3h-3a2.25 2.25 0 00-2.25 2.25v.894m7.5 0a48.667 48.667 0 00-7.5 0"/></svg>',
+  money:    '<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.6" d="M12 6v12m-3-2.818l.879.659c1.171.879 3.07.879 4.242 0 1.172-.879 1.172-2.303 0-3.182C13.536 12.219 12.768 12 12 12c-.725 0-1.45-.22-2.003-.659-1.106-.879-1.106-2.303 0-3.182s2.9-.879 4.006 0l.415.33M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>',
+  clock:    '<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.6" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>',
+  phone:    '<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.6" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 002.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 01-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 00-1.091-.852H4.5A2.25 2.25 0 002.25 4.5v2.25z"/></svg>',
+  fire:     '<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.6" d="M15.362 5.214A8.252 8.252 0 0112 21 8.25 8.25 0 016.038 7.047 8.287 8.287 0 009 9.601a8.983 8.983 0 013.361-6.867 8.21 8.21 0 003 2.48z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.6" d="M12 18a3.75 3.75 0 00.495-7.467 5.99 5.99 0 00-1.925 3.546 5.974 5.974 0 01-2.133-1A3.75 3.75 0 0012 18z"/></svg>',
+  building: '<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.6" d="M3.75 21h16.5M4.5 3h15M5.25 3v18m13.5-18v18M9 6.75h1.5m-1.5 3h1.5m-1.5 3h1.5m3-6H15m-1.5 3H15m-1.5 3H15M9 21v-3.375c0-.621.504-1.125 1.125-1.125h3.75c.621 0 1.125.504 1.125 1.125V21"/></svg>',
+  check:    '<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.6" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>',
+  users:    '<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.6" d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z"/></svg>',
+};
+
+function renderKpiCard({ label, value, delta, up, icon, color = 'brand', click }) {
+  return `
+    <div class="kpi-card${click ? ' card-interactive' : ''}"${click ? ` onclick="${click}" role="button" tabindex="0" title="Click for details"` : ''}>
+      <div class="kpi-top">
+        <span class="kpi-icon kpi-icon-${color}">${icon || ''}</span>
+        ${delta ? `<span class="kpi-delta ${up ? 'up' : 'down'}">${up ? '↑' : '↓'} ${escapeHtml(String(delta))}</span>` : ''}
+      </div>
+      <div class="kpi-value">${value}</div>
+      <div class="kpi-label-pro">${escapeHtml(label)}</div>
+    </div>`;
+}
+
 async function renderDashboard() {
   const pageContent = document.getElementById('page-content');
   pageContent.innerHTML = `<div class="p-4 lg:p-8 max-w-7xl mx-auto">${renderLoadingSkeleton(5)}</div>`;
@@ -143,15 +167,11 @@ async function renderDashboard() {
       label: 'Quick Stats',
       fullWidth: true,
       html: `
-        <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          ${renderStatCard('Total Contacts', activeContacts.length,
-            '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z" /></svg>', 'brand', "showDrilldown('contacts-all')")}
-          ${renderStatCard('Total Calls', calls.length,
-            '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 002.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 01-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 00-1.091-.852H4.5A2.25 2.25 0 002.25 4.5v2.25z" /></svg>', 'purple', "showDrilldown('calls-all')")}
-          ${renderStatCard('Due Today', dueToday.length,
-            '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>', 'yellow', "showDrilldown('contacts-today')")}
-          ${renderStatCard('Overdue', overdueFollowUps.length,
-            '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" /></svg>', 'red', "showDrilldown('contacts-overdue')")}
+        <div class="kpi-grid">
+          ${renderKpiCard({ label: 'Total Contacts', value: activeContacts.length, icon: _DASH_ICONS.users, color: 'brand', click: "showDrilldown('contacts-all')" })}
+          ${renderKpiCard({ label: 'Total Calls', value: calls.length, icon: _DASH_ICONS.phone, color: 'violet', click: "showDrilldown('calls-all')" })}
+          ${renderKpiCard({ label: 'Due Today', value: dueToday.length, icon: _DASH_ICONS.clock, color: 'amber', click: "showDrilldown('contacts-today')" })}
+          ${renderKpiCard({ label: 'Overdue', value: overdueFollowUps.length, icon: _DASH_ICONS.clock, color: overdueFollowUps.length > 0 ? 'red' : 'green', delta: overdueFollowUps.length > 0 ? 'needs attention' : 'all clear', up: overdueFollowUps.length === 0, click: "showDrilldown('contacts-overdue')" })}
         </div>
       `,
     },
@@ -462,17 +482,15 @@ async function renderDashboard() {
   const overviewHtml = `
     <div class="kpi-grid">
       ${[
-        { label: 'Active Deals',     val: activeDeals.length,     delta: hotDeals.length > 0 ? `${hotDeals.length} hot` : (allDeals.length > 0 ? `${allDeals.length} total` : null), up: hotDeals.length > 0 || activeDeals.length > 0, click: "showDrilldown('deals-active')" },
-        { label: 'Calls This Week',  val: _callsThisWeek,         delta: calls.length > 0 ? `${calls.length} total` : null,                                                            up: _callsThisWeek > 0,                               click: "showDrilldown('calls-all')" },
-        { label: 'Companies',        val: companies.length,        delta: activeContacts.length > 0 ? `${activeContacts.length} contacts` : null,                                      up: companies.length > 0,                              click: "showDrilldown('companies-all')" },
-        { label: 'Pipeline Value',   val: fmtVal(pipelineValue),  delta: activeDeals.length > 0 ? `${activeDeals.length} active deal${activeDeals.length !== 1 ? 's' : ''}` : null,  up: pipelineValue > 0,                                 click: "showDrilldown('deals-active')" },
-      ].map(k => `
-        <div class="kpi-card cursor-pointer" onclick="${k.click}" title="Click to see details">
-          <div class="kpi-label">${k.label}</div>
-          <div class="kpi-value">${k.val}</div>
-          ${k.delta ? `<div class="kpi-delta ${k.up ? 'up' : 'down'}">${k.up ? '↑' : '↓'} ${k.delta}</div>` : ''}
-        </div>
-      `).join('')}
+        { label: 'Pipeline Value',   value: fmtVal(pipelineValue), icon: _DASH_ICONS.money, color: 'emerald',
+          delta: activeDeals.length > 0 ? `${activeDeals.length} active deal${activeDeals.length !== 1 ? 's' : ''}` : null, up: true, click: "showDrilldown('deals-active')" },
+        { label: 'Active Deals',     value: activeDeals.length,    icon: _DASH_ICONS.deals, color: 'brand',
+          delta: hotDeals.length > 0 ? `${hotDeals.length} hot` : (allDeals.length > 0 ? `${allDeals.length} total` : null), up: true, click: "showDrilldown('deals-active')" },
+        { label: 'Follow-ups Due',   value: _dueTodayCount,        icon: _DASH_ICONS.clock, color: overdueFollowUps.length > 0 ? 'amber' : 'green',
+          delta: overdueFollowUps.length > 0 ? `${overdueFollowUps.length} overdue` : 'all on track', up: overdueFollowUps.length === 0, click: "showDrilldown('contacts-overdue')" },
+        { label: 'Calls This Week',  value: _callsThisWeek,        icon: _DASH_ICONS.phone, color: 'violet',
+          delta: calls.length > 0 ? `${calls.length} total` : null, up: true, click: "showDrilldown('calls-all')" },
+      ].map(renderKpiCard).join('')}
     </div>
 
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
@@ -519,19 +537,15 @@ async function renderDashboard() {
 
   // Deals stats tab HTML
   const dealsStatsHtml = `
-    <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
+    <div class="kpi-grid">
       ${[
-        ['Total Deals', allDeals.length, "showDrilldown('deals-all')"],
-        ['Active', activeDeals.length, "showDrilldown('deals-active')"],
-        ['Hot / High Priority', hotDeals.length, "showDrilldown('deals-hot')"],
-        ['Pipeline Value', fmtVal(pipelineValue), "showDrilldown('deals-active')"],
-      ].map(([label, val, click]) => `
-        <div class="card card-interactive text-center py-5"
-          onclick="${click}" role="button" tabindex="0" title="Click to see details">
-          <p class="stat-value">${val}</p>
-          <p class="stat-label mt-1">${label}</p>
-        </div>
-      `).join('')}
+        { label: 'Total Deals', value: allDeals.length, icon: _DASH_ICONS.deals, color: 'brand', click: "showDrilldown('deals-all')" },
+        { label: 'Active', value: activeDeals.length, icon: _DASH_ICONS.check, color: 'sky',
+          delta: allDeals.length > 0 ? `${Math.round(activeDeals.length / allDeals.length * 100)}% of total` : null, up: true, click: "showDrilldown('deals-active')" },
+        { label: 'Hot / High Priority', value: hotDeals.length, icon: _DASH_ICONS.fire, color: 'rose', click: "showDrilldown('deals-hot')" },
+        { label: 'Pipeline Value', value: fmtVal(pipelineValue), icon: _DASH_ICONS.money, color: 'emerald',
+          delta: activeDeals.length > 0 ? `avg ${fmtVal(Math.round(pipelineValue / activeDeals.length))}` : null, up: true, click: "showDrilldown('deals-active')" },
+      ].map(renderKpiCard).join('')}
     </div>
 
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
