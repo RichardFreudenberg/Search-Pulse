@@ -71,9 +71,23 @@ async function _getMsal(clientId, tenantId) {
     cache: { cacheLocation: 'localStorage', storeAuthStateInCookie: false },
   });
   if (typeof _msalApp.initialize === 'function') await _msalApp.initialize(); // MSAL v3
+  // Resolve any in-flight redirect AND clear stuck "interaction_in_progress"
+  // state left over from an interrupted popup — the main cause of sync working
+  // once and then failing on the next click.
+  try { await _msalApp.handleRedirectPromise(); } catch (_) {}
+  // Make the cached account active so acquireTokenSilent works after a reload.
+  try {
+    if (!_msalApp.getActiveAccount()) {
+      const accts = _msalApp.getAllAccounts();
+      if (accts && accts.length) _msalApp.setActiveAccount(accts[0]);
+    }
+  } catch (_) {}
   _msalClientId = cacheKey;
   return _msalApp;
 }
+
+// Serialize interactive auth so two clicks never open competing popups.
+let _outlookAuthInFlight = null;
 
 function _activeOutlookAccount() {
   if (!_msalApp) return null;
@@ -118,17 +132,38 @@ async function disconnectOutlook() {
   });
 }
 
-async function _outlookToken(silent) {
+async function _outlookToken(silent, forceRefresh = false) {
   const app = _msalApp;
   const account = _activeOutlookAccount();
   if (!app || !account) throw new Error('Not connected');
   try {
-    const r = await app.acquireTokenSilent({ scopes: OUTLOOK_SCOPES, account });
+    const r = await app.acquireTokenSilent({ scopes: OUTLOOK_SCOPES, account, forceRefresh });
     return r.accessToken;
   } catch (e) {
     if (silent) throw e; // never pop up during automatic background sync
-    const r = await app.acquireTokenPopup({ scopes: OUTLOOK_SCOPES });
-    return r.accessToken;
+
+    // Don't open a second popup if one is already running — reuse it.
+    if (_outlookAuthInFlight) {
+      const r = await _outlookAuthInFlight;
+      return r.accessToken;
+    }
+    _outlookAuthInFlight = (async () => {
+      try {
+        return await app.acquireTokenPopup({ scopes: OUTLOOK_SCOPES, account });
+      } catch (err) {
+        // Stuck "interaction_in_progress" from an interrupted popup: clearing it
+        // requires resolving the redirect promise, then a silent retry usually works.
+        if (/interaction_in_progress/i.test(String(err && (err.errorCode || err.message || '')))) {
+          try { await app.handleRedirectPromise(); } catch (_) {}
+          await new Promise(res => setTimeout(res, 300));
+          try { return await app.acquireTokenSilent({ scopes: OUTLOOK_SCOPES, account, forceRefresh: true }); }
+          catch (_) { return await app.acquireTokenPopup({ scopes: OUTLOOK_SCOPES, account }); }
+        }
+        throw err;
+      }
+    })();
+    try { const r = await _outlookAuthInFlight; return r.accessToken; }
+    finally { _outlookAuthInFlight = null; }
   }
 }
 
@@ -150,16 +185,23 @@ async function syncOutlook(opts = {}) {
 
   try {
     await _getMsal(cfg.clientId, cfg.tenantId);
-    const token = await _outlookToken(silent);
+    let token = await _outlookToken(silent);
     const selfEmail = (cfg.account || _activeOutlookAccount()?.username || '').toLowerCase();
 
     const inboxUrl = `${GRAPH_BASE}/me/mailFolders/inbox/messages?$select=from,toRecipients,ccRecipients,receivedDateTime,subject,isRead,conversationId&$top=${_EMAIL_PAGE_SIZE}&$orderby=receivedDateTime desc`;
     const sentUrl  = `${GRAPH_BASE}/me/mailFolders/sentitems/messages?$select=toRecipients,ccRecipients,bccRecipients,sentDateTime,subject,conversationId&$top=${_EMAIL_PAGE_SIZE}&$orderby=sentDateTime desc`;
 
-    const [inbox, sent] = await Promise.all([
-      _graphGet(token, inboxUrl),
-      _graphGet(token, sentUrl),
-    ]);
+    const _fetchBoth = (t) => Promise.all([_graphGet(t, inboxUrl), _graphGet(t, sentUrl)]);
+    let inbox, sent;
+    try {
+      [inbox, sent] = await _fetchBoth(token);
+    } catch (err) {
+      // Stale access token → Graph 401. Force a fresh token and retry once.
+      if (/Graph 401|401/.test(String(err && err.message)) && !silent) {
+        token = await _outlookToken(false, true);
+        [inbox, sent] = await _fetchBoth(token);
+      } else { throw err; }
+    }
 
     const contacts = getActiveContacts(await DB.getForUser(STORES.contacts, currentUser.id));
     const result = await _processEmailData(inbox.value || [], sent.value || [], contacts, selfEmail);
