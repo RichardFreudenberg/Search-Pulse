@@ -165,7 +165,10 @@ function _brokerFirmRowHtml(f) {
 }
 
 /* ─── Firm detail: the firm's individual contacts + touchpoints + summaries ──── */
-async function viewBrokerFirm(companyId) {
+async function viewBrokerFirm(companyId, opts = {}) {
+  if (typeof currentPage !== 'undefined') currentPage = 'broker-firm';
+  if (!opts.fromRoute) { try { history.pushState({ page: 'broker-firm', param: companyId }, '', '#broker-firm/' + companyId); } catch (_) {} }
+  if (typeof switchNavTab === 'function') switchNavTab('deals');
   const container = document.getElementById('page-content');
   if (!container) return;
   container.innerHTML = `<div class="p-4 lg:p-8 max-w-5xl mx-auto">${renderLoadingSkeleton(4)}</div>`;
@@ -208,7 +211,7 @@ async function viewBrokerFirm(companyId) {
 
   container.innerHTML = `
     <div class="p-4 lg:p-8 max-w-5xl mx-auto animate-fade-in">
-      <button onclick="renderBrokers()" class="btn-ghost mb-4 -ml-2">
+      <button onclick="navigate('brokers')" class="btn-ghost mb-4 -ml-2">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.75 19.5L8.25 12l7.5-7.5"/></svg>
         Back to brokers
       </button>

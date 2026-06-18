@@ -225,7 +225,8 @@ async function syncOutlook(opts = {}) {
     const recentActivity = recentRaw.slice(0, 30).map(r => ({ ...r, isContact: !!byEmailLc[r.email] }));
     const newSenders = recentActivity.filter(r => !r.isContact).length;
 
-    await _saveOutlookCfg({ lastSyncAt: new Date().toISOString(), lastSyncMatched: result.matched, recentActivity });
+    console.info(`[Outlook] sync ok — ${(inbox.value || []).length} inbox + ${(sent.value || []).length} sent pulled, ${result.matched} contacts matched, ${result.needsReply} reply-due (${silent ? 'auto' : 'manual'})`);
+    await _saveOutlookCfg({ lastSyncAt: new Date().toISOString(), lastSyncMatched: result.matched, lastSyncStatus: 'ok', lastSyncError: null, recentActivity });
     if (silent) {
       if (result.needsReply) showToast(`Auto-synced inbox — ${result.needsReply} awaiting your reply`, 'info');
     } else {
@@ -245,9 +246,10 @@ async function syncOutlook(opts = {}) {
     console.error('[Outlook] sync failed:', err);
     const msg = String(err && (err.errorCode || err.errorMessage || err.message || ''));
     const authIssue = /interaction_required|login_required|consent|invalid_grant|token|AADSTS|popup|user_cancelled|no_account|Not connected/i.test(msg);
+    await _saveOutlookCfg({ lastSyncStatus: authIssue ? 'auth' : 'error', lastSyncError: msg.slice(0, 300), lastSyncErrorAt: new Date().toISOString() }).catch(() => {});
     if (!silent) {
       showToast(authIssue ? 'Microsoft sign-in expired — click Reconnect to resume syncing' : ('Sync failed: ' + (err.errorMessage || err.message || 'unknown error')), authIssue ? 'warning' : 'error');
-      if (authIssue && currentPage === 'email') renderEmailHub();
+      if (currentPage === 'email') renderEmailHub();
     }
   } finally {
     _emailSyncing = false;
@@ -598,6 +600,12 @@ async function renderEmailHub() {
           <button onclick="connectOutlook()" class="btn-primary btn-sm flex-shrink-0">Reconnect Microsoft</button>
         </div>
       ` : ''}
+
+      ${(tokenOk && cfg.lastSyncStatus === 'error' && cfg.lastSyncError) ? `
+        <div class="text-xs text-red-500 dark:text-red-400 mb-4 flex items-start gap-1.5">
+          <svg class="w-3.5 h-3.5 flex-shrink-0 mt-px" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z"/></svg>
+          <span>Last sync hit an error: ${escapeHtml(cfg.lastSyncError)}. Click <b>Sync now</b> to retry.</span>
+        </div>` : ''}
 
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <!-- Needs your reply -->

@@ -1164,7 +1164,11 @@ async function saveNewContact() {
   navigate('contacts');
 }
 
-async function viewContact(contactId) {
+async function viewContact(contactId, opts = {}) {
+  // History-managed route: pushing state makes Back/Forward + deep links work.
+  if (typeof currentPage !== 'undefined') currentPage = 'contact';
+  if (!opts.fromRoute) { try { history.pushState({ page: 'contact', param: contactId }, '', '#contact/' + contactId); } catch (_) {} }
+  if (typeof switchNavTab === 'function') switchNavTab('relationships');
   const pageContent = document.getElementById('page-content');
   pageContent.innerHTML = `<div class="p-4 lg:p-8 max-w-5xl mx-auto">${renderLoadingSkeleton(5)}</div>`;
 

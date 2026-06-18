@@ -12,10 +12,13 @@ const VALID_PAGES = new Set([
   'email-templates','brokers',
   'pipeline-company',  // /#pipeline-company/<id> — full-page detail view
   'deal',              // /#deal/<id>/<tab> — full-page deal detail view
+  'contact',           // /#contact/<id> — contact detail
+  'company',           // /#company/<id> — company detail
+  'broker-firm',       // /#broker-firm/<companyId> — broker firm detail
 ]);
 
 // Nav tab switcher
-const DEALS_PAGES = new Set(['deals','deal-search','company-scout','sourcing','shared-dashboard','email-templates','brokers','pipeline-company','deal']);
+const DEALS_PAGES = new Set(['deals','deal-search','company-scout','sourcing','shared-dashboard','email-templates','brokers','pipeline-company','deal','broker-firm']);
 
 function switchNavTab(tab) {
   const relPanel  = document.getElementById('nav-panel-relationships');
@@ -101,6 +104,18 @@ function navigate(pageInput, { pushState = true } = {}) {
       } else {
         renderDeals();
       }
+      break;
+    case 'contact':
+      if (param && typeof viewContact === 'function') viewContact(param, { fromRoute: true });
+      else renderContacts();
+      break;
+    case 'company':
+      if (param && typeof viewCompany === 'function') viewCompany(param, { fromRoute: true });
+      else renderCompanies();
+      break;
+    case 'broker-firm':
+      if (param && typeof viewBrokerFirm === 'function') viewBrokerFirm(param, { fromRoute: true });
+      else renderBrokers();
       break;
     default: renderDashboard();
   }

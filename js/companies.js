@@ -102,7 +102,10 @@ function _companiesPaint() {
   }
 }
 
-async function viewCompany(companyId) {
+async function viewCompany(companyId, opts = {}) {
+  if (typeof currentPage !== 'undefined') currentPage = 'company';
+  if (!opts.fromRoute) { try { history.pushState({ page: 'company', param: companyId }, '', '#company/' + companyId); } catch (_) {} }
+  if (typeof switchNavTab === 'function') switchNavTab('relationships');
   const [company, contacts] = await Promise.all([
     DB.get(STORES.companies, companyId),
     DB.getForUser(STORES.contacts, currentUser.id),
