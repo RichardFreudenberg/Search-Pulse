@@ -201,7 +201,12 @@ async function syncOutlook(opts = {}) {
       .catch(() => {});
   } catch (err) {
     console.error('[Outlook] sync failed:', err);
-    if (!silent) showToast('Sync failed: ' + (err.errorMessage || err.message || 'unknown error'), 'error');
+    const msg = String(err && (err.errorCode || err.errorMessage || err.message || ''));
+    const authIssue = /interaction_required|login_required|consent|invalid_grant|token|AADSTS|popup|user_cancelled|no_account|Not connected/i.test(msg);
+    if (!silent) {
+      showToast(authIssue ? 'Microsoft sign-in expired — click Reconnect to resume syncing' : ('Sync failed: ' + (err.errorMessage || err.message || 'unknown error')), authIssue ? 'warning' : 'error');
+      if (authIssue && currentPage === 'email') renderEmailHub();
+    }
   } finally {
     _emailSyncing = false;
     if (btn) { btn.disabled = false; if (btn.dataset.label) btn.innerHTML = btn.dataset.label; }
@@ -500,8 +505,14 @@ async function renderEmailHub() {
   const cfg = await _outlookCfg();
   const connected = !!cfg.clientId && !!cfg.account;
 
-  // Re-hydrate MSAL silently so "connected" survives refreshes
-  if (cfg.clientId) { try { await _getMsal(cfg.clientId, cfg.tenantId); } catch (_) {} }
+  // Re-hydrate MSAL and probe the token silently. If the session expired or this
+  // browser has no cached token, we show a Reconnect prompt rather than letting
+  // auto-sync fail silently (the usual "it stopped working" cause).
+  let tokenOk = false;
+  if (cfg.clientId) {
+    try { await _getMsal(cfg.clientId, cfg.tenantId); await _outlookToken(true); tokenOk = true; }
+    catch (_) { tokenOk = false; }
+  }
 
   if (!connected) { pageContent.innerHTML = _emailSetupView(cfg); return; }
 
@@ -532,6 +543,19 @@ async function renderEmailHub() {
         </button>
         <button onclick="disconnectOutlook()" class="btn-ghost text-surface-500 text-sm">Disconnect</button>
       `)}
+
+      ${!tokenOk ? `
+        <div class="card mb-5 border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 flex items-center justify-between gap-3 flex-wrap">
+          <div class="flex items-center gap-2.5">
+            <svg class="w-5 h-5 text-amber-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z"/></svg>
+            <div>
+              <p class="text-sm font-semibold text-amber-800 dark:text-amber-300">Microsoft session expired — auto-sync is paused</p>
+              <p class="text-xs text-amber-700 dark:text-amber-400">Your sign-in token is no longer valid on this browser. Reconnect to resume syncing emails.</p>
+            </div>
+          </div>
+          <button onclick="connectOutlook()" class="btn-primary btn-sm flex-shrink-0">Reconnect Microsoft</button>
+        </div>
+      ` : ''}
 
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <!-- Needs your reply -->
