@@ -134,8 +134,24 @@ async function disconnectOutlook() {
 
 async function _outlookToken(silent, forceRefresh = false) {
   const app = _msalApp;
+  if (!app) throw new Error('Not connected');
   const account = _activeOutlookAccount();
-  if (!app || !account) throw new Error('Not connected');
+  // No cached account (cleared cookies / fresh device): a background sync can't
+  // recover, but a manual sync should offer a clean sign-in instead of failing.
+  if (!account) {
+    if (silent) throw new Error('Not connected');
+    if (_outlookAuthInFlight) { const r = await _outlookAuthInFlight; return r.accessToken; }
+    _outlookAuthInFlight = (async () => {
+      const resp = await app.loginPopup({ scopes: OUTLOOK_SCOPES, prompt: 'select_account' });
+      if (resp && resp.account) {
+        app.setActiveAccount(resp.account);
+        try { await _saveOutlookCfg({ account: resp.account.username || '', connectedAt: new Date().toISOString() }); } catch (_) {}
+      }
+      return resp;
+    })();
+    try { const r = await _outlookAuthInFlight; return r.accessToken; }
+    finally { _outlookAuthInFlight = null; }
+  }
   try {
     const r = await app.acquireTokenSilent({ scopes: OUTLOOK_SCOPES, account, forceRefresh });
     return r.accessToken;
@@ -148,18 +164,31 @@ async function _outlookToken(silent, forceRefresh = false) {
       return r.accessToken;
     }
     _outlookAuthInFlight = (async () => {
+      // Step 1 — try interactive token for the cached account (no account picker).
       try {
         return await app.acquireTokenPopup({ scopes: OUTLOOK_SCOPES, account });
       } catch (err) {
-        // Stuck "interaction_in_progress" from an interrupted popup: clearing it
-        // requires resolving the redirect promise, then a silent retry usually works.
-        if (/interaction_in_progress/i.test(String(err && (err.errorCode || err.message || '')))) {
+        const code = String(err && (err.errorCode || err.message || ''));
+        // The user deliberately closed the popup — respect that, don't reopen.
+        if (/user_cancelled|user_canceled|popup_window_error|block/i.test(code)) throw err;
+        // Stuck "interaction_in_progress" from an interrupted popup: resolve the
+        // redirect promise, then a forced-silent retry usually clears it.
+        if (/interaction_in_progress/i.test(code)) {
           try { await app.handleRedirectPromise(); } catch (_) {}
           await new Promise(res => setTimeout(res, 300));
           try { return await app.acquireTokenSilent({ scopes: OUTLOOK_SCOPES, account, forceRefresh: true }); }
-          catch (_) { return await app.acquireTokenPopup({ scopes: OUTLOOK_SCOPES, account }); }
+          catch (_) { /* fall through to full sign-in */ }
         }
-        throw err;
+        // Step 2 — the cached session is unusable (expired/revoked refresh token,
+        // wrong/stale account, no_account, invalid_grant, consent changes…).
+        // Self-heal with a clean interactive sign-in so a single click on "Sync"
+        // always ends in a working session instead of dead-ending on "Reconnect".
+        const resp = await app.loginPopup({ scopes: OUTLOOK_SCOPES, prompt: 'select_account' });
+        if (resp && resp.account) {
+          app.setActiveAccount(resp.account);
+          try { await _saveOutlookCfg({ account: resp.account.username || '', connectedAt: new Date().toISOString() }); } catch (_) {}
+        }
+        return resp;
       }
     })();
     try { const r = await _outlookAuthInFlight; return r.accessToken; }
@@ -186,7 +215,9 @@ async function syncOutlook(opts = {}) {
   try {
     await _getMsal(cfg.clientId, cfg.tenantId);
     let token = await _outlookToken(silent);
-    const selfEmail = (cfg.account || _activeOutlookAccount()?.username || '').toLowerCase();
+    // Prefer the live signed-in account (a self-heal re-login may have changed it
+    // since `cfg` was read), falling back to the stored config.
+    const selfEmail = (_activeOutlookAccount()?.username || cfg.account || '').toLowerCase();
 
     const inboxUrl = `${GRAPH_BASE}/me/mailFolders/inbox/messages?$select=from,toRecipients,ccRecipients,receivedDateTime,subject,isRead,conversationId&$top=${_EMAIL_PAGE_SIZE}&$orderby=receivedDateTime desc`;
     const sentUrl  = `${GRAPH_BASE}/me/mailFolders/sentitems/messages?$select=toRecipients,ccRecipients,bccRecipients,sentDateTime,subject,conversationId&$top=${_EMAIL_PAGE_SIZE}&$orderby=sentDateTime desc`;
@@ -593,8 +624,8 @@ async function renderEmailHub() {
           <div class="flex items-center gap-2.5">
             <svg class="w-5 h-5 text-amber-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z"/></svg>
             <div>
-              <p class="text-sm font-semibold text-amber-800 dark:text-amber-300">Microsoft session expired — auto-sync is paused</p>
-              <p class="text-xs text-amber-700 dark:text-amber-400">Your sign-in token is no longer valid on this browser. Reconnect to resume syncing emails.</p>
+              <p class="text-sm font-semibold text-amber-800 dark:text-amber-300">Microsoft session needs a refresh — automatic background sync is paused</p>
+              <p class="text-xs text-amber-700 dark:text-amber-400">Click <b>Sync now</b> (or Reconnect) — you'll get a quick Microsoft sign-in and the sync runs immediately. Once signed in, auto-sync resumes too.</p>
             </div>
           </div>
           <button onclick="connectOutlook()" class="btn-primary btn-sm flex-shrink-0">Reconnect Microsoft</button>
