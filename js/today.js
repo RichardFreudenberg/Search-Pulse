@@ -55,11 +55,12 @@ function _todayPaint(focusInput) {
   // ── Tasks ──
   const openTodos = todos.filter(t => !t.done && (!t.date || t.date <= today))
     .sort((a, b) => (a.date || '').localeCompare(b.date || '') || new Date(a.createdAt || 0) - new Date(b.createdAt || 0));
-  const dueDealTasks = dealTasks.filter(t => t.status !== 'done' && t.dueDate && t.dueDate.slice(0, 10) <= today)
+  const dueDealTasks = dealTasks.filter(t => t.status !== 'done' && t.status !== 'dismissed' && t.dueDate && t.dueDate.slice(0, 10) <= today)
     .sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate));
 
-  // ── Replies due (emails awaiting you) ──
-  const replyDue = activeContacts.filter(c => c.emailStats && c.emailStats.awaiting === 'you')
+  // ── Replies due (emails awaiting you) — respects dismissal ──
+  const _needsReply = (typeof emailNeedsReply === 'function') ? emailNeedsReply : (c => c.emailStats && c.emailStats.awaiting === 'you');
+  const replyDue = activeContacts.filter(_needsReply)
     .sort((a, b) => new Date(a.emailStats.lastInboundAt || 0) - new Date(b.emailStats.lastInboundAt || 0));
 
   // ── Follow-ups & reminders ──
@@ -67,7 +68,7 @@ function _todayPaint(focusInput) {
     .sort((a, b) => new Date(a.nextFollowUpDate) - new Date(b.nextFollowUpDate));
   const dueReminders = reminders.filter(r => (r.status === 'pending' || r.status === 'snoozed') && r.dueDate && r.dueDate.slice(0, 10) <= today)
     .sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate));
-  const dueCallFollowUps = calls.filter(c => c.followUpDate && (c.nextSteps || (c.tasks && c.tasks.length)) && c.followUpDate.slice(0, 10) <= today)
+  const dueCallFollowUps = calls.filter(c => !c.followUpHandled && c.followUpDate && (c.nextSteps || (c.tasks && c.tasks.length)) && c.followUpDate.slice(0, 10) <= today)
     .sort((a, b) => new Date(a.followUpDate) - new Date(b.followUpDate)).slice(0, 15);
 
   // ── Stay in touch (cadence-due) — minus anyone already surfaced above ──
@@ -156,6 +157,13 @@ function _todayActionBtn(onclick, label, cls) {
   return `<button onclick="event.stopPropagation(); ${onclick}" class="btn-ghost btn-xs ${cls || 'text-surface-500'} flex-shrink-0">${label}</button>`;
 }
 
+// Universal Dismiss (✕) — clears an item from your action lists.
+function _todayDismiss(onclick) {
+  return `<button onclick="event.stopPropagation(); ${onclick}" title="Dismiss" class="flex-shrink-0 p-1 rounded text-surface-300 hover:text-red-500 dark:text-surface-600 transition-colors">
+    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+  </button>`;
+}
+
 function _todayTodoRow(t) {
   return `
     <div class="flex items-center gap-3 py-2.5 group">
@@ -180,6 +188,7 @@ function _todayDealTaskRow(t, deal) {
         ${deal ? `<button onclick="viewDeal('${deal.id}')" class="text-[11px] text-brand-500 hover:underline">${escapeHtml(deal.name)}</button>` : ''}
       </div>
       <span class="text-[10px] px-1.5 py-0.5 rounded-full bg-orange-50 dark:bg-orange-900/20 text-orange-600 dark:text-orange-400 flex-shrink-0">Deal</span>
+      ${_todayDismiss(`todayDismissDealTask('${t.id}')`)}
     </div>`;
 }
 
@@ -194,6 +203,7 @@ function _todayReplyRow(c, company) {
         <div class="text-xs text-surface-500 truncate">${subj ? escapeHtml(subj) : 'Awaiting your reply'}${when ? ` · ${when}` : ''}</div>
       </div>
       ${_todayActionBtn(`outlookEmailAI('${c.id}','draft')`, 'Draft reply', 'text-brand-600')}
+      ${_todayDismiss(`todayDismissReply('${c.id}')`)}
     </div>`;
 }
 
@@ -209,6 +219,7 @@ function _todayFollowUpRow(c, company) {
       </div>
       ${_todayActionBtn(`todayDoneFollowUp('${c.id}')`, 'Done', 'text-green-600')}
       ${_todayActionBtn(`todaySnoozeFollowUp('${c.id}')`, 'Snooze')}
+      ${_todayDismiss(`todayDismissFollowUp('${c.id}')`)}
     </div>`;
 }
 
@@ -223,6 +234,7 @@ function _todayReminderRow(r, contact) {
       </div>
       ${_todayActionBtn(`todayCompleteReminder('${r.id}')`, 'Done', 'text-green-600')}
       ${_todayActionBtn(`todaySnoozeReminder('${r.id}')`, 'Snooze')}
+      ${_todayDismiss(`todayDismissReminder('${r.id}')`)}
     </div>`;
 }
 
@@ -236,6 +248,7 @@ function _todayCallRow(call, contact) {
         ${contact ? `<span class="text-[11px] text-surface-400">Re: ${escapeHtml(contact.fullName)}</span>` : ''}
       </div>
       <span class="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 flex-shrink-0">Call</span>
+      ${_todayDismiss(`todayDismissCall('${call.id}')`)}
     </div>`;
 }
 
@@ -253,6 +266,7 @@ function _todayTouchRow(c, company) {
       </div>
       ${_todayActionBtn(`openNewCallModal('${c.id}')`, 'Log call', 'text-brand-600')}
       ${_todayActionBtn(`todaySnoozeTouch('${c.id}')`, 'Snooze')}
+      ${_todayDismiss(`todayDismissTouch('${c.id}')`)}
     </div>`;
 }
 
@@ -335,5 +349,57 @@ async function todaySnoozeTouch(contactId, days = 7) {
   const next = new Date(); next.setDate(next.getDate() + days);
   await DB.put(STORES.contacts, { ...c, cadenceSnoozeUntil: next.toISOString() }).catch(() => {});
   showToast(`Snoozed ${days} days`, 'info');
+  renderToday();
+}
+
+// ── Dismiss (✕) — clears an item from the action lists ───────
+async function todayDismissDealTask(id) {
+  const t = await DB.get(STORES.dealTasks, id);
+  if (t) await DB.put(STORES.dealTasks, { ...t, status: 'dismissed', dismissedAt: new Date().toISOString() }).catch(() => {});
+  showToast('Dismissed', 'info');
+  renderToday();
+}
+
+async function todayDismissReply(contactId) {
+  const c = await DB.get(STORES.contacts, contactId);
+  if (c && c.emailStats) {
+    // Mark the current inbound as handled; a newer email will re-surface it.
+    const es = { ...c.emailStats, dismissedAt: c.emailStats.lastInboundAt || new Date().toISOString() };
+    await DB.put(STORES.contacts, { ...c, emailStats: es }).catch(() => {});
+  }
+  showToast('Dismissed — a new email will bring it back', 'info');
+  renderToday();
+}
+
+async function todayDismissFollowUp(contactId) {
+  const c = await DB.get(STORES.contacts, contactId);
+  if (c) await DB.put(STORES.contacts, { ...c, nextFollowUpDate: null }).catch(() => {});
+  showToast('Dismissed', 'info');
+  renderToday();
+}
+
+async function todayDismissReminder(id) {
+  const r = await DB.get(STORES.reminders, id);
+  if (r) await DB.put(STORES.reminders, { ...r, status: 'dismissed' }).catch(() => {});
+  showToast('Dismissed', 'info');
+  renderToday();
+  if (typeof checkReminders === 'function') checkReminders();
+}
+
+async function todayDismissCall(callId) {
+  const call = await DB.get(STORES.calls, callId);
+  if (call) await DB.put(STORES.calls, { ...call, followUpHandled: true }).catch(() => {});
+  showToast('Dismissed', 'info');
+  renderToday();
+}
+
+async function todayDismissTouch(contactId) {
+  // Dismiss a stay-in-touch nudge for a full cadence cycle (re-fires next cycle).
+  const c = await DB.get(STORES.contacts, contactId);
+  if (!c) return;
+  const days = (typeof getCadenceDays === 'function' ? getCadenceDays(c) : 0) || 30;
+  const next = new Date(); next.setDate(next.getDate() + days);
+  await DB.put(STORES.contacts, { ...c, cadenceSnoozeUntil: next.toISOString() }).catch(() => {});
+  showToast('Dismissed for this cycle', 'info');
   renderToday();
 }

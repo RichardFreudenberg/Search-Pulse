@@ -482,7 +482,7 @@ async function renderDashboard() {
     });
   })();
   const _newContactsThisMonth = contactMonthData.length ? contactMonthData[contactMonthData.length - 1] : 0;
-  const _replyDue = activeContacts.filter(c => c.emailStats && c.emailStats.awaiting === 'you').length;
+  const _replyDue = activeContacts.filter(c => typeof emailNeedsReply === 'function' ? emailNeedsReply(c) : (c.emailStats && c.emailStats.awaiting === 'you')).length;
   const _goingCold = typeof getReconnectContacts === 'function' ? getReconnectContacts(activeContacts).length : stale;
 
   // Greeting computation

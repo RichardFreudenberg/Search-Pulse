@@ -143,7 +143,7 @@ async function refreshTodoBadge() {
       DB.getForUser(STORES.reminders, currentUser.id).catch(() => []),
     ]);
     const n = todos.filter(t => t.date === todayStr && !t.done).length
-            + dealTasks.filter(t => t.status !== 'done' && t.dueDate && t.dueDate.slice(0,10) <= todayStr).length
+            + dealTasks.filter(t => t.status !== 'done' && t.status !== 'dismissed' && t.dueDate && t.dueDate.slice(0,10) <= todayStr).length
             + reminders.filter(r => (r.status === 'pending' || r.status === 'snoozed') && r.dueDate && r.dueDate.slice(0,10) <= todayStr).length;
     const badge = document.getElementById('todo-badge');
     if (badge) {
@@ -214,7 +214,7 @@ async function _renderTodayTab(body, dateStr) {
   const done    = dayTodos.filter(t =>  t.done);
 
   const dueDealTasks = dealTasks
-    .filter(t => t.status !== 'done' && t.dueDate && t.dueDate.slice(0,10) <= dateStr)
+    .filter(t => t.status !== 'done' && t.status !== 'dismissed' && t.dueDate && t.dueDate.slice(0,10) <= dateStr)
     .sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate));
 
   const dueReminders = reminders
@@ -222,7 +222,7 @@ async function _renderTodayTab(body, dateStr) {
     .sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate));
 
   const dueCallFollowUps = calls
-    .filter(c => c.followUpDate && (c.nextSteps || (c.tasks && c.tasks.length)) && c.followUpDate.slice(0,10) <= dateStr)
+    .filter(c => !c.followUpHandled && c.followUpDate && (c.nextSteps || (c.tasks && c.tasks.length)) && c.followUpDate.slice(0,10) <= dateStr)
     .sort((a, b) => new Date(a.followUpDate) - new Date(b.followUpDate))
     .slice(0, 10);
 
@@ -489,6 +489,7 @@ function _renderDealTaskRow(task, deal, dateStr) {
       </div>
       ${overdue ? `<span class="text-[9px] text-red-500 font-semibold flex-shrink-0">OD</span>` : ''}
       <span class="text-[9px] px-1 py-0.5 rounded-full bg-orange-50 dark:bg-orange-900/20 text-orange-600 dark:text-orange-400 flex-shrink-0">Deal</span>
+      ${_todoDismissBtn(`_dismissDealTaskFromTodo('${task.id}')`)}
     </div>`;
 }
 
@@ -505,6 +506,7 @@ function _renderReminderRow(reminder, contact, dateStr) {
       </div>
       ${overdue ? `<span class="text-[9px] text-red-500 font-semibold flex-shrink-0">OD</span>` : ''}
       <span class="text-[9px] px-1 py-0.5 rounded-full bg-purple-50 dark:bg-purple-900/20 text-purple-600 dark:text-purple-400 flex-shrink-0">Reminder</span>
+      ${_todoDismissBtn(`_dismissReminderFromTodo('${reminder.id}')`)}
     </div>`;
 }
 
@@ -522,6 +524,7 @@ function _renderCallFollowUpRow(call, contact, dateStr) {
       </div>
       ${overdue ? `<span class="text-[9px] text-red-500 font-semibold flex-shrink-0">OD</span>` : ''}
       <span class="text-[9px] px-1 py-0.5 rounded-full bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 flex-shrink-0">Call</span>
+      ${_todoDismissBtn(`_dismissCallFollowUpFromTodo('${call.id}')`)}
     </div>`;
 }
 
@@ -600,4 +603,35 @@ async function _completeReminderFromTodo(reminderId) {
   showToast('Reminder done ✓', 'success');
   renderTodoPanelContent();
   if (typeof checkReminders === 'function') checkReminders();
+}
+
+// ─── Dismiss (✕) — clears an item from the panel without completing it ─────────
+
+function _todoDismissBtn(onclick) {
+  return `<button onclick="${onclick}" title="Dismiss"
+    class="flex-shrink-0 p-0.5 rounded text-surface-300 hover:text-red-500 dark:text-surface-600 dark:hover:text-red-400 transition-colors">
+    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+  </button>`;
+}
+
+async function _dismissDealTaskFromTodo(taskId) {
+  const t = await DB.get(STORES.dealTasks, taskId);
+  if (t) await DB.put(STORES.dealTasks, { ...t, status: 'dismissed', dismissedAt: new Date().toISOString() }).catch(() => {});
+  showToast('Dismissed', 'info');
+  renderTodoPanelContent();
+}
+
+async function _dismissReminderFromTodo(reminderId) {
+  const r = await DB.get(STORES.reminders, reminderId);
+  if (r) await DB.put(STORES.reminders, { ...r, status: 'dismissed' }).catch(() => {});
+  showToast('Dismissed', 'info');
+  renderTodoPanelContent();
+  if (typeof checkReminders === 'function') checkReminders();
+}
+
+async function _dismissCallFollowUpFromTodo(callId) {
+  const call = await DB.get(STORES.calls, callId);
+  if (call) await DB.put(STORES.calls, { ...call, followUpHandled: true }).catch(() => {});
+  showToast('Dismissed', 'info');
+  renderTodoPanelContent();
 }

@@ -32,6 +32,19 @@ let _msalApp = null;
 let _msalClientId = null;
 let _emailSyncing = false;
 
+/**
+ * Whether a contact still owes you a reply — single source of truth used by the
+ * Inbox, the Today cockpit, and the dashboard so a dismissed reply stays
+ * dismissed everywhere. Dismissing marks emailStats.dismissedAt = the inbound
+ * timestamp that was dismissed; a NEWER inbound email re-surfaces it.
+ */
+function emailNeedsReply(contact) {
+  const es = contact && contact.emailStats;
+  if (!es || es.awaiting !== 'you') return false;
+  if (es.dismissedAt && es.lastInboundAt && es.dismissedAt >= es.lastInboundAt) return false;
+  return true;
+}
+
 // ── Config persistence (in the user's settings doc) ──────────
 async function _outlookCfg() {
   try {
@@ -596,7 +609,7 @@ async function renderEmailHub() {
   const companyMap = buildMap(companies);
 
   const withStats = contacts.filter(c => c.emailStats && c.emailStats.awaiting);
-  const needsReply = withStats.filter(c => c.emailStats.awaiting === 'you')
+  const needsReply = withStats.filter(emailNeedsReply)
     .sort((a, b) => new Date(b.emailStats.lastInboundAt || 0) - new Date(a.emailStats.lastInboundAt || 0));
   const awaiting = withStats.filter(c => c.emailStats.awaiting === 'them')
     .sort((a, b) => new Date(a.emailStats.lastOutboundAt || 0) - new Date(b.emailStats.lastOutboundAt || 0)); // oldest waits first
