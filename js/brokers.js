@@ -4,6 +4,7 @@
 
 /* ─── Module state ──────────────────────────────────────────────────────────── */
 let _brokerFilter   = 'all'; // 'all' | 'active' | 'inactive'
+let _brokerSort     = 'recent'; // 'recent' | 'name' | 'contacts' | 'category'
 let _brokerSearch   = '';
 let _brokerEditingId = null; // for safe modal save onclick
 let _brokerView     = localStorage.getItem('pulse_broker_view') || 'cards'; // 'cards' | 'list'
@@ -97,6 +98,7 @@ function _brokerFirmsMainHtml(firms) {
       f.contacts.some(c => (c.fullName || '').toLowerCase().includes(q) || (c.title || '').toLowerCase().includes(q));
     return matchStatus && matchSearch;
   });
+  filtered = _sortBrokerFirms(filtered, _brokerSort);
   const activeCount = firms.filter(f => f.lastContact && f.lastContact >= thirty).length;
   const chip = (key, label, count) => `<button onclick="_brokerSetFilter('${key}')" class="px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap ${_brokerFilter === key ? 'bg-brand-600 text-white shadow-sm' : 'bg-surface-100 text-surface-600 hover:bg-surface-200 dark:bg-surface-700 dark:text-surface-300'}">${label} <span class="opacity-60">${count}</span></button>`;
 
@@ -115,9 +117,17 @@ function _brokerFirmsMainHtml(firms) {
         </div>
         <div class="flex gap-1.5">${chip('all', 'All', firms.length)}${chip('active', 'Active', activeCount)}${chip('inactive', 'Need Attention', firms.length - activeCount)}</div>
       </div>
+      <div class="flex items-center gap-2 shrink-0">
+      <select onchange="_brokerSetSort(this.value)" class="input-field w-auto text-sm" style="max-width: 170px">
+        <option value="recent" ${_brokerSort === 'recent' ? 'selected' : ''}>Last contacted</option>
+        <option value="name" ${_brokerSort === 'name' ? 'selected' : ''}>Name A–Z</option>
+        <option value="contacts" ${_brokerSort === 'contacts' ? 'selected' : ''}>Most contacts</option>
+        <option value="category" ${_brokerSort === 'category' ? 'selected' : ''}>Category A–Z</option>
+      </select>
       <div class="flex border border-surface-200 dark:border-surface-700 rounded-lg overflow-hidden shrink-0">
         <button onclick="_brokerSetView('cards')" class="p-2 ${_brokerView === 'cards' ? 'bg-surface-200 dark:bg-surface-700' : 'hover:bg-surface-100 dark:hover:bg-surface-800'}" title="Card view"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z"/></svg></button>
         <button onclick="_brokerSetView('list')" class="p-2 ${_brokerView === 'list' ? 'bg-surface-200 dark:bg-surface-700' : 'hover:bg-surface-100 dark:hover:bg-surface-800'}" title="List view"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3.75 5.25h16.5m-16.5 4.5h16.5m-16.5 4.5h16.5m-16.5 4.5h16.5"/></svg></button>
+      </div>
       </div>
     </div>
     ${body}`;
@@ -786,6 +796,21 @@ function _brokerSetFilter(filter) {
 function _brokerSetSearch(val) {
   _brokerSearch = val;
   _brokerFirmsRefresh();
+}
+
+function _brokerSetSort(val) {
+  _brokerSort = val;
+  _brokerFirmsRefresh();
+}
+
+function _sortBrokerFirms(list, sort) {
+  const arr = [...list];
+  const byName = (a, b) => (a.name || '').localeCompare(b.name || '');
+  if (sort === 'name')          arr.sort(byName);
+  else if (sort === 'contacts') arr.sort((a, b) => (b.count || 0) - (a.count || 0) || byName(a, b));
+  else if (sort === 'category') arr.sort((a, b) => (a.category || '~').localeCompare(b.category || '~') || byName(a, b));
+  else                          arr.sort((a, b) => (b.lastContact || '').localeCompare(a.lastContact || '') || byName(a, b)); // recent
+  return arr;
 }
 
 /* ─── AI: Suggest Re-engagement Outreach ────────────────────────────────────── */

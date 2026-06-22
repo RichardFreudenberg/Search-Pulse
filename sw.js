@@ -5,7 +5,7 @@
    cached index.html can never keep serving old code.
    ============================================================ */
 
-const SW_VERSION = '20260620b';
+const SW_VERSION = '20260620c';
 
 // Install: activate immediately, don't wait for old tabs to close
 self.addEventListener('install', () => self.skipWaiting());

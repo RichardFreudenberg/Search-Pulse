@@ -9,6 +9,8 @@ function companyTypeOptions(selected = '') {
 }
 
 let companiesSearch = '';
+let companiesSort = 'name';      // name | recent | contacts | added | industry
+let companiesIndustry = '';      // '' = all industries
 let _companiesCache = null;
 
 async function renderCompanies() {
@@ -38,14 +40,28 @@ function _companiesPaint() {
   const contactCounts = {};
   activeContacts.forEach(c => { if (c.companyId) contactCounts[c.companyId] = (contactCounts[c.companyId] || 0) + 1; });
 
+  // Latest contact date per company (from its people) — powers "Last contacted" sort.
+  const lastContactByCo = {};
+  activeContacts.forEach(c => {
+    if (!c.companyId || !c.lastContactDate) return;
+    if (!lastContactByCo[c.companyId] || c.lastContactDate > lastContactByCo[c.companyId]) lastContactByCo[c.companyId] = c.lastContactDate;
+  });
+
+  // Distinct industries for the filter dropdown.
+  const industries = [...new Set(allCos.map(c => (c.industry || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+
   const q = companiesSearch.trim().toLowerCase();
-  let companies = allCos.filter(c => !q ||
-    (c.name || '').toLowerCase().includes(q) ||
-    (c.industry || '').toLowerCase().includes(q) ||
-    (c.description || '').toLowerCase().includes(q) ||
-    (c.location || '').toLowerCase().includes(q) ||
-    (c.website || '').toLowerCase().includes(q));
-  companies.sort((a, b) => a.name.localeCompare(b.name));
+  let companies = allCos.filter(c => {
+    if (companiesIndustry && (c.industry || '') !== companiesIndustry) return false;
+    if (!q) return true;
+    return (c.name || '').toLowerCase().includes(q) ||
+      (c.industry || '').toLowerCase().includes(q) ||
+      (c.description || '').toLowerCase().includes(q) ||
+      (c.location || '').toLowerCase().includes(q) ||
+      (c.website || '').toLowerCase().includes(q);
+  });
+  companies = _sortCompanies(companies, companiesSort, { contactCounts, lastContactByCo });
+  const filtersActive = !!(companiesSearch || companiesIndustry);
 
   const grid = `
     <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
@@ -60,6 +76,7 @@ function _companiesPaint() {
               <div class="flex items-center gap-3 mt-2 text-xs text-surface-500">
                 <span>${contactCounts[c.id] || 0} contacts</span>
                 ${c.size ? `<span>· ${escapeHtml(c.size)} employees</span>` : ''}
+                ${lastContactByCo[c.id] ? `<span>· last ${formatRelative(lastContactByCo[c.id])}</span>` : ''}
                 ${c.website ? `<span>· ${renderSiteLink(c.website)}</span>` : ''}
                 ${c.linkedInUrl ? `<span>· ${renderSiteLink(c.linkedInUrl)}</span>` : ''}
               </div>
@@ -79,11 +96,25 @@ function _companiesPaint() {
       `)}
 
       ${allCos.length === 0 ? '' : `
-        <div class="relative max-w-sm mb-5">
-          <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-surface-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"/></svg>
-          <input type="text" id="companies-search-input" placeholder="Search name, industry, description, location…" value="${escapeHtml(companiesSearch)}"
-            oninput="companiesSearch=this.value; _companiesPaint()"
-            class="search-field" />
+        <div class="flex flex-wrap items-center gap-2 mb-5">
+          <div class="relative flex-1 min-w-[200px] max-w-sm">
+            <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-surface-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"/></svg>
+            <input type="text" id="companies-search-input" placeholder="Search name, industry, description, location…" value="${escapeHtml(companiesSearch)}"
+              oninput="companiesSearch=this.value; _companiesPaint()"
+              class="search-field" />
+          </div>
+          ${industries.length ? `<select onchange="companiesIndustry=this.value; _companiesPaint()" class="input-field w-auto text-sm" style="max-width: 200px">
+            <option value="">All industries</option>
+            ${industries.map(i => `<option value="${escapeHtml(i)}" ${companiesIndustry === i ? 'selected' : ''}>${escapeHtml(i)}</option>`).join('')}
+          </select>` : ''}
+          <select onchange="companiesSort=this.value; _companiesPaint()" class="input-field w-auto text-sm" style="max-width: 180px">
+            <option value="name" ${companiesSort === 'name' ? 'selected' : ''}>Name A–Z</option>
+            <option value="recent" ${companiesSort === 'recent' ? 'selected' : ''}>Last contacted</option>
+            <option value="contacts" ${companiesSort === 'contacts' ? 'selected' : ''}>Most contacts</option>
+            <option value="added" ${companiesSort === 'added' ? 'selected' : ''}>Recently added</option>
+            <option value="industry" ${companiesSort === 'industry' ? 'selected' : ''}>Industry A–Z</option>
+          </select>
+          ${filtersActive ? `<button onclick="_clearCompaniesFilters()" class="btn-ghost text-surface-500 text-sm">Clear</button>` : ''}
         </div>`}
 
       ${allCos.length === 0 ? renderEmptyState(
@@ -92,7 +123,7 @@ function _companiesPaint() {
         'Companies will appear here as you add contacts',
         '<button onclick="openNewCompanyModal()" class="btn-primary">Add Company</button>'
       ) : companies.length === 0
-        ? `<div class="card text-center py-10 text-sm text-surface-500">No companies match "${escapeHtml(companiesSearch)}".</div>`
+        ? `<div class="card text-center py-10 text-sm text-surface-500">No companies match your filters. <button onclick="_clearCompaniesFilters()" class="text-brand-600 hover:underline ml-1">Clear filters</button></div>`
         : grid}
     </div>
   `;
@@ -100,6 +131,23 @@ function _companiesPaint() {
     const inp = document.getElementById('companies-search-input');
     if (inp) { inp.focus(); try { inp.setSelectionRange(_caret, _caret); } catch (_) {} }
   }
+}
+
+// ── Companies filter/sort helpers ────────────────────────────
+function _sortCompanies(list, sort, { contactCounts = {}, lastContactByCo = {} } = {}) {
+  const arr = [...list];
+  const byName = (a, b) => (a.name || '').localeCompare(b.name || '');
+  if (sort === 'contacts')      arr.sort((a, b) => (contactCounts[b.id] || 0) - (contactCounts[a.id] || 0) || byName(a, b));
+  else if (sort === 'recent')   arr.sort((a, b) => (lastContactByCo[b.id] || '').localeCompare(lastContactByCo[a.id] || '') || byName(a, b));
+  else if (sort === 'added')    arr.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0) || byName(a, b));
+  else if (sort === 'industry') arr.sort((a, b) => (a.industry || '~').localeCompare(b.industry || '~') || byName(a, b));
+  else                          arr.sort(byName);
+  return arr;
+}
+function _clearCompaniesFilters() {
+  companiesSearch = '';
+  companiesIndustry = '';
+  _companiesPaint();
 }
 
 async function viewCompany(companyId, opts = {}) {
