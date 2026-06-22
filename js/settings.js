@@ -126,6 +126,31 @@ async function renderSettings() {
         </div>
       </div>
 
+      <!-- ── Stay-in-touch cadences ─────────────── -->
+      <div class="card mb-4">
+        <div class="flex items-start justify-between gap-3 mb-1">
+          <div>
+            <p class="text-sm font-semibold">Stay-in-Touch Cadences</p>
+            <p class="text-xs text-surface-400 mt-0.5">How often you want to reach each type of relationship. Pulse flags anyone past their cadence as <span class="font-medium text-orange-600 dark:text-orange-400">Touch due</span>. Set a bucket to 0 to turn its cadence off.</p>
+          </div>
+          <span class="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-orange-100 dark:bg-orange-900/30 text-orange-600 flex-shrink-0">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16.023 9.348h4.992V4.356M3.985 19.644V14.65h4.992m-9.97-3.348a8.001 8.001 0 0115.357-2M3.985 14.65a8.001 8.001 0 0015.357 2"/></svg>
+          </span>
+        </div>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-2.5 mt-3">
+          ${(typeof RELATIONSHIP_BUCKETS !== 'undefined' ? RELATIONSHIP_BUCKETS.filter(b => b.key !== 'unassigned') : []).map(b => `
+            <div class="flex items-center justify-between">
+              <span class="inline-flex items-center gap-2 text-sm"><span class="w-2 h-2 rounded-full bg-${b.color}-500"></span>${b.label}</span>
+              <div class="flex items-center gap-2">
+                <input type="number" id="settings-touch-cadence-${b.key}" class="input-field w-20 text-center"
+                  value="${(settings?.cadences && settings.cadences[b.key] != null) ? settings.cadences[b.key] : (typeof CADENCE_DEFAULTS !== 'undefined' ? CADENCE_DEFAULTS[b.key] : 60)}" min="0" max="730" />
+                <span class="text-xs text-surface-500">days</span>
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+
       ${!_isOwner ? `
       <!-- ── NOTICE FOR INVITED USERS ─────────────── -->
       <div class="card mb-4 border-l-4 border-l-brand-500">
@@ -777,6 +802,19 @@ async function saveSettings() {
   for (const stage of STAGES) {
     const id = `settings-cadence-${stage.replace(/\s+/g, '-').toLowerCase()}`;
     settings.stageCadence[stage] = parseInt(document.getElementById(id).value) || 14;
+  }
+
+  // Stay-in-touch cadences (per relationship bucket; 0 = off)
+  if (typeof RELATIONSHIP_BUCKETS !== 'undefined') {
+    settings.cadences = {};
+    RELATIONSHIP_BUCKETS.filter(b => b.key !== 'unassigned').forEach(b => {
+      const el = document.getElementById('settings-touch-cadence-' + b.key);
+      if (el) {
+        const n = parseInt(el.value, 10);
+        settings.cadences[b.key] = (isNaN(n) || n < 0) ? (CADENCE_DEFAULTS[b.key] || 0) : n;
+      }
+    });
+    if (typeof applyCadenceSettings === 'function') applyCadenceSettings(settings);
   }
 
   await DB.put(STORES.settings, settings);

@@ -16,12 +16,14 @@ async function renderContacts() {
   const pageContent = document.getElementById('page-content');
   pageContent.innerHTML = `<div class="p-4 lg:p-8 max-w-7xl mx-auto">${renderLoadingSkeleton(5)}</div>`;
 
-  const [contacts, companies, tags] = await Promise.all([
+  const [contacts, companies, tags, settings] = await Promise.all([
     DB.getForUser(STORES.contacts, currentUser.id),
     DB.getForUser(STORES.companies, currentUser.id),
     DB.getForUser(STORES.tags, currentUser.id),
+    DB.get(STORES.settings, `settings_${currentUser.id}`),
   ]);
-  _contactsCache = { contacts, companies, tags };
+  if (typeof applyCadenceSettings === 'function') applyCadenceSettings(settings);
+  _contactsCache = { contacts, companies, tags, settings };
   _contactsPaint();
 }
 
@@ -46,6 +48,8 @@ function _contactsPaint() {
   const priorityCount = activeContacts.filter(c => isHighPriority(c)).length;
   const reconnectList = getReconnectContacts(activeContacts);
   const reconnectIds  = new Set(reconnectList.map(c => c.id));
+  const cadenceDueList = typeof getCadenceDueContacts === 'function' ? getCadenceDueContacts(activeContacts) : [];
+  const cadenceDueIds  = new Set(cadenceDueList.map(c => c.id));
 
   // ── Apply filters ──
   let filtered = [...activeContacts];
@@ -53,6 +57,7 @@ function _contactsPaint() {
   if (contactsFilters.quick === 'overdue')   filtered = filtered.filter(c => c.nextFollowUpDate && isOverdue(c.nextFollowUpDate));
   if (contactsFilters.quick === 'priority')  filtered = filtered.filter(c => isHighPriority(c));
   if (contactsFilters.quick === 'reconnect') filtered = filtered.filter(c => reconnectIds.has(c.id));
+  if (contactsFilters.quick === 'touch')     filtered = filtered.filter(c => cadenceDueIds.has(c.id));
   if (contactsFilters.stage) filtered = filtered.filter(c => c.stage === contactsFilters.stage);
   if (contactsFilters.tag)   filtered = filtered.filter(c => (c.tags || []).includes(contactsFilters.tag));
   if (contactsFilters.search) {
@@ -147,6 +152,8 @@ function _contactsPaint() {
           '<svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20"><path d="M9.05 2.93c.3-.92 1.6-.92 1.9 0l1.36 4.18a1 1 0 00.95.69h4.4c.97 0 1.37 1.24.59 1.81l-3.56 2.59a1 1 0 00-.36 1.12l1.36 4.18c.3.92-.76 1.69-1.54 1.12l-3.56-2.59a1 1 0 00-1.18 0l-3.56 2.59c-.78.57-1.84-.2-1.54-1.12l1.36-4.18a1 1 0 00-.36-1.12L2.4 9.61c-.78-.57-.38-1.81.59-1.81h4.4a1 1 0 00.95-.69l1.36-4.18z"/></svg>', 'amber')}
         ${quickChip('reconnect', 'Reconnect', reconnectList.length,
           '<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16.023 9.348h4.992V4.356M3.985 19.644V14.65h4.992m-9.97-3.348a8.001 8.001 0 0115.357-2M3.985 14.65a8.001 8.001 0 0015.357 2"/></svg>', 'orange')}
+        ${quickChip('touch', 'Touch due', cadenceDueList.length,
+          '<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 8.25c0-2.485-2.099-4.5-4.688-4.5-1.935 0-3.597 1.126-4.312 2.733-.715-1.607-2.377-2.733-4.313-2.733C5.1 3.75 3 5.765 3 8.25c0 7.22 9 12 9 12s9-4.78 9-12z"/></svg>', 'amber')}
 
         <div class="relative flex-1 min-w-[200px] max-w-sm ml-auto">
           <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-surface-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" /></svg>
@@ -1406,6 +1413,14 @@ async function openEditContactModal(contactId) {
           </div>
         </div>
         <div>
+          <label class="block text-sm font-medium text-surface-600 dark:text-surface-400 mb-1">Stay-in-touch cadence <span class="text-xs font-normal text-surface-400">(optional — overrides the bucket default)</span></label>
+          <select id="edit-contact-cadence" class="input-field">
+            <option value="">Use bucket default</option>
+            <option value="0" ${contact.cadenceDays === 0 ? 'selected' : ''}>Off for this contact</option>
+            ${[14,30,45,60,90,120,180,365].map(d => `<option value="${d}" ${contact.cadenceDays === d ? 'selected' : ''}>Every ${d} days</option>`).join('')}
+          </select>
+        </div>
+        <div>
           <label class="block text-sm font-medium text-surface-600 dark:text-surface-400 mb-1">Sub-role / Type <span class="text-xs font-normal text-surface-400">(optional)</span></label>
           <select id="edit-contact-relationship-type" class="input-field">
             <option value="">— Select type —</option>
@@ -1462,6 +1477,8 @@ async function openEditContactModal(contactId) {
     const _effBucket = _selBucket || getContactBucket({ relationshipType: contact.relationshipType });
     contact.bucket = (_effBucket && _effBucket !== 'unassigned') ? _effBucket : null;
     contact.priority = document.getElementById('edit-contact-priority')?.value || null;
+    const _cad = document.getElementById('edit-contact-cadence')?.value;
+    contact.cadenceDays = (_cad === '' || _cad == null) ? null : parseInt(_cad, 10);
     contact.tags = getTagInputValues('edit-contact-tags');
     const followUp = document.getElementById('edit-contact-followup').value;
     contact.nextFollowUpDate = followUp ? new Date(followUp).toISOString() : null;

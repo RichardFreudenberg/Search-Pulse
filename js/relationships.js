@@ -94,6 +94,87 @@ function renderBucketSelect(contactId, currentKey, from) {
   </select>`;
 }
 
+// ── Stay-in-touch cadences ───────────────────────────────────
+// A target touch frequency (in days) per bucket. Pulse flags contacts that
+// have gone past their cadence so important relationships never go quiet.
+// Smart defaults below; the user can override per-bucket in Settings, and
+// per-contact via contact.cadenceDays (number = days, 0 = off, null = use bucket).
+const CADENCE_DEFAULTS = {
+  investors: 90, prospective: 60, pevc: 90, mentors: 90, advisors: 90,
+  brokers: 30, targets: 45, operators: 90, searchers: 120, unassigned: 0,
+};
+
+// Active cadence map (defaults merged with the user's saved overrides).
+let _cadenceMap = { ...CADENCE_DEFAULTS };
+
+/** Merge stored per-bucket overrides (settings.cadences) onto the defaults. */
+function getCadenceSettings(settings) {
+  const saved = (settings && settings.cadences) || {};
+  const out = { ...CADENCE_DEFAULTS };
+  Object.keys(saved).forEach(k => {
+    const n = parseInt(saved[k], 10);
+    if (!isNaN(n) && n >= 0) out[k] = n;
+  });
+  return out;
+}
+
+/** Set the active cadence map from a settings doc (call before rendering). */
+function applyCadenceSettings(settings) { _cadenceMap = getCadenceSettings(settings); return _cadenceMap; }
+
+/** Effective cadence (days) for a contact: per-contact override else bucket. 0 = off. */
+function getCadenceDays(contact, map = _cadenceMap) {
+  if (!contact) return 0;
+  if (contact.cadenceDays !== undefined && contact.cadenceDays !== null && contact.cadenceDays !== '') {
+    const n = parseInt(contact.cadenceDays, 10);
+    if (!isNaN(n) && n >= 0) return n;          // explicit per-contact value (0 = off)
+  }
+  return map[getContactBucket(contact)] || 0;   // fall back to the bucket cadence
+}
+
+/**
+ * Cadence status for a contact:
+ *   { days, status: 'none'|'ontrack'|'soon'|'overdue', dueDate, diffDays, overdueDays }
+ * Anchored on lastContactDate (falls back to createdAt). A contact you've never
+ * logged but that has a cadence is treated as due.
+ */
+function getCadenceStatus(contact, map = _cadenceMap) {
+  const days = getCadenceDays(contact, map);
+  if (!days || days <= 0) return { days: 0, status: 'none' };
+  const anchor = contact.lastContactDate || contact.createdAt || null;
+  if (!anchor) return { days, status: 'overdue', overdueDays: days, diffDays: -days, dueDate: null };
+  const anchorMs = new Date(anchor).getTime();
+  if (isNaN(anchorMs)) return { days, status: 'none' };
+  const dueMs = anchorMs + days * 86400000;
+  const diffDays = Math.round((dueMs - Date.now()) / 86400000); // >0 future, <=0 due/overdue
+  const soonWindow = Math.max(3, Math.round(days * 0.15));
+  let status = 'ontrack';
+  if (diffDays <= 0) status = 'overdue';
+  else if (diffDays <= soonWindow) status = 'soon';
+  return { days, status, dueDate: new Date(dueMs).toISOString(), diffDays, overdueDays: diffDays <= 0 ? -diffDays : 0 };
+}
+
+/** Contacts past their cadence, most overdue first. */
+function getCadenceDueContacts(contacts, map = _cadenceMap) {
+  return (contacts || [])
+    .map(c => ({ c, st: getCadenceStatus(c, map) }))
+    .filter(x => x.st.status === 'overdue')
+    .sort((a, b) => (b.st.overdueDays || 0) - (a.st.overdueDays || 0))
+    .map(x => x.c);
+}
+
+/** Small cadence chip — shown only when a touch is due soon or overdue. */
+function renderCadenceChip(contact, map = _cadenceMap) {
+  const st = getCadenceStatus(contact, map);
+  if (st.status === 'overdue') {
+    return `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-orange-50 text-orange-700 dark:bg-orange-900/20 dark:text-orange-300" title="Past its stay-in-touch cadence (${st.days}d)">
+      <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16.023 9.348h4.992V4.356M3.985 19.644V14.65h4.992m-9.97-3.348a8.001 8.001 0 0115.357-2M3.985 14.65a8.001 8.001 0 0015.357 2"/></svg>Touch due</span>`;
+  }
+  if (st.status === 'soon') {
+    return `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-surface-100 text-surface-500 dark:bg-surface-700 dark:text-surface-300" title="Stay-in-touch cadence ${st.days}d">Touch in ${st.diffDays}d</span>`;
+  }
+  return '';
+}
+
 // ── Relationship strength (cold / warm / active / developing / dormant) ──
 const RELATIONSHIP_STRENGTHS = {
   active:     { label: 'Active',     color: 'emerald', order: 1 },
@@ -185,6 +266,7 @@ function renderRelationshipCard(contact, company) {
 
           <div class="flex items-center flex-wrap gap-2 mt-2.5">
             ${renderStrengthChip(contact)}
+            ${renderCadenceChip(contact)}
             ${typeof renderEmailStatusChip === 'function' ? renderEmailStatusChip(contact) : ''}
             ${fuText ? `<span class="inline-flex items-center gap-1 text-[11px] font-medium ${overdue ? 'text-red-600 dark:text-red-400' : 'text-surface-500'}">
               <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
@@ -227,7 +309,7 @@ function renderRelationshipRow(contact, company) {
       </td>
       <td><div class="flex items-center gap-2">${company ? (typeof renderCompanyLogo === 'function' ? renderCompanyLogo(company, 'sm') : '') : ''}<span class="truncate">${company ? escapeHtml(company.name) : '—'}</span></div></td>
       <td>${renderBucketBadge(bucket)}</td>
-      <td>${renderStrengthChip(contact)}</td>
+      <td><div class="flex items-center gap-1.5">${renderStrengthChip(contact)}${renderCadenceChip(contact)}</div></td>
       <td class="text-surface-500">${lastText}</td>
       <td class="${overdue ? 'text-red-600 dark:text-red-400 font-medium' : ''}">${overdue ? 'Overdue · ' : ''}${fuText}</td>
     </tr>
