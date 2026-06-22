@@ -340,17 +340,12 @@ async function openNewContactModal(prefill = {}) {
                   <input type="text" id="cp-search" class="input-field py-1.5 text-sm" placeholder="Search companies…" oninput="cpFilter(this.value)" />
                 </div>
                 <div id="cp-list" class="max-h-52 overflow-y-auto py-1"></div>
-                <div class="p-2 border-t border-surface-100 dark:border-surface-800 flex gap-1">
-                  <button type="button" onclick="cpToggle(); toggleInlineCompany(true)"
-                    class="flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-medium text-brand-600 dark:text-brand-400 hover:bg-brand-50 dark:hover:bg-brand-900/20 transition-colors"
-                    title="Add company inline in this form">
+                <div class="p-2 border-t border-surface-100 dark:border-surface-800">
+                  <button type="button" onclick="cpClose(); openCreateCompanyDialog()"
+                    class="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold text-brand-600 dark:text-brand-400 hover:bg-brand-50 dark:hover:bg-brand-900/20 transition-colors"
+                    title="Create a new company and link it to this contact">
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
-                    Create Inline
-                  </button>
-                  <button type="button" onclick="cpToggle(); openCreateCompanyDialog()"
-                    class="flex items-center justify-center gap-1 px-3 py-2 rounded-lg text-xs font-medium text-surface-500 dark:text-surface-400 hover:bg-surface-50 dark:hover:bg-surface-800 transition-colors"
-                    title="Open full company form in a dialog">
-                    Full Form
+                    Create new company
                   </button>
                 </div>
               </div>
@@ -363,46 +358,6 @@ async function openNewContactModal(prefill = {}) {
             <label class="block text-sm font-medium text-surface-600 dark:text-surface-400 mb-1">Location</label>
             <input type="text" id="contact-location" class="input-field" placeholder="Boston, MA" value="${escapeHtml(prefill.location || '')}" />
           </div>
-        </div>
-
-        <!-- Inline company creation — full-width section, hidden by default. -->
-        <div id="inline-company-section" class="hidden p-4 rounded-xl bg-brand-50/60 dark:bg-surface-800/40 border border-brand-200 dark:border-brand-800/50 space-y-3 animate-fade-in">
-          <div class="flex items-center justify-between">
-            <p class="text-sm font-semibold flex items-center gap-1.5">
-              <svg class="w-4 h-4 text-brand-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
-              Quick-add company
-            </p>
-            <button type="button" onclick="toggleInlineCompany(false)" class="text-xs text-surface-400 hover:text-red-500 transition-colors">✕ Collapse</button>
-          </div>
-          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div class="sm:col-span-2">
-              <label class="block text-xs font-medium text-surface-500 mb-1">Company name *</label>
-              <input type="text" id="ic-name" class="input-field text-sm" placeholder="Acme GmbH" />
-            </div>
-            <div>
-              <label class="block text-xs font-medium text-surface-500 mb-1">Industry</label>
-              <select id="ic-industry" class="input-field text-sm">
-                <option value="">— Industry —</option>
-                ${COMPANY_INDUSTRY_LIST.map(s => `<option value="${s}">${s}</option>`).join('')}
-              </select>
-            </div>
-            <div>
-              <label class="block text-xs font-medium text-surface-500 mb-1">Size</label>
-              <select id="ic-size" class="input-field text-sm">
-                <option value="">— Size —</option>
-                ${COMPANY_SIZE_LIST.map(s => `<option value="${s}">${s}</option>`).join('')}
-              </select>
-            </div>
-            <div>
-              <label class="block text-xs font-medium text-surface-500 mb-1">Website</label>
-              <input type="url"  id="ic-website"  class="input-field text-sm" placeholder="https://company.com" />
-            </div>
-            <div>
-              <label class="block text-xs font-medium text-surface-500 mb-1">HQ / Location</label>
-              <input type="text" id="ic-location" class="input-field text-sm" placeholder="Hamburg, Germany" />
-            </div>
-          </div>
-          <p class="text-[11px] text-surface-400 italic">A new company will be created and linked to this contact when you save.</p>
         </div>
 
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -635,47 +590,24 @@ function cpClear() {
 
 // --- Create New Company dialog ---
 
-// Inline company-creation panel toggle.
-// When `show` is true, expands the inline form in the contact modal so the
-// user can create a new company + contact in a single submit.
-// Pre-fills the company name from the picker search box when relevant.
-function toggleInlineCompany(show) {
-  const section = document.getElementById('inline-company-section');
-  if (!section) return;
-  if (show) {
-    section.classList.remove('hidden');
-    // Re-trigger the fade-in animation each time the panel opens
-    section.style.animation = 'none';
-    void section.offsetWidth; // force reflow
-    section.style.animation = '';
-
-    const nameInput = document.getElementById('ic-name');
-    // Pre-fill from picker search if user typed something there
-    const picked = document.getElementById('cp-search')?.value?.trim();
-    if (nameInput && picked && !nameInput.value) nameInput.value = picked;
-    // Clear any previously-selected existing company since we're creating new
-    if (typeof cpClear === 'function') cpClear();
-    if (nameInput) nameInput.focus();
-  } else {
-    section.classList.add('hidden');
-    // Clear inline fields so we don't accidentally create a company on submit
-    ['ic-name','ic-website','ic-location'].forEach(id => {
-      const el = document.getElementById(id);
-      if (el) el.value = '';
-    });
-    ['ic-industry','ic-size'].forEach(id => {
-      const el = document.getElementById(id);
-      if (el) el.value = '';
-    });
-  }
-}
-
 function openCreateCompanyDialog() {
   let dlg = document.getElementById('create-company-dlg');
   if (dlg) dlg.remove();
 
+  // Name typed in the picker search carries over so the user doesn't retype it.
+  const prefillName = (document.getElementById('cp-search')?.value || '').trim();
+
+  // Backdrop styling for the native <dialog> (once).
+  if (!document.getElementById('create-company-dlg-style')) {
+    const st = document.createElement('style');
+    st.id = 'create-company-dlg-style';
+    st.textContent = '#create-company-dlg{border:none;padding:0;background:transparent;}#create-company-dlg::backdrop{background:rgba(15,23,42,0.55);backdrop-filter:blur(2px);}';
+    document.head.appendChild(st);
+  }
+
   dlg = document.createElement('dialog');
   dlg.id = 'create-company-dlg';
+  dlg.className = 'rounded-2xl shadow-2xl bg-white dark:bg-surface-900 text-surface-900 dark:text-surface-100';
   dlg.style.cssText = 'width:min(600px,95vw);max-height:90vh;overflow-y:auto;';
   dlg.innerHTML = `
     <div class="p-6 w-full">
@@ -778,6 +710,9 @@ function openCreateCompanyDialog() {
 
   document.body.appendChild(dlg);
   dlg.showModal();
+  // Carry over the name typed in the picker and focus it for quick entry.
+  const ccdName = document.getElementById('ccd-name');
+  if (ccdName) { if (prefillName) ccdName.value = prefillName; ccdName.focus(); }
   dlg.addEventListener('click', e => { if (e.target === dlg) dlg.close(); });
   // Stop Escape from bubbling up and closing the parent custom modal too
   dlg.addEventListener('keydown', e => { if (e.key === 'Escape') e.stopPropagation(); });
@@ -1075,38 +1010,9 @@ async function saveNewContact() {
     if (!proceed) return;
   }
 
-  // ── Inline company creation ───────────────────────────────────────
-  // If the inline-company panel is open and has a name, create it now
-  // BEFORE the contact so we have an ID to link.
-  let companyId = _selectedCompanyId || null;
-  const inlineSection = document.getElementById('inline-company-section');
-  const inlineOpen    = inlineSection && !inlineSection.classList.contains('hidden');
-  const inlineName    = inlineOpen ? (document.getElementById('ic-name')?.value || '').trim() : '';
-
-  if (inlineOpen && inlineName) {
-    // Guard: don't duplicate if a company with the same name already exists
-    const allCompanies = await DB.getForUser(STORES.companies, currentUser.id);
-    const existingMatch = allCompanies.find(c =>
-      c.name && c.name.toLowerCase() === inlineName.toLowerCase()
-    );
-    if (existingMatch) {
-      companyId = existingMatch.id;
-      showToast(`Linked existing "${existingMatch.name}" (no duplicate created)`, 'info');
-    } else {
-      const newCompany = await DB.add(STORES.companies, {
-        userId:      currentUser.id,
-        name:        inlineName,
-        industry:    document.getElementById('ic-industry')?.value || '',
-        size:        document.getElementById('ic-size')?.value     || '',
-        website:     (document.getElementById('ic-website')?.value || '').trim(),
-        location:    (document.getElementById('ic-location')?.value || '').trim(),
-        companyType: '',
-        source:      'contact-inline',
-        createdAt:   new Date().toISOString(),
-      });
-      companyId = newCompany.id;
-    }
-  }
+  // Company link: chosen in the picker, or created+selected via the
+  // "Create new company" popup (openCreateCompanyDialog → cpSetSelected).
+  const companyId = _selectedCompanyId || null;
   _selectedCompanyId = null; // clear after use
 
   // Persist the EFFECTIVE bucket: explicit choice, else derived from the sub-role.
