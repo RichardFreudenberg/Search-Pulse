@@ -908,7 +908,7 @@ function showApp() {
   const hashRaw   = location.hash.slice(1);
   const hashPage  = hashRaw.split('/')[0];
   const startPage = (hashPage && typeof VALID_PAGES !== 'undefined' && VALID_PAGES.has(hashPage))
-    ? hashRaw : 'dashboard';
+    ? hashRaw : 'today';
   navigate(startPage, { replace: true });
   checkReminders();
 

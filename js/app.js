@@ -85,6 +85,7 @@ if (typeof document !== 'undefined') {
 
 // Valid pages — anything not in this set falls back to dashboard
 const VALID_PAGES = new Set([
+  'today',
   'dashboard','contacts','companies','calls','reminders','email',
   'suggestions','news','resources','deals','deal-search',
   'company-scout','sourcing','settings','shared-dashboard',
@@ -155,6 +156,7 @@ function navigate(pageInput, { pushState = true, replace = false } = {}) {
 
   // Render page
   switch (validPage) {
+    case 'today': renderToday(); break;
     case 'dashboard': renderDashboard(); break;
     case 'contacts': renderContacts(); break;
     case 'companies': renderCompanies(); break;

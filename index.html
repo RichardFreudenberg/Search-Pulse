@@ -362,6 +362,10 @@
 
         <!-- Relationships panel -->
         <div class="nav-panel" id="nav-panel-relationships">
+          <button onclick="navigate('today')" class="nav-item" data-page="today">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+            <span>Today</span>
+          </button>
           <button onclick="navigate('dashboard')" class="nav-item" data-page="dashboard">
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" /></svg>
             <span>Dashboard</span>
@@ -673,14 +677,15 @@
   <script src="js/shared-config.js?v=1"></script>
   <script src="js/firebase-config.js?v=1"></script>
   <script src="js/db.js?v=20260426"></script>
-  <script src="js/auth.js?v=20260640"></script>
+  <script src="js/auth.js?v=20260644"></script>
   <script src="js/utils.js?v=20260624"></script>
   <script src="js/toast.js?v=8"></script>
   <script src="js/modal.js?v=20260516"></script>
   <script src="js/components.js?v=8"></script>
   <script src="js/dashboard.js?v=20260635"></script>
-  <script src="js/relationships.js?v=20260643"></script>
+  <script src="js/relationships.js?v=20260644"></script>
   <script src="js/contacts.js?v=20260643"></script>
+  <script src="js/today.js?v=20260644"></script>
   <script src="js/companies.js?v=20260641"></script>
   <script src="js/meeting-recorder.js?v=20260609"></script>
   <script src="js/calls.js?v=20260611"></script>
@@ -731,7 +736,7 @@
   <script src="js/sourcing-analyser.js?v=1"></script>
   <script src="js/handelsregister.js?v=20260517"></script>
   <script src="js/todos.js?v=1"></script>
-  <script src="js/app.js?v=20260640"></script>
+  <script src="js/app.js?v=20260644"></script>
   <!-- EmailJS — for real email verification on signup -->
   <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
 

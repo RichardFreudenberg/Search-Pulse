@@ -140,6 +140,11 @@ function getCadenceDays(contact, map = _cadenceMap) {
 function getCadenceStatus(contact, map = _cadenceMap) {
   const days = getCadenceDays(contact, map);
   if (!days || days <= 0) return { days: 0, status: 'none' };
+  // Snoozed from the Today cockpit → suppress until the snooze expires.
+  if (contact.cadenceSnoozeUntil) {
+    const snoozeMs = new Date(contact.cadenceSnoozeUntil).getTime();
+    if (!isNaN(snoozeMs) && snoozeMs > Date.now()) return { days, status: 'ontrack', snoozed: true, dueDate: contact.cadenceSnoozeUntil };
+  }
   const anchor = contact.lastContactDate || contact.createdAt || null;
   if (!anchor) return { days, status: 'overdue', overdueDays: days, diffDays: -days, dueDate: null };
   const anchorMs = new Date(anchor).getTime();
