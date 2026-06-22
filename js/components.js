@@ -272,8 +272,12 @@ function renderTimeline(activities) {
                   <div class="flex-1 h-px bg-surface-200 dark:bg-surface-700"></div>
                 </div>
                 <div class="space-y-1">
-                  ${group.items.map(a => `
-                    <div class="flex gap-3 p-3 rounded-lg hover:bg-surface-50 dark:hover:bg-surface-800/60 transition-colors">
+                  ${group.items.map(a => {
+                    const clickable = !!a.openable;
+                    const idx = activities.indexOf(a);
+                    return `
+                    <div class="flex gap-3 p-3 rounded-lg transition-colors ${clickable ? 'cursor-pointer hover:bg-surface-100 dark:hover:bg-surface-800 group/tl' : 'hover:bg-surface-50 dark:hover:bg-surface-800/60'}"
+                      ${clickable ? `onclick="openTimelineDetail(${idx})" title="Open details"` : ''}>
                       <div class="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center mt-0.5"
                         style="background:${getActivityColor(a.type)}18; color:${getActivityColor(a.type)}">
                         ${getActivityIcon(a.type)}
@@ -283,8 +287,9 @@ function renderTimeline(activities) {
                         ${a.description ? `<p class="text-xs text-surface-500 mt-0.5 leading-relaxed">${escapeHtml(a.description)}</p>` : ''}
                         <p class="text-xs text-surface-400 mt-1">${formatDateTime(a.timestamp)}</p>
                       </div>
-                    </div>
-                  `).join('')}
+                      ${clickable ? `<svg class="w-4 h-4 text-surface-300 dark:text-surface-600 self-center flex-shrink-0 opacity-0 group-hover/tl:opacity-100 transition-opacity" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>` : ''}
+                    </div>`;
+                  }).join('')}
                 </div>
               </div>
             `).join('')}

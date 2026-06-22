@@ -1099,33 +1099,39 @@ function buildContactTimeline(contact, calls, notes, reminders, activities) {
   const items = [];
   const clip = (s, n = 240) => { s = String(s || '').trim(); return s.length > n ? s.slice(0, n).trimEnd() + '…' : s; };
 
+  const cid = contact && contact.id;
+
   (calls || []).forEach(c => {
     if (!c.date) return;
     const body = c.cleanedNotes || c.aiSummary || c.notes || '';
+    const full = [body, c.nextSteps ? 'Next steps: ' + c.nextSteps : ''].filter(Boolean).join('\n\n');
     items.push({
       type: 'call',
       title: 'Call' + (c.outcome ? ' · ' + c.outcome : '') + (c.duration ? ` · ${c.duration} min` : ''),
       description: clip(body || c.nextSteps || ''),
       timestamp: c.date,
+      openable: true, refType: 'call', refId: c.id, contactId: cid, full,
     });
   });
 
   (notes || []).forEach(n => {
     if (!n.createdAt) return;
-    items.push({ type: 'note', title: 'Note', description: clip(n.cleanedContent || n.content || ''), timestamp: n.createdAt });
+    const full = n.cleanedContent || n.content || '';
+    items.push({ type: 'note', title: 'Note', description: clip(full), timestamp: n.createdAt, openable: true, refType: 'note', refId: n.id, contactId: cid, full });
   });
 
   (reminders || []).forEach(r => {
     const ts = r.completedAt || r.createdAt || r.dueDate;
     if (!ts) return;
-    items.push({ type: 'reminder', title: r.status === 'completed' ? 'Reminder completed' : 'Reminder set', description: clip(r.title || ''), timestamp: ts });
+    const full = [r.title, r.notes].filter(Boolean).join('\n\n');
+    items.push({ type: 'reminder', title: r.status === 'completed' ? 'Reminder completed' : 'Reminder set', description: clip(r.title || ''), timestamp: ts, openable: true, refType: 'reminder', refId: r.id, contactId: cid, full });
   });
 
   // Email touchpoints from the Outlook sync (aggregate last inbound/outbound).
   const es = contact && contact.emailStats;
   if (es) {
-    if (es.lastInboundAt)  items.push({ type: 'email', title: 'Email received', description: (es.lastDirection === 'in'  && es.lastSubject) ? es.lastSubject : '', timestamp: es.lastInboundAt });
-    if (es.lastOutboundAt) items.push({ type: 'email', title: 'Email sent',     description: (es.lastDirection === 'out' && es.lastSubject) ? es.lastSubject : '', timestamp: es.lastOutboundAt });
+    if (es.lastInboundAt)  { const s = (es.lastDirection === 'in'  && es.lastSubject) ? es.lastSubject : ''; items.push({ type: 'email', title: 'Email received', description: s, timestamp: es.lastInboundAt,  openable: true, refType: 'email', contactId: cid, full: s }); }
+    if (es.lastOutboundAt) { const s = (es.lastDirection === 'out' && es.lastSubject) ? es.lastSubject : ''; items.push({ type: 'email', title: 'Email sent',     description: s, timestamp: es.lastOutboundAt, openable: true, refType: 'email', contactId: cid, full: s }); }
   }
 
   // Lifecycle events not represented by a raw record (avoids double-counting).
@@ -1137,6 +1143,37 @@ function buildContactTimeline(contact, calls, notes, reminders, activities) {
 
   items.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
   return items;
+}
+
+/**
+ * Open the full detail for a clicked timeline row (index into the rendered
+ * timeline cached on window._currentTimeline). Shows the full notes/content and
+ * a deep-link to the underlying call / note / email.
+ */
+function openTimelineDetail(idx) {
+  const a = (window._currentTimeline || [])[idx];
+  if (!a) return;
+  const body = String(a.full || a.description || '').trim();
+  let footer = '';
+  if (a.refType === 'call' && a.refId)        footer = `<button onclick="closeModal(); openEditCallModal('${a.refId}', { type: 'contact', id: '${a.contactId}' })" class="btn-secondary btn-sm">Open full call</button>`;
+  else if (a.refType === 'note' && a.refId)   footer = `<button onclick="closeModal(); openCleanupNotes('${a.refId}')" class="btn-secondary btn-sm">Open note</button>`;
+  else if (a.refType === 'email' && a.contactId) footer = `<button onclick="closeModal(); openEmailAIMenu('${a.contactId}')" class="btn-secondary btn-sm">Email AI</button>`;
+  const color = typeof getActivityColor === 'function' ? getActivityColor(a.type) : '#868e96';
+  const icon  = typeof getActivityIcon === 'function' ? getActivityIcon(a.type) : '';
+  openModal(`
+    <div class="p-6" style="max-width:34rem">
+      <div class="flex items-start gap-3 mb-4">
+        <div class="flex-shrink-0 w-9 h-9 rounded-full flex items-center justify-center" style="background:${color}1a;color:${color}">${icon}</div>
+        <div class="min-w-0">
+          <h2 class="text-base font-semibold leading-tight">${escapeHtml(a.title || '')}</h2>
+          <p class="text-xs text-surface-400 mt-0.5">${typeof formatDateTime === 'function' ? formatDateTime(a.timestamp) : ''}</p>
+        </div>
+      </div>
+      ${body
+        ? `<div class="text-sm whitespace-pre-wrap text-surface-700 dark:text-surface-200 leading-relaxed max-h-[55vh] overflow-y-auto">${escapeHtml(body)}</div>`
+        : `<p class="text-sm text-surface-400">No additional detail recorded for this activity.</p>`}
+      <div class="flex justify-end gap-2 mt-6">${footer}<button onclick="closeModal()" class="btn-primary btn-sm">Close</button></div>
+    </div>`);
 }
 
 async function viewContact(contactId, opts = {}) {
