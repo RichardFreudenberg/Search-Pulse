@@ -245,7 +245,7 @@ function renderTimeline(activities) {
     groups[groups.length - 1].items.push(a);
   });
 
-  const typeLabels = { call: 'Calls', note: 'Notes', reminder: 'Reminders', enrichment: 'Enrichment', email: 'Emails', created: 'Created', updated: 'Updates', stage_change: 'Stage Changes' };
+  const typeLabels = { call: 'Calls', note: 'Notes', reminder: 'Reminders', enrichment: 'Enrichment', email: 'Emails', created: 'Created', updated: 'Updates', stage_change: 'Stage Changes', bucket_change: 'Bucket Changes' };
 
   return `
     <div>
@@ -303,6 +303,7 @@ function getActivityIcon(type) {
     created:      '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v6m3-3H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>',
     updated:      '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99"/></svg>',
     stage_change: '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7.5 21L3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5"/></svg>',
+    bucket_change: '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5"/></svg>',
   };
   return icons[type] || '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>';
 }
@@ -316,6 +317,8 @@ function getActivityColor(type) {
     created: '#40c057',
     updated: '#868e96',
     stage_change: '#e64980',
+    bucket_change: '#e64980',
+    email: '#0ca678',
   };
   return colors[type] || '#868e96';
 }

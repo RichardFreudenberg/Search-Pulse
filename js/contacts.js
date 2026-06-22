@@ -251,8 +251,18 @@ function _loadMoreContacts() { contactsRenderLimit += CONTACTS_PAGE_SIZE; _conta
 async function _quickSetContactBucket(contactId, bucketKey, from) {
   const contact = await DB.get(STORES.contacts, contactId);
   if (!contact) { showToast('Contact not found', 'error'); return; }
+  const oldBucket = getContactBucket(contact);
   contact.bucket = bucketKey || null;
   await DB.put(STORES.contacts, contact);
+  const newBucket = getContactBucket(contact);
+  if (oldBucket !== newBucket) {
+    await DB.add(STORES.activities, {
+      userId: currentUser.id, contactId: contact.id, type: 'bucket_change',
+      title: 'Bucket changed',
+      description: `${getBucketMeta(oldBucket).label} → ${getBucketMeta(newBucket).label}`,
+      timestamp: new Date().toISOString(),
+    }).catch(() => {});
+  }
   showToast(bucketKey ? `Moved to ${getBucketMeta(bucketKey).label}` : 'Bucket cleared', 'success');
   if (from === 'detail' && typeof viewContact === 'function') viewContact(contactId);
   else renderContacts();
@@ -1077,6 +1087,58 @@ async function saveNewContact() {
   navigate('contacts');
 }
 
+/**
+ * Unified activity feed for a contact — merges raw calls, notes, reminders,
+ * Outlook email touchpoints, and lifecycle events (stage/bucket/created/
+ * enrichment) into one chronological list (ascending). renderTimeline()
+ * reverses it to show newest-first with date buckets + type filter chips.
+ * Calls/notes/reminders come from their own records (so full history + content
+ * show); only lifecycle events come from the activities log (no double-count).
+ */
+function buildContactTimeline(contact, calls, notes, reminders, activities) {
+  const items = [];
+  const clip = (s, n = 240) => { s = String(s || '').trim(); return s.length > n ? s.slice(0, n).trimEnd() + '…' : s; };
+
+  (calls || []).forEach(c => {
+    if (!c.date) return;
+    const body = c.cleanedNotes || c.aiSummary || c.notes || '';
+    items.push({
+      type: 'call',
+      title: 'Call' + (c.outcome ? ' · ' + c.outcome : '') + (c.duration ? ` · ${c.duration} min` : ''),
+      description: clip(body || c.nextSteps || ''),
+      timestamp: c.date,
+    });
+  });
+
+  (notes || []).forEach(n => {
+    if (!n.createdAt) return;
+    items.push({ type: 'note', title: 'Note', description: clip(n.cleanedContent || n.content || ''), timestamp: n.createdAt });
+  });
+
+  (reminders || []).forEach(r => {
+    const ts = r.completedAt || r.createdAt || r.dueDate;
+    if (!ts) return;
+    items.push({ type: 'reminder', title: r.status === 'completed' ? 'Reminder completed' : 'Reminder set', description: clip(r.title || ''), timestamp: ts });
+  });
+
+  // Email touchpoints from the Outlook sync (aggregate last inbound/outbound).
+  const es = contact && contact.emailStats;
+  if (es) {
+    if (es.lastInboundAt)  items.push({ type: 'email', title: 'Email received', description: (es.lastDirection === 'in'  && es.lastSubject) ? es.lastSubject : '', timestamp: es.lastInboundAt });
+    if (es.lastOutboundAt) items.push({ type: 'email', title: 'Email sent',     description: (es.lastDirection === 'out' && es.lastSubject) ? es.lastSubject : '', timestamp: es.lastOutboundAt });
+  }
+
+  // Lifecycle events not represented by a raw record (avoids double-counting).
+  const KEEP = new Set(['stage_change', 'bucket_change', 'created', 'updated', 'enrichment']);
+  (activities || []).forEach(a => {
+    if (!a.timestamp || !KEEP.has(a.type)) return;
+    items.push({ type: a.type, title: a.title || a.type, description: a.description || '', timestamp: a.timestamp });
+  });
+
+  items.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+  return items;
+}
+
 async function viewContact(contactId, opts = {}) {
   // History-managed route: pushing state makes Back/Forward + deep links work.
   if (typeof currentPage !== 'undefined') currentPage = 'contact';
@@ -1105,7 +1167,6 @@ async function viewContact(contactId, opts = {}) {
   const company = contact.companyId ? companies.find(c => c.id === contact.companyId) : null;
   const sortedCalls = sortByDate(calls, 'date');
   const sortedNotes = sortByDate(notes, 'createdAt');
-  const sortedActivities = sortByDate(activities, 'timestamp');
   const activeReminders = reminders.filter(r => r.status !== 'dismissed');
 
   pageContent.innerHTML = `
@@ -1194,15 +1255,15 @@ async function viewContact(contactId, opts = {}) {
 
       <!-- Tabs -->
       <div class="tab-group mb-6">
-        <button class="tab-item active" onclick="showContactTab(this, 'notes-tab')">Notes</button>
+        <button class="tab-item active" onclick="showContactTab(this, 'timeline-tab')">Activity</button>
+        <button class="tab-item" onclick="showContactTab(this, 'notes-tab')">Notes</button>
         <button class="tab-item" onclick="showContactTab(this, 'calls-tab')">Calls</button>
-        <button class="tab-item" onclick="showContactTab(this, 'timeline-tab')">Timeline</button>
         <button class="tab-item" onclick="showContactTab(this, 'enrichment-tab')">Enrichment</button>
         <button class="tab-item" onclick="showContactTab(this, 'reminders-tab')">Reminders</button>
       </div>
 
       <!-- Tab Content -->
-      <div id="notes-tab" class="tab-content">
+      <div id="notes-tab" class="tab-content hidden">
         <div class="flex items-center justify-between mb-4">
           <h2 class="text-base font-semibold">Notes</h2>
           <button onclick="openNewNoteModal('${contact.id}')" class="btn-secondary btn-sm">
@@ -1273,9 +1334,9 @@ async function viewContact(contactId, opts = {}) {
         `}
       </div>
 
-      <div id="timeline-tab" class="tab-content hidden">
-        <h2 class="text-base font-semibold mb-4">Relationship Timeline</h2>
-        ${renderTimeline(sortedActivities)}
+      <div id="timeline-tab" class="tab-content">
+        <h2 class="text-base font-semibold mb-4">Activity</h2>
+        ${renderTimeline(buildContactTimeline(contact, calls, notes, reminders, activities))}
       </div>
 
       <div id="enrichment-tab" class="tab-content hidden">
