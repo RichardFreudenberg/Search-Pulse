@@ -4,6 +4,85 @@
 
 let currentPage = 'dashboard';
 
+// ============================================
+// Browser-grade navigation: history keys + scroll restoration
+// --------------------------------------------
+// The scrollable element is #page-content (NOT the window). Every history
+// entry gets a unique numeric `key`; we remember each entry's scroll offset
+// and restore it on Back/Forward — so lists return to exactly where you were,
+// like a normal website. We patch history.pushState/replaceState so EVERY
+// navigation (the router, the contact/company/broker/deal detail views, deal
+// tabs) participates automatically, with no per-call-site changes.
+// ============================================
+if ('scrollRestoration' in history) { try { history.scrollRestoration = 'manual'; } catch (_) {} }
+
+let _navSeq = 0;                       // monotonic id source for history entries
+let _currentNavKey = null;             // key of the entry currently on screen
+const _scrollByKey = new Map();        // key -> last scrollTop of #page-content
+const _SCROLLER_ID = 'page-content';
+function _scroller() { return document.getElementById(_SCROLLER_ID); }
+
+function _saveCurrentScroll() {
+  const el = _scroller();
+  if (el && _currentNavKey != null) _scrollByKey.set(_currentNavKey, el.scrollTop);
+}
+
+// Restore the saved offset for `key` once the (async) render has painted enough
+// height to honour it. Resets to top when there is nothing saved (a fresh nav).
+function _restoreScrollForKey(key) {
+  const el = _scroller();
+  if (!el) return;
+  const target = (key != null && _scrollByKey.has(key)) ? _scrollByKey.get(key) : 0;
+  if (!target) { el.scrollTop = 0; return; }
+  let tries = 0;
+  const step = () => {
+    if (el.scrollHeight - el.clientHeight >= target - 2 || tries++ > 90) {
+      el.scrollTop = target;            // content is tall enough (or we gave up after ~1.5s)
+    } else {
+      requestAnimationFrame(step);
+    }
+  };
+  requestAnimationFrame(step);
+}
+
+// Patch history so every navigation is keyed and captures outgoing scroll.
+(function _patchHistoryForScroll() {
+  const _push = history.pushState.bind(history);
+  const _replace = history.replaceState.bind(history);
+  history.pushState = function (state, title, url) {
+    _saveCurrentScroll();                       // remember where we were before leaving
+    state = state || {};
+    if (state.key == null) state.key = ++_navSeq;
+    _currentNavKey = state.key;
+    return _push(state, title, url);
+  };
+  history.replaceState = function (state, title, url) {
+    state = state || {};
+    if (state.key == null) state.key = (_currentNavKey != null ? _currentNavKey : ++_navSeq);
+    _currentNavKey = state.key;
+    return _replace(state, title, url);
+  };
+})();
+
+// Keep the current entry's scroll offset fresh as the user scrolls (throttled).
+function _initScrollTracking() {
+  const el = _scroller();
+  if (!el || el._scrollTracked) return;
+  el._scrollTracked = true;
+  let raf = 0;
+  el.addEventListener('scroll', () => {
+    if (raf) return;
+    raf = requestAnimationFrame(() => {
+      raf = 0;
+      if (_currentNavKey != null) _scrollByKey.set(_currentNavKey, el.scrollTop);
+    });
+  }, { passive: true });
+}
+if (typeof document !== 'undefined') {
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', _initScrollTracking);
+  else _initScrollTracking();
+}
+
 // Valid pages — anything not in this set falls back to dashboard
 const VALID_PAGES = new Set([
   'dashboard','contacts','companies','calls','reminders','email',
@@ -42,7 +121,7 @@ function switchNavTab(tab) {
 
 // Navigation — supports parameterised routes via "page/param" hash format
 // Example: navigate('pipeline-company/abc123') opens /#pipeline-company/abc123
-function navigate(pageInput, { pushState = true } = {}) {
+function navigate(pageInput, { pushState = true, replace = false } = {}) {
   pageInput = String(pageInput || '');
   const slashIdx = pageInput.indexOf('/');
   const page  = slashIdx >= 0 ? pageInput.slice(0, slashIdx) : pageInput;
@@ -51,10 +130,13 @@ function navigate(pageInput, { pushState = true } = {}) {
   const validPage = VALID_PAGES.has(page) ? page : 'dashboard';
   currentPage = validPage;
 
-  // Update URL hash so refresh / back-button work
-  if (pushState) {
+  // Update URL hash so refresh / back-button work. `replace` is used for the
+  // initial route on load so we don't leave a phantom duplicate entry.
+  if (replace || pushState) {
     const hash = param ? `${validPage}/${param}` : validPage;
-    history.pushState({ page: validPage, param }, '', '#' + hash);
+    const st = { page: validPage, param };
+    if (replace) history.replaceState(st, '', '#' + hash);
+    else         history.pushState(st, '', '#' + hash);
   }
 
   // Switch sidebar tab to match the page
@@ -119,11 +201,17 @@ function navigate(pageInput, { pushState = true } = {}) {
       break;
     default: renderDashboard();
   }
+
+  // Restore the saved scroll offset for this history entry (Back/Forward), or
+  // reset to top for a fresh navigation. Polls until the async render paints.
+  _restoreScrollForKey(_currentNavKey);
 }
 
 // Back / forward button support
 window.addEventListener('popstate', (e) => {
   if (!currentUser) return; // ignore if not logged in
+  // Adopt the target entry's key so we restore ITS scroll offset.
+  _currentNavKey = (e.state && e.state.key != null) ? e.state.key : null;
   let target = e.state?.page;
   if (target && e.state?.param) target = `${target}/${e.state.param}`;
   if (!target) target = location.hash.slice(1) || 'dashboard';

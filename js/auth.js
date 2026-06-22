@@ -909,7 +909,7 @@ function showApp() {
   const hashPage  = hashRaw.split('/')[0];
   const startPage = (hashPage && typeof VALID_PAGES !== 'undefined' && VALID_PAGES.has(hashPage))
     ? hashRaw : 'dashboard';
-  navigate(startPage);
+  navigate(startPage, { replace: true });
   checkReminders();
 
   if (currentUser && localStorage.getItem('pulse_show_tutorial_' + currentUser.id)) {
