@@ -20,6 +20,7 @@ async function renderCompanies() {
     DB.getForUser(STORES.companies, currentUser.id),
     DB.getForUser(STORES.contacts, currentUser.id),
   ]);
+  if (typeof ensureSavedViewsLoaded === 'function') await ensureSavedViewsLoaded();
   _companiesCache = { allCompanies, contacts };
   _companiesPaint();
 }
@@ -94,6 +95,8 @@ function _companiesPaint() {
           New Company
         </button>
       `)}
+
+      ${allCos.length === 0 ? '' : (typeof renderViewsBar === 'function' ? renderViewsBar('companies') : '')}
 
       ${allCos.length === 0 ? '' : `
         <div class="flex flex-wrap items-center gap-2 mb-5">

@@ -23,6 +23,7 @@ async function renderContacts() {
     DB.get(STORES.settings, `settings_${currentUser.id}`),
   ]);
   if (typeof applyCadenceSettings === 'function') applyCadenceSettings(settings);
+  if (typeof setSavedViewsFromSettings === 'function') setSavedViewsFromSettings(settings);
   _contactsCache = { contacts, companies, tags, settings };
   _contactsPaint();
 }
@@ -115,6 +116,8 @@ function _contactsPaint() {
           New Contact
         </button>
       `)}
+
+      ${typeof renderViewsBar === 'function' ? renderViewsBar('contacts') : ''}
 
       <!-- Bucket segment bar -->
       <div class="flex items-center gap-2 overflow-x-auto pb-1 mb-3 -mx-1 px-1">

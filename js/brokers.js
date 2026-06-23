@@ -20,6 +20,7 @@ async function renderBrokers() {
     DB.getForUser(STORES.contacts, currentUser.id),
     DB.getForUser(STORES.companies, currentUser.id),
   ]);
+  if (typeof ensureSavedViewsLoaded === 'function') await ensureSavedViewsLoaded();
   const coById = buildMap(companies);
   const bucketOf = c => (typeof getContactBucket === 'function' ? getContactBucket(c) : c.bucket);
   const brokerContacts = contacts.filter(c => !c.archived && bucketOf(c) === 'brokers');
@@ -109,6 +110,7 @@ function _brokerFirmsMainHtml(firms) {
       : `<div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">${filtered.map(_brokerFirmCardHtml).join('')}</div>`);
 
   return `
+    ${typeof renderViewsBar === 'function' ? renderViewsBar('brokers') : ''}
     <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5">
       <div class="flex items-center gap-3 flex-wrap">
         <div class="relative w-64">
