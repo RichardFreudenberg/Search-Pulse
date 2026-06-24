@@ -1164,9 +1164,25 @@ function renderDealsTableView(deals) {
 // === DEAL CRUD ===
 function openNewDealModal() { openEditDealModal(null); }
 
+// Show the broker picker only when the deal source is "Broker".
+function toggleDealSourcePicker() {
+  const src = document.getElementById('deal-source')?.value;
+  const wrap = document.getElementById('deal-source-contact-wrap');
+  if (wrap) wrap.classList.toggle('hidden', src !== 'Broker');
+}
+
 async function openEditDealModal(dealId) {
   const deal = dealId ? await DB.get(STORES.deals, dealId) : null;
-  const contacts = await DB.getForUser(STORES.contacts, currentUser.id);
+  const [contacts, _dealCompanies] = await Promise.all([
+    DB.getForUser(STORES.contacts, currentUser.id),
+    DB.getForUser(STORES.companies, currentUser.id),
+  ]);
+  // Broker contacts (for the "sourced via broker" picker), with firm labels.
+  const _coMap = (typeof buildMap === 'function') ? buildMap(_dealCompanies) : Object.fromEntries((_dealCompanies || []).map(c => [c.id, c]));
+  const _brokerOf = c => (typeof getContactBucket === 'function' ? getContactBucket(c) : c.bucket);
+  const _brokerContacts = contacts
+    .filter(c => !c.archived && _brokerOf(c) === 'brokers')
+    .sort((a, b) => (a.fullName || '').localeCompare(b.fullName || ''));
 
   openModal(deal ? 'Edit Deal' : 'New Deal', `
     <div class="p-6 space-y-4 max-h-[80vh] overflow-y-auto">
@@ -1223,10 +1239,23 @@ async function openEditDealModal(dealId) {
         </div>
         <div>
           <label class="block text-sm font-medium mb-1">Source</label>
-          <select id="deal-source" class="input-field">
+          <select id="deal-source" class="input-field" onchange="toggleDealSourcePicker()">
             <option value="">Select source...</option>
             ${DEAL_SOURCES.map(s => `<option value="${s}" ${deal?.source === s ? 'selected' : ''}>${s}</option>`).join('')}
           </select>
+        </div>
+        <div id="deal-source-contact-wrap" class="md:col-span-2 ${deal?.source === 'Broker' ? '' : 'hidden'}">
+          <label class="block text-sm font-medium mb-1">Sourced by (broker)</label>
+          <select id="deal-source-contact" class="input-field">
+            <option value="">Select the broker who sourced this…</option>
+            ${_brokerContacts.map(c => {
+              const firm = (c.companyId && _coMap[c.companyId]) ? _coMap[c.companyId].name : (c.title || '');
+              return `<option value="${c.id}" ${deal?.sourceContactId === c.id ? 'selected' : ''}>${escapeHtml(c.fullName || 'Unnamed')}${firm ? ' — ' + escapeHtml(firm) : ''}</option>`;
+            }).join('')}
+          </select>
+          ${_brokerContacts.length === 0
+            ? '<p class="text-xs text-surface-400 mt-1">No broker contacts yet — add them in the Brokers tab, or classify a contact into the Brokers bucket.</p>'
+            : '<p class="text-xs text-surface-400 mt-1">Pick the broker from your contacts who brought you this deal.</p>'}
         </div>
         <div>
           <label class="block text-sm font-medium mb-1">Sector</label>
@@ -1351,6 +1380,10 @@ async function saveDeal(dealId) {
   deal.website = document.getElementById('deal-website').value.trim();
   deal.stage = document.getElementById('deal-stage').value;
   deal.source = document.getElementById('deal-source').value;
+  // Link the broker contact who sourced this (only when source is Broker).
+  deal.sourceContactId = (deal.source === 'Broker')
+    ? (document.getElementById('deal-source-contact')?.value || null)
+    : null;
   deal.sector = document.getElementById('deal-sector').value;
   deal.subsector = document.getElementById('deal-subsector').value.trim();
   deal.location = document.getElementById('deal-location').value.trim();
