@@ -14,6 +14,7 @@ async function viewDeal(dealIdInput, opts = {}) {
 
   currentDealId = dealId;
   currentPage = 'deal';
+  _finEditMode = false; // always open the financials tab in read-only mode
   // Only override the active tab when the URL specifies one; otherwise preserve
   // the current tab (so in-place refreshes after edits/uploads stay put).
   if (routeTab) currentDealTab = routeTab;
@@ -90,7 +91,12 @@ async function viewDeal(dealIdInput, opts = {}) {
           <div class="flex items-center gap-3 mt-2 flex-wrap">
             <span class="badge ${stageColorClass}">${escapeHtml(deal.stage)}</span>
             ${deal.priority ? `<span class="badge badge-${deal.priority === 'high' ? 'red' : deal.priority === 'medium' ? 'yellow' : 'blue'}">${deal.priority}</span>` : ''}
-            ${deal.score !== null && deal.score !== undefined ? renderScoreBadge(deal.score) : ''}
+            <button onclick="openDealScoreEditor('${dealId}')" title="Set or overwrite the deal score" class="inline-flex items-center gap-1 hover:opacity-80 transition-opacity">
+              ${deal.score !== null && deal.score !== undefined
+                ? renderScoreBadge(deal.score)
+                : '<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-surface-100 dark:bg-surface-800 text-surface-500">Set score</span>'}
+              <svg class="w-3 h-3 text-surface-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z"/></svg>
+            </button>
             ${deal.sector ? `<span class="text-sm text-surface-500">${escapeHtml(deal.sector)}</span>` : ''}
             ${deal.location ? `<span class="text-sm text-surface-400">${escapeHtml(deal.location)}</span>` : ''}
           </div>
@@ -1841,6 +1847,8 @@ Coverage & Returns:
 // === FINANCIALS TAB — Historical charts & financial dashboard per deal =========
 // ═══════════════════════════════════════════════════════════════════════════════
 
+let _finEditMode = false; // financials tab: inline multi-year edit grid toggle
+
 async function renderDealFinancialsTab() {
   const deal = await DB.get(STORES.deals, currentDealId);
   if (!deal) return '';
@@ -1872,6 +1880,15 @@ async function renderDealFinancialsTab() {
       <p class="text-xs text-surface-400 mt-0.5">${s.note}</p>
     </div>
   `).join('');
+
+  // Inline multi-year edit grid
+  if (_finEditMode) {
+    return `
+      <div class="space-y-6">
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4">${snapshotCards}</div>
+        ${_renderFinancialEditCard(deal, history)}
+      </div>`;
+  }
 
   const tableRows = history.map((h, i) => {
     const prev      = i > 0 ? history[i - 1].revenue : null;
@@ -1911,6 +1928,10 @@ async function renderDealFinancialsTab() {
       <div class="flex items-center justify-between mb-4">
         <h3 class="text-sm font-semibold">Annual History (${history.length} year${history.length !== 1 ? 's' : ''})</h3>
         <div class="flex items-center gap-2">
+          <button onclick="toggleFinancialEdit(true)" class="btn-primary btn-sm flex items-center gap-1.5" title="Edit all years inline in a table">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z"/></svg>
+            Edit table
+          </button>
           <button onclick="_openFinancialHistoryEntry('${currentDealId}')" class="btn-secondary btn-sm">+ Add Year</button>
           <button onclick="_refreshFinancialHistory('${currentDealId}')" class="btn-secondary btn-sm flex items-center gap-1.5" title="Re-extract from all uploaded documents">
             <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
@@ -1952,7 +1973,7 @@ async function renderDealFinancialsTab() {
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3"/></svg>
           Upload Financial Statements
         </button>
-        <button onclick="_openFinancialHistoryEntry('${currentDealId}')" class="btn-secondary flex items-center gap-2">
+        <button onclick="toggleFinancialEdit(true)" class="btn-secondary flex items-center gap-2">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 4.5v15m7.5-7.5h-15"/></svg>
           Enter Manually
         </button>
@@ -1981,6 +2002,103 @@ async function renderDealFinancialsTab() {
       ` : ''}
     </div>
   `;
+}
+
+/* ─── Inline multi-year financials edit grid ─────────────────────────────────── */
+function toggleFinancialEdit(on) {
+  _finEditMode = (on === undefined) ? !_finEditMode : !!on;
+  if (typeof switchDealTab === 'function') switchDealTab('financials');
+}
+
+function _finGridRow(h, i) {
+  const v = x => (x == null ? '' : x);
+  const cell = (field, val, w = 'w-28', extra = '') => `<input type="number" data-fin="${field}" value="${v(val)}" class="input-field text-sm py-1 ${w} text-right" ${extra}>`;
+  return `
+    <tr data-fin-row="${i}" class="border-b border-surface-100 dark:border-surface-800">
+      <td class="py-1.5 pr-2"><input type="number" data-fin="year" value="${v(h.year)}" min="1990" max="2040" class="input-field text-sm py-1 w-20"></td>
+      <td class="py-1.5 pr-2"><input type="text" data-fin="label" value="${escapeHtml(h.label || '')}" placeholder="FY" class="input-field text-sm py-1 w-24"></td>
+      <td class="py-1.5 pr-2 text-right">${cell('revenue', h.revenue)}</td>
+      <td class="py-1.5 pr-2 text-right">${cell('ebitda', h.ebitda)}</td>
+      <td class="py-1.5 pr-2 text-right">${cell('grossMargin', h.grossMargin, 'w-20', 'step="0.1"')}</td>
+      <td class="py-1.5 pr-2 text-right">${cell('netIncome', h.netIncome)}</td>
+      <td class="py-1.5 pr-2 text-center"><input type="checkbox" data-fin="isProjected" ${h.isProjected ? 'checked' : ''} class="rounded"></td>
+      <td class="py-1.5"><button onclick="this.closest('tr').remove()" title="Remove row" class="text-surface-400 hover:text-red-500 p-1"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg></button></td>
+    </tr>`;
+}
+
+function _renderFinancialEditCard(deal, history) {
+  const rows = (history && history.length) ? history : [{ year: new Date().getFullYear() - 1 }];
+  return `
+    <div class="card overflow-x-auto">
+      <div class="flex items-center justify-between mb-4 gap-2 flex-wrap">
+        <div>
+          <h3 class="text-sm font-semibold">Edit Annual Financials</h3>
+          <p class="text-xs text-surface-400 mt-0.5">Edit any cell across years, then Save. EBITDA % is computed from Revenue and EBITDA.</p>
+        </div>
+        <div class="flex gap-2 flex-shrink-0">
+          <button onclick="_addFinancialGridRow()" class="btn-secondary btn-sm">+ Add year</button>
+          <button onclick="toggleFinancialEdit(false)" class="btn-ghost btn-sm">Cancel</button>
+          <button onclick="_saveFinancialGrid('${deal.id}')" class="btn-primary btn-sm">Save</button>
+        </div>
+      </div>
+      <table class="w-full text-sm min-w-[700px]">
+        <thead>
+          <tr class="border-b border-surface-200 dark:border-surface-700 text-xs font-semibold text-surface-500 uppercase tracking-wide">
+            <th class="text-left py-2 pr-2">Year</th>
+            <th class="text-left py-2 pr-2">Label</th>
+            <th class="text-right py-2 pr-2">Revenue</th>
+            <th class="text-right py-2 pr-2">EBITDA</th>
+            <th class="text-right py-2 pr-2">Gross %</th>
+            <th class="text-right py-2 pr-2">Net Income</th>
+            <th class="text-center py-2 pr-2">Proj.</th>
+            <th class="py-2"></th>
+          </tr>
+        </thead>
+        <tbody id="fin-edit-tbody">
+          ${rows.map((h, i) => _finGridRow(h, i)).join('')}
+        </tbody>
+      </table>
+    </div>`;
+}
+
+function _addFinancialGridRow() {
+  const tbody = document.getElementById('fin-edit-tbody');
+  if (!tbody) return;
+  const years = Array.from(tbody.querySelectorAll('[data-fin="year"]')).map(e => parseInt(e.value)).filter(Boolean);
+  const nextYear = years.length ? Math.max(...years) + 1 : new Date().getFullYear() - 1;
+  const i = tbody.querySelectorAll('tr').length;
+  tbody.insertAdjacentHTML('beforeend', _finGridRow({ year: nextYear }, i));
+}
+
+async function _saveFinancialGrid(dealId) {
+  const tbody = document.getElementById('fin-edit-tbody');
+  if (!tbody) return;
+  const num = el => { const n = parseFloat(el?.value); return isNaN(n) ? null : n; };
+  const byYear = {};
+  tbody.querySelectorAll('tr[data-fin-row]').forEach(tr => {
+    const get = sel => tr.querySelector(`[data-fin="${sel}"]`);
+    const year = parseInt(get('year')?.value);
+    if (!year || year < 1990 || year > 2040) return;
+    const revenue = num(get('revenue')), ebitda = num(get('ebitda'));
+    byYear[year] = {
+      year,
+      label: (get('label')?.value || '').trim() || null,
+      revenue, ebitda,
+      ebitdaMargin: (revenue && ebitda) ? +(ebitda / revenue * 100).toFixed(2) : null,
+      grossMargin: num(get('grossMargin')),
+      netIncome: num(get('netIncome')),
+      isProjected: !!(get('isProjected') && get('isProjected').checked),
+    };
+  });
+  const merged = Object.values(byYear).sort((a, b) => a.year - b.year);
+  const deal = await DB.get(STORES.deals, dealId);
+  if (!deal) return;
+  deal.financialHistory = merged;
+  deal.updatedAt = new Date().toISOString();
+  await DB.put(STORES.deals, deal);
+  _finEditMode = false;
+  showToast(`Saved ${merged.length} year${merged.length !== 1 ? 's' : ''} of financials`, 'success');
+  if (typeof switchDealTab === 'function') switchDealTab('financials');
 }
 
 /* ─── Chart initializer — called after HTML is injected into the DOM ─────────── */

@@ -146,6 +146,64 @@ async function saveDealScores(dealId) {
   }
 }
 
+// ── Manual score override ────────────────────────────────────
+// Lets you directly set/overwrite the deal score (0–10) instead of (or on top
+// of) the criteria-based scoring.
+async function openDealScoreEditor(dealId) {
+  const deal = await DB.get(STORES.deals, dealId);
+  if (!deal) return;
+  openModal('Set Deal Score', `
+    <div class="p-6 space-y-4">
+      <p class="text-sm text-surface-500">Set the overall deal score from 0 to 10. This overrides the computed criteria score.</p>
+      <div class="flex items-center gap-3">
+        <input type="number" id="manual-deal-score" min="0" max="10" step="0.1"
+          value="${deal.score != null ? deal.score : ''}" placeholder="—"
+          class="input-field w-28 text-center text-2xl font-bold"
+          onkeydown="if(event.key==='Enter'){event.preventDefault();saveManualDealScore('${dealId}');}" />
+        <span class="text-surface-500 text-lg">/ 10</span>
+      </div>
+      <div class="flex justify-between items-center pt-4 border-t border-surface-200 dark:border-surface-800">
+        <button onclick="clearDealScore('${dealId}')" class="btn-ghost btn-sm text-red-500">Clear score</button>
+        <div class="flex gap-3">
+          <button onclick="closeModal()" class="btn-secondary">Cancel</button>
+          <button onclick="saveManualDealScore('${dealId}')" class="btn-primary">Save</button>
+        </div>
+      </div>
+      <p class="text-xs text-surface-400">Tip: use “Score Deal” on the Scoring view to compute a weighted score from criteria.</p>
+    </div>
+  `);
+  setTimeout(() => { const i = document.getElementById('manual-deal-score'); if (i) { i.focus(); i.select(); } }, 40);
+}
+
+async function saveManualDealScore(dealId) {
+  const deal = await DB.get(STORES.deals, dealId);
+  if (!deal) return;
+  const raw = document.getElementById('manual-deal-score')?.value;
+  let v = parseFloat(raw);
+  if (raw == null || raw === '' || isNaN(v)) { showToast('Enter a score between 0 and 10', 'error'); return; }
+  v = Math.max(0, Math.min(10, Math.round(v * 10) / 10));
+  deal.score = v;
+  deal.scoreManual = true;
+  deal.updatedAt = new Date().toISOString();
+  await DB.put(STORES.deals, deal);
+  if (typeof logDealHistory === 'function') await logDealHistory(dealId, 'score_updated', { score: v, manual: true });
+  closeModal();
+  showToast(`Score set to ${v.toFixed(1)}/10`, 'success');
+  if (typeof currentDealId !== 'undefined' && currentDealId === dealId && typeof viewDeal === 'function') viewDeal(dealId);
+}
+
+async function clearDealScore(dealId) {
+  const deal = await DB.get(STORES.deals, dealId);
+  if (!deal) return;
+  deal.score = null;
+  deal.scoreManual = false;
+  deal.updatedAt = new Date().toISOString();
+  await DB.put(STORES.deals, deal);
+  closeModal();
+  showToast('Score cleared', 'info');
+  if (typeof currentDealId !== 'undefined' && currentDealId === dealId && typeof viewDeal === 'function') viewDeal(dealId);
+}
+
 function renderScoreBadge(score) {
   if (score === null || score === undefined) return '';
   const color = score >= 7 ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
