@@ -1183,6 +1183,79 @@ function _dealBrokerFirmChanged() {
     list.map(b => `<option value="${b.id}">${escapeHtml(b.name)}${b.title ? ' — ' + escapeHtml(b.title) : ''}</option>`).join('');
 }
 
+// ── Create a broker firm / individual on the spot, from inside the deal form ──
+function _dealNewFirmToggle(show) {
+  const row = document.getElementById('deal-new-firm-row');
+  if (row) row.classList.toggle('hidden', !show);
+  if (show) setTimeout(() => document.getElementById('deal-new-firm-name')?.focus(), 20);
+}
+
+async function _dealCreateFirm() {
+  const nameEl = document.getElementById('deal-new-firm-name');
+  const name = (nameEl?.value || '').trim();
+  if (!name) { showToast('Enter a firm name', 'warning'); nameEl?.focus(); return; }
+  // Reuse an existing company with the same name instead of duplicating.
+  const companies = await DB.getForUser(STORES.companies, currentUser.id);
+  let firm = companies.find(c => (c.name || '').toLowerCase() === name.toLowerCase());
+  if (firm) { showToast(`Using existing "${firm.name}"`, 'info'); }
+  else {
+    firm = await DB.add(STORES.companies, {
+      userId: currentUser.id, name, industry: 'Broker / M&A Advisor', source: 'deal-inline',
+      createdAt: new Date().toISOString(),
+    });
+    showToast(`Firm "${name}" created`, 'success');
+  }
+  const firmSel = document.getElementById('deal-source-firm');
+  if (firmSel) {
+    if (![...firmSel.options].some(o => o.value === firm.id)) {
+      const opt = document.createElement('option');
+      opt.value = firm.id; opt.textContent = firm.name;
+      firmSel.appendChild(opt);
+    }
+    firmSel.value = firm.id;
+  }
+  _dealNewFirmToggle(false);
+  _dealBrokerFirmChanged();       // refresh individuals for the new firm (empty)
+  _dealNewBrokerToggle(true);     // prompt to add the person at this firm
+}
+
+function _dealNewBrokerToggle(show) {
+  const row = document.getElementById('deal-new-broker-row');
+  if (row) row.classList.toggle('hidden', !show);
+  if (show) setTimeout(() => document.getElementById('deal-new-broker-name')?.focus(), 20);
+}
+
+async function _dealCreateBroker() {
+  const nameEl = document.getElementById('deal-new-broker-name');
+  const name = (nameEl?.value || '').trim();
+  if (!name) { showToast('Enter the broker’s name', 'warning'); nameEl?.focus(); return; }
+  const firmSel = document.getElementById('deal-source-firm');
+  const firmId  = (firmSel?.value && firmSel.value !== '__nofirm__') ? firmSel.value : null;
+  const email = (document.getElementById('deal-new-broker-email')?.value || '').trim();
+  const title = (document.getElementById('deal-new-broker-title')?.value || '').trim();
+
+  const contact = await DB.add(STORES.contacts, {
+    userId: currentUser.id, fullName: name, email, title,
+    companyId: firmId, bucket: 'brokers', stage: 'New intro',
+    relationshipType: 'Broker / Intermediary', createdAt: new Date().toISOString(),
+  });
+  showToast(`Broker "${name}" created & linked`, 'success');
+
+  if (!window._dealBrokerList) window._dealBrokerList = [];
+  window._dealBrokerList.push({ id: contact.id, name, firm: firmId || '__nofirm__', title });
+
+  const indivSel = document.getElementById('deal-source-contact');
+  if (indivSel) {
+    const opt = document.createElement('option');
+    opt.value = contact.id; opt.textContent = name + (title ? ' — ' + title : '');
+    indivSel.appendChild(opt);
+    indivSel.value = contact.id;
+  }
+  // Clear + close the mini-form.
+  ['deal-new-broker-name', 'deal-new-broker-email', 'deal-new-broker-title'].forEach(id => { const e = document.getElementById(id); if (e) e.value = ''; });
+  _dealNewBrokerToggle(false);
+}
+
 async function openEditDealModal(dealId) {
   const deal = dealId ? await DB.get(STORES.deals, dealId) : null;
   const [contacts, _dealCompanies] = await Promise.all([
@@ -1272,24 +1345,48 @@ async function openEditDealModal(dealId) {
         <div id="deal-source-contact-wrap" class="md:col-span-2 ${deal?.source === 'Broker' ? '' : 'hidden'}">
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label class="block text-sm font-medium mb-1">Broker firm</label>
+              <div class="flex items-center justify-between mb-1">
+                <label class="block text-sm font-medium">Broker firm</label>
+                <button type="button" onclick="_dealNewFirmToggle(true)" class="text-xs font-medium text-brand-600 hover:underline">+ New firm</button>
+              </div>
               <select id="deal-source-firm" class="input-field" onchange="_dealBrokerFirmChanged()">
                 <option value="">Select firm…</option>
                 ${_brokerFirms.map(f => `<option value="${escapeHtml(f.id)}" ${f.id === _selFirmId ? 'selected' : ''}>${escapeHtml(f.name)}</option>`).join('')}
               </select>
+              <div id="deal-new-firm-row" class="hidden mt-2 flex gap-2">
+                <input type="text" id="deal-new-firm-name" class="input-field text-sm" placeholder="New firm name"
+                  onkeydown="if(event.key==='Enter'){event.preventDefault();_dealCreateFirm();}" />
+                <button type="button" onclick="_dealCreateFirm()" class="btn-primary btn-sm flex-shrink-0">Create</button>
+                <button type="button" onclick="_dealNewFirmToggle(false)" class="btn-ghost btn-sm flex-shrink-0">Cancel</button>
+              </div>
             </div>
             <div>
-              <label class="block text-sm font-medium mb-1">Individual at firm</label>
+              <div class="flex items-center justify-between mb-1">
+                <label class="block text-sm font-medium">Individual at firm</label>
+                <button type="button" onclick="_dealNewBrokerToggle(true)" class="text-xs font-medium text-brand-600 hover:underline">+ New broker</button>
+              </div>
               <select id="deal-source-contact" class="input-field">
                 <option value="">${_selFirmId ? 'Select person…' : 'Pick a firm first'}</option>
                 ${_brokerContacts.filter(c => _selFirmId && (c.companyId || '__nofirm__') === _selFirmId)
                   .map(c => `<option value="${c.id}" ${c.id === deal?.sourceContactId ? 'selected' : ''}>${escapeHtml(c.fullName || 'Unnamed')}${c.title ? ' — ' + escapeHtml(c.title) : ''}</option>`).join('')}
               </select>
+              <div id="deal-new-broker-row" class="hidden mt-2 space-y-2 p-2 rounded-lg bg-surface-50 dark:bg-surface-800/50">
+                <input type="text" id="deal-new-broker-name" class="input-field text-sm" placeholder="Full name *"
+                  onkeydown="if(event.key==='Enter'){event.preventDefault();_dealCreateBroker();}" />
+                <div class="flex gap-2">
+                  <input type="email" id="deal-new-broker-email" class="input-field text-sm" placeholder="Email (optional)" />
+                  <input type="text" id="deal-new-broker-title" class="input-field text-sm" placeholder="Title (optional)" />
+                </div>
+                <div class="flex gap-2">
+                  <button type="button" onclick="_dealCreateBroker()" class="btn-primary btn-sm">Create &amp; link</button>
+                  <button type="button" onclick="_dealNewBrokerToggle(false)" class="btn-ghost btn-sm">Cancel</button>
+                </div>
+              </div>
             </div>
           </div>
           ${_brokerContacts.length === 0
-            ? '<p class="text-xs text-surface-400 mt-1">No broker contacts yet — add them in the Brokers tab, or classify a contact into the Brokers bucket.</p>'
-            : '<p class="text-xs text-surface-400 mt-1">Pick the broker firm, then the individual who brought you this deal.</p>'}
+            ? '<p class="text-xs text-surface-400 mt-1">No brokers saved yet — use <b>+ New firm</b> and <b>+ New broker</b> to add one right here.</p>'
+            : '<p class="text-xs text-surface-400 mt-1">Pick the broker firm, then the individual — or add a new one on the spot with <b>+ New firm</b> / <b>+ New broker</b>.</p>'}
         </div>
         <div>
           <label class="block text-sm font-medium mb-1">Sector</label>
