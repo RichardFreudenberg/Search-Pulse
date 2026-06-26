@@ -48,9 +48,12 @@ function openModal(contentHtmlOrTitle, optionsOrContent = {}, buttonsArr = null)
   overlay.classList.remove('hidden');
   overlay.classList.add('show');
 
-  // Close on overlay click
+  // By default, clicking the backdrop does NOT close the modal — so you never
+  // lose what you typed into a form by mis-clicking outside it. Use the X / a
+  // Cancel button / Escape to close. Pass { closeOnBackdrop: true } to opt in
+  // (e.g. lightweight read-only popups).
   overlay.onclick = (e) => {
-    if (e.target === overlay) closeModal();
+    if (e.target === overlay && options.closeOnBackdrop) closeModal();
   };
 
   // Close on Escape
@@ -82,6 +85,12 @@ function closeModal(force = false) {
   document.removeEventListener('keydown', handleModalEscape);
   // Clean up company picker dropdown if it was portaled to body
   if (typeof cpClose === 'function') cpClose();
+  // The picker dropdown gets MOVED (portaled) to <body> when opened. Hiding it
+  // isn't enough — if left there it collides (duplicate id="cp-dropdown") with
+  // the next modal's picker, which is why company selection sometimes failed.
+  // Remove the portaled copy entirely; the next modal renders its own.
+  const _cpOrphan = document.getElementById('cp-dropdown');
+  if (_cpOrphan && _cpOrphan.parentElement === document.body) _cpOrphan.remove();
   // Close any orphaned sub-dialogs spawned by the modal (e.g. the
   // "Create New Company" full-form dialog). Otherwise they remain on
   // screen after the parent modal disappears.

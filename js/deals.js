@@ -1171,6 +1171,18 @@ function toggleDealSourcePicker() {
   if (wrap) wrap.classList.toggle('hidden', src !== 'Broker');
 }
 
+// When the broker FIRM changes, repopulate the individual dropdown with that
+// firm's people.
+function _dealBrokerFirmChanged() {
+  const firmSel  = document.getElementById('deal-source-firm');
+  const indivSel = document.getElementById('deal-source-contact');
+  if (!firmSel || !indivSel) return;
+  const fid  = firmSel.value;
+  const list = (window._dealBrokerList || []).filter(b => fid && b.firm === fid);
+  indivSel.innerHTML = `<option value="">${fid ? 'Select person…' : 'Pick a firm first'}</option>` +
+    list.map(b => `<option value="${b.id}">${escapeHtml(b.name)}${b.title ? ' — ' + escapeHtml(b.title) : ''}</option>`).join('');
+}
+
 async function openEditDealModal(dealId) {
   const deal = dealId ? await DB.get(STORES.deals, dealId) : null;
   const [contacts, _dealCompanies] = await Promise.all([
@@ -1183,6 +1195,19 @@ async function openEditDealModal(dealId) {
   const _brokerContacts = contacts
     .filter(c => !c.archived && _brokerOf(c) === 'brokers')
     .sort((a, b) => (a.fullName || '').localeCompare(b.fullName || ''));
+  // Group brokers by firm for the firm → individual cascading picker.
+  const _brokerFirms = (() => {
+    const seen = {};
+    _brokerContacts.forEach(c => {
+      const fid = c.companyId || '__nofirm__';
+      if (!seen[fid]) seen[fid] = { id: fid, name: (c.companyId && _coMap[c.companyId]) ? _coMap[c.companyId].name : 'Independent / no firm' };
+    });
+    return Object.values(seen).sort((a, b) => a.name.localeCompare(b.name));
+  })();
+  // Expose for the client-side handler that repopulates the individual dropdown.
+  window._dealBrokerList = _brokerContacts.map(c => ({ id: c.id, name: c.fullName || 'Unnamed', firm: c.companyId || '__nofirm__', title: c.title || '' }));
+  const _selBroker = deal?.sourceContactId ? _brokerContacts.find(c => c.id === deal.sourceContactId) : null;
+  const _selFirmId = _selBroker ? (_selBroker.companyId || '__nofirm__') : '';
 
   openModal(deal ? 'Edit Deal' : 'New Deal', `
     <div class="p-6 space-y-4 max-h-[80vh] overflow-y-auto">
@@ -1245,17 +1270,26 @@ async function openEditDealModal(dealId) {
           </select>
         </div>
         <div id="deal-source-contact-wrap" class="md:col-span-2 ${deal?.source === 'Broker' ? '' : 'hidden'}">
-          <label class="block text-sm font-medium mb-1">Sourced by (broker)</label>
-          <select id="deal-source-contact" class="input-field">
-            <option value="">Select the broker who sourced this…</option>
-            ${_brokerContacts.map(c => {
-              const firm = (c.companyId && _coMap[c.companyId]) ? _coMap[c.companyId].name : (c.title || '');
-              return `<option value="${c.id}" ${deal?.sourceContactId === c.id ? 'selected' : ''}>${escapeHtml(c.fullName || 'Unnamed')}${firm ? ' — ' + escapeHtml(firm) : ''}</option>`;
-            }).join('')}
-          </select>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label class="block text-sm font-medium mb-1">Broker firm</label>
+              <select id="deal-source-firm" class="input-field" onchange="_dealBrokerFirmChanged()">
+                <option value="">Select firm…</option>
+                ${_brokerFirms.map(f => `<option value="${escapeHtml(f.id)}" ${f.id === _selFirmId ? 'selected' : ''}>${escapeHtml(f.name)}</option>`).join('')}
+              </select>
+            </div>
+            <div>
+              <label class="block text-sm font-medium mb-1">Individual at firm</label>
+              <select id="deal-source-contact" class="input-field">
+                <option value="">${_selFirmId ? 'Select person…' : 'Pick a firm first'}</option>
+                ${_brokerContacts.filter(c => _selFirmId && (c.companyId || '__nofirm__') === _selFirmId)
+                  .map(c => `<option value="${c.id}" ${c.id === deal?.sourceContactId ? 'selected' : ''}>${escapeHtml(c.fullName || 'Unnamed')}${c.title ? ' — ' + escapeHtml(c.title) : ''}</option>`).join('')}
+              </select>
+            </div>
+          </div>
           ${_brokerContacts.length === 0
             ? '<p class="text-xs text-surface-400 mt-1">No broker contacts yet — add them in the Brokers tab, or classify a contact into the Brokers bucket.</p>'
-            : '<p class="text-xs text-surface-400 mt-1">Pick the broker from your contacts who brought you this deal.</p>'}
+            : '<p class="text-xs text-surface-400 mt-1">Pick the broker firm, then the individual who brought you this deal.</p>'}
         </div>
         <div>
           <label class="block text-sm font-medium mb-1">Sector</label>
@@ -1380,9 +1414,12 @@ async function saveDeal(dealId) {
   deal.website = document.getElementById('deal-website').value.trim();
   deal.stage = document.getElementById('deal-stage').value;
   deal.source = document.getElementById('deal-source').value;
-  // Link the broker contact who sourced this (only when source is Broker).
+  // Link the broker firm + individual who sourced this (only when source = Broker).
   deal.sourceContactId = (deal.source === 'Broker')
     ? (document.getElementById('deal-source-contact')?.value || null)
+    : null;
+  deal.sourceCompanyId = (deal.source === 'Broker')
+    ? (() => { const f = document.getElementById('deal-source-firm')?.value; return (f && f !== '__nofirm__') ? f : null; })()
     : null;
   deal.sector = document.getElementById('deal-sector').value;
   deal.subsector = document.getElementById('deal-subsector').value.trim();

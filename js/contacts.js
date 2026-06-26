@@ -733,8 +733,9 @@ function openCreateCompanyDialog() {
   // Carry over the name typed in the picker and focus it for quick entry.
   const ccdName = document.getElementById('ccd-name');
   if (ccdName) { if (prefillName) ccdName.value = prefillName; ccdName.focus(); }
-  dlg.addEventListener('click', e => { if (e.target === dlg) dlg.close(); });
-  // Stop Escape from bubbling up and closing the parent custom modal too
+  // Intentionally NOT closing on backdrop click — you close via Cancel / X /
+  // Escape, so you can't lose what you typed by mis-clicking outside.
+  // Stop Escape from bubbling up and closing the parent custom modal too.
   dlg.addEventListener('keydown', e => { if (e.key === 'Escape') e.stopPropagation(); });
 
   document.getElementById('create-company-dlg-form').addEventListener('submit', async (e) => {
