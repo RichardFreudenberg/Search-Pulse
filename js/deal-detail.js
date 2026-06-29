@@ -36,11 +36,6 @@ async function viewDeal(dealIdInput, opts = {}) {
   const deal = await DB.get(STORES.deals, dealId);
   if (!deal) { showToast('Deal not found', 'error'); navigate('deals'); return; }
 
-  // The broker contact this deal was sourced through (when source = Broker).
-  const _sourceContact = (deal.source === 'Broker' && deal.sourceContactId)
-    ? await DB.get(STORES.contacts, deal.sourceContactId).catch(() => null)
-    : null;
-
   // Load persisted number-display format preference
   try {
     const _numSettings = await DB.get(STORES.settings, `settings_${currentUser.id}`);
@@ -227,6 +222,11 @@ async function switchDealTab(tabId) {
 async function renderDealOverviewTab() {
   const deal = await DB.get(STORES.deals, currentDealId);
   if (!deal) return '';
+
+  // The broker contact this deal was sourced through (when source = Broker).
+  const _sourceContact = (deal.source === 'Broker' && deal.sourceContactId)
+    ? await DB.get(STORES.contacts, deal.sourceContactId).catch(() => null)
+    : null;
 
   return `
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
