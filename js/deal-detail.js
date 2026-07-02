@@ -57,6 +57,7 @@ async function viewDeal(dealIdInput, opts = {}) {
 
   const tabs = [
     { id: 'overview',   label: 'Overview',      icon: '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M2.25 12l8.954-8.955a1.126 1.126 0 011.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25" /></svg>' },
+    { id: 'timeline',   label: 'Timeline',      icon: '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>' },
     { id: 'financials', label: 'Financials',    icon: '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z" /></svg>' },
     { id: 'fit-score',  label: 'Fit Score',     icon: '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.955 11.955 0 003 12c0 6.627 5.373 12 12 12s12-5.373 12-12c0-2.13-.558-4.128-1.534-5.856A11.955 11.955 0 0112 5.044z" /></svg>' },
     { id: 'diligence',  label: 'AI Diligence',  icon: '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" /></svg>' },
@@ -196,6 +197,7 @@ async function switchDealTab(tabId) {
 
   switch (tabId) {
     case 'overview':  container.innerHTML = await renderDealOverviewTab(); break;
+    case 'timeline':  container.innerHTML = await renderDealTimelineTab(); break;
     case 'financials':
       container.innerHTML = await renderDealFinancialsTab();
       setTimeout(() => _initFinancialChartsForDeal(currentDealId), 60);
@@ -255,6 +257,9 @@ async function renderDealOverviewTab() {
             }).join('')}
           </div>
         </div>
+
+        <!-- Deal Timeline (compact) -->
+        ${_dealTimelineOverviewCard(deal)}
 
         <!-- Highlights -->
         ${deal.highlights && deal.highlights.length > 0 ? `
@@ -2099,6 +2104,233 @@ async function _saveFinancialGrid(dealId) {
   _finEditMode = false;
   showToast(`Saved ${merged.length} year${merged.length !== 1 ? 's' : ''} of financials`, 'success');
   if (typeof switchDealTab === 'function') switchDealTab('financials');
+}
+
+/* ─── Deal Timeline / Milestones ─────────────────────────────────────────────── */
+const DEAL_MILESTONE_PRESETS = [
+  'IM / CIM Received', 'NDA Signed', 'Management Meeting', 'IOI Submitted',
+  'LOI Submitted', 'LOI Signed', 'Due Diligence', 'QoE Complete',
+  'SPA Negotiation', 'Offer Deadline', 'Financing Secured', 'Signing (SPA)', 'Closing',
+];
+
+function _sortDealMilestones(list) {
+  return (list || []).slice().sort((a, b) => {
+    if (!a.date && !b.date) return 0;
+    if (!a.date) return 1;
+    if (!b.date) return -1;
+    return String(a.date).localeCompare(String(b.date));
+  });
+}
+
+// Status → color for a milestone (done / overdue / today / upcoming / undated).
+function _dealMilestoneStatus(m) {
+  if (m.done) return { key: 'done', color: 'green', label: 'Done' };
+  if (!m.date) return { key: 'none', color: 'surface', label: '' };
+  const d = new Date(String(m.date) + 'T00:00:00');
+  if (isNaN(d.getTime())) return { key: 'none', color: 'surface', label: '' };
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  if (d < today) return { key: 'overdue', color: 'red', label: 'Overdue' };
+  if (d.getTime() === today.getTime()) return { key: 'today', color: 'amber', label: 'Today' };
+  return { key: 'upcoming', color: 'brand', label: 'Upcoming' };
+}
+
+function _msDateStr(d) { return d ? (typeof formatDate === 'function' ? formatDate(d) : d) : 'No date'; }
+
+// Compact timeline card shown on the deal Overview.
+function _dealTimelineOverviewCard(deal) {
+  const ms = _sortDealMilestones(deal.milestones || []);
+  const done = ms.filter(m => m.done).length;
+  return `
+    <div class="card">
+      <div class="flex items-center justify-between mb-3 gap-2 flex-wrap">
+        <h3 class="text-sm font-semibold">Deal Timeline</h3>
+        <div class="flex items-center gap-2">
+          ${ms.length ? `<span class="text-xs text-surface-400">${done}/${ms.length} done</span>` : ''}
+          ${ms.length ? `<button onclick="switchDealTab('timeline')" class="text-xs font-medium text-brand-600 hover:underline">View all</button>` : ''}
+          <button onclick="openDealMilestoneModal('${deal.id}')" class="btn-secondary btn-xs">+ Add</button>
+        </div>
+      </div>
+      ${ms.length === 0
+        ? `<p class="text-sm text-surface-400">No milestones yet — track IM received, management meeting, LOI, SPA negotiations, offer deadlines… <button onclick="openDealMilestoneModal('${deal.id}')" class="text-brand-600 hover:underline">Add one</button>.</p>`
+        : `<div class="relative pl-5">
+            <div class="absolute left-1.5 top-1 bottom-1 w-px bg-surface-200 dark:bg-surface-700"></div>
+            <div class="space-y-3">
+              ${ms.slice(0, 5).map(m => {
+                const st = _dealMilestoneStatus(m);
+                const dot = m.done ? 'bg-green-500' : (st.color === 'surface' ? 'bg-surface-300 dark:bg-surface-600' : `bg-${st.color}-400`);
+                return `<div class="relative flex items-center gap-2.5">
+                  <span class="absolute -left-[13px] w-2.5 h-2.5 rounded-full ${dot} ring-2 ring-white dark:ring-surface-900"></span>
+                  <span class="text-sm flex-1 min-w-0 truncate ${m.done ? 'line-through text-surface-400' : ''}">${escapeHtml(m.label)}</span>
+                  <span class="text-xs flex-shrink-0 ${(st.key === 'overdue') ? 'text-red-600 dark:text-red-400 font-medium' : 'text-surface-400'}">${_msDateStr(m.date)}</span>
+                </div>`;
+              }).join('')}
+              ${ms.length > 5 ? `<button onclick="switchDealTab('timeline')" class="text-xs text-brand-600 hover:underline pl-0.5">+${ms.length - 5} more…</button>` : ''}
+            </div>
+          </div>`}
+    </div>`;
+}
+
+function _dealMilestoneRow(dealId, m) {
+  const st = _dealMilestoneStatus(m);
+  const ring = m.done ? '' : (st.color === 'surface' ? 'border-surface-300 dark:border-surface-600' : `border-${st.color}-400`);
+  return `
+    <div class="relative flex items-start gap-3 group">
+      <button onclick="toggleDealMilestone('${dealId}','${m.id}')" title="${m.done ? 'Mark incomplete' : 'Mark complete'}" class="absolute -left-6 mt-0.5 flex-shrink-0">
+        ${m.done
+          ? `<svg class="w-4 h-4 text-green-500 bg-white dark:bg-surface-900 rounded-full" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/></svg>`
+          : `<span class="block w-4 h-4 rounded-full border-2 ${ring} bg-white dark:bg-surface-900"></span>`}
+      </button>
+      <div class="flex-1 min-w-0 pl-1">
+        <div class="flex items-start justify-between gap-2">
+          <p class="text-sm font-medium ${m.done ? 'line-through text-surface-400' : ''}">${escapeHtml(m.label)}</p>
+          <div class="flex items-center gap-1 flex-shrink-0">
+            ${(!m.done && st.label) ? `<span class="text-[11px] font-medium px-1.5 py-0.5 rounded-full bg-${st.color}-50 text-${st.color}-700 dark:bg-${st.color}-900/20 dark:text-${st.color}-300">${st.label}</span>` : ''}
+            <button onclick="openDealMilestoneModal('${dealId}','${m.id}')" class="opacity-0 group-hover:opacity-100 text-surface-400 hover:text-brand-600 transition-all p-0.5" title="Edit">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z"/></svg>
+            </button>
+            <button onclick="deleteDealMilestone('${dealId}','${m.id}')" class="opacity-0 group-hover:opacity-100 text-surface-400 hover:text-red-500 transition-all p-0.5" title="Delete">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+            </button>
+          </div>
+        </div>
+        <p class="text-xs text-surface-500 mt-0.5">${_msDateStr(m.date)}</p>
+        ${m.notes ? `<p class="text-xs text-surface-500 mt-1 whitespace-pre-wrap leading-relaxed">${escapeHtml(m.notes)}</p>` : ''}
+      </div>
+    </div>`;
+}
+
+async function renderDealTimelineTab() {
+  const deal = await DB.get(STORES.deals, currentDealId);
+  if (!deal) return '';
+  const ms = _sortDealMilestones(deal.milestones || []);
+  const done = ms.filter(m => m.done).length;
+  const existing = new Set(ms.map(m => (m.label || '').toLowerCase()));
+  const quick = DEAL_MILESTONE_PRESETS.filter(p => !existing.has(p.toLowerCase()));
+
+  return `
+    <div class="space-y-6">
+      <div class="card">
+        <div class="flex items-center justify-between gap-2 flex-wrap">
+          <div>
+            <h3 class="text-sm font-semibold">Deal Timeline</h3>
+            <p class="text-xs text-surface-400 mt-0.5">${ms.length ? `${done}/${ms.length} milestones complete` : 'Log key milestones — IM received, management meeting, LOI, SPA negotiations, offer deadlines…'}</p>
+          </div>
+          <button onclick="openDealMilestoneModal('${deal.id}')" class="btn-primary btn-sm flex-shrink-0">+ Add milestone</button>
+        </div>
+        ${quick.length ? `
+          <div class="flex flex-wrap items-center gap-1.5 mt-3">
+            <span class="text-xs text-surface-400 mr-0.5">Quick add:</span>
+            ${quick.map(p => `<button onclick="openDealMilestoneModal('${deal.id}', null, '${p.replace(/'/g, "\\'")}')" class="px-2.5 py-1 rounded-full text-xs font-medium bg-surface-100 dark:bg-surface-800 text-surface-600 dark:text-surface-300 hover:bg-brand-50 hover:text-brand-600 dark:hover:bg-brand-900/20 transition-colors">${escapeHtml(p)}</button>`).join('')}
+          </div>` : ''}
+      </div>
+
+      ${ms.length ? `
+        <div class="card">
+          <div class="relative pl-6">
+            <div class="absolute left-2 top-1 bottom-1 w-px bg-surface-200 dark:bg-surface-700"></div>
+            <div class="space-y-5">
+              ${ms.map(m => _dealMilestoneRow(deal.id, m)).join('')}
+            </div>
+          </div>
+        </div>` : `
+        <div class="card text-center py-12">
+          <div class="w-12 h-12 rounded-full bg-brand-50 dark:bg-brand-900/20 flex items-center justify-center mx-auto mb-3">
+            <svg class="w-6 h-6 text-brand-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+          </div>
+          <p class="text-sm font-semibold">No milestones yet</p>
+          <p class="text-xs text-surface-400 mt-1 max-w-sm mx-auto">Track this deal's journey — add milestones like IM received, management meeting, LOI, SPA negotiations, and offer deadlines using the buttons above.</p>
+        </div>`}
+    </div>`;
+}
+
+async function openDealMilestoneModal(dealId, milestoneId = null, presetLabel = '') {
+  const deal = await DB.get(STORES.deals, dealId);
+  if (!deal) return;
+  const m = milestoneId ? (deal.milestones || []).find(x => x.id === milestoneId) : null;
+  const label = m ? m.label : presetLabel;
+  const date = m ? (m.date || '') : new Date().toISOString().slice(0, 10);
+  openModal(m ? 'Edit Milestone' : 'Add Milestone', `
+    <div class="p-6 space-y-4">
+      <div>
+        <label class="block text-sm font-medium mb-1">Milestone *</label>
+        <input type="text" id="ms-label" class="input-field" list="ms-presets" value="${escapeHtml(label)}" placeholder="e.g. LOI Submitted"
+          onkeydown="if(event.key==='Enter'){event.preventDefault();saveDealMilestone('${dealId}', ${m ? `'${m.id}'` : 'null'});}" />
+        <datalist id="ms-presets">${DEAL_MILESTONE_PRESETS.map(p => `<option value="${escapeHtml(p)}"></option>`).join('')}</datalist>
+      </div>
+      <div class="grid grid-cols-2 gap-4">
+        <div>
+          <label class="block text-sm font-medium mb-1">Date</label>
+          <input type="date" id="ms-date" class="input-field" value="${date}" />
+        </div>
+        <div class="flex items-end pb-2">
+          <label class="flex items-center gap-2 text-sm cursor-pointer">
+            <input type="checkbox" id="ms-done" class="rounded" ${m && m.done ? 'checked' : ''} /> Completed
+          </label>
+        </div>
+      </div>
+      <div>
+        <label class="block text-sm font-medium mb-1">Notes <span class="text-xs font-normal text-surface-400">(optional)</span></label>
+        <textarea id="ms-notes" class="input-field" rows="2" placeholder="Details, owner, next step…">${m ? escapeHtml(m.notes || '') : ''}</textarea>
+      </div>
+      <div class="flex justify-between items-center pt-4 border-t border-surface-200 dark:border-surface-800">
+        ${m ? `<button onclick="deleteDealMilestone('${dealId}','${m.id}')" class="btn-ghost btn-sm text-red-500">Delete</button>` : '<span></span>'}
+        <div class="flex gap-3">
+          <button onclick="closeModal()" class="btn-secondary">Cancel</button>
+          <button onclick="saveDealMilestone('${dealId}', ${m ? `'${m.id}'` : 'null'})" class="btn-primary">Save</button>
+        </div>
+      </div>
+    </div>
+  `);
+  setTimeout(() => document.getElementById('ms-label')?.focus(), 40);
+}
+
+async function saveDealMilestone(dealId, milestoneId) {
+  const label = (document.getElementById('ms-label')?.value || '').trim();
+  if (!label) { showToast('Enter a milestone name', 'warning'); document.getElementById('ms-label')?.focus(); return; }
+  const date  = document.getElementById('ms-date')?.value || null;
+  const done  = !!(document.getElementById('ms-done') && document.getElementById('ms-done').checked);
+  const notes = (document.getElementById('ms-notes')?.value || '').trim();
+  const deal = await DB.get(STORES.deals, dealId);
+  if (!deal) return;
+  const list = deal.milestones || [];
+  if (milestoneId && milestoneId !== 'null') {
+    const idx = list.findIndex(x => x.id === milestoneId);
+    if (idx >= 0) list[idx] = { ...list[idx], label, date, done, notes, completedAt: done ? (list[idx].completedAt || new Date().toISOString()) : null };
+  } else {
+    list.push({ id: 'ms' + Date.now().toString(36) + Math.floor(Math.random() * 1000), label, date, done, notes, completedAt: done ? new Date().toISOString() : null, createdAt: new Date().toISOString() });
+  }
+  deal.milestones = list;
+  deal.updatedAt = new Date().toISOString();
+  await DB.put(STORES.deals, deal);
+  if (typeof logDealHistory === 'function') logDealHistory(dealId, milestoneId && milestoneId !== 'null' ? 'milestone_updated' : 'milestone_added', { label }).catch(() => {});
+  closeModal();
+  showToast('Milestone saved', 'success');
+  if (typeof currentDealId !== 'undefined' && currentDealId === dealId && typeof switchDealTab === 'function') switchDealTab(currentDealTab === 'overview' ? 'overview' : 'timeline');
+}
+
+async function toggleDealMilestone(dealId, milestoneId) {
+  const deal = await DB.get(STORES.deals, dealId);
+  if (!deal) return;
+  const list = deal.milestones || [];
+  const m = list.find(x => x.id === milestoneId);
+  if (!m) return;
+  m.done = !m.done;
+  m.completedAt = m.done ? new Date().toISOString() : null;
+  deal.milestones = list;
+  deal.updatedAt = new Date().toISOString();
+  await DB.put(STORES.deals, deal);
+  if (typeof currentDealId !== 'undefined' && currentDealId === dealId && typeof switchDealTab === 'function') switchDealTab(currentDealTab === 'overview' ? 'overview' : 'timeline');
+}
+
+async function deleteDealMilestone(dealId, milestoneId) {
+  const deal = await DB.get(STORES.deals, dealId);
+  if (!deal) return;
+  deal.milestones = (deal.milestones || []).filter(x => x.id !== milestoneId);
+  deal.updatedAt = new Date().toISOString();
+  await DB.put(STORES.deals, deal);
+  closeModal();
+  showToast('Milestone removed', 'info');
+  if (typeof currentDealId !== 'undefined' && currentDealId === dealId && typeof switchDealTab === 'function') switchDealTab(currentDealTab === 'overview' ? 'overview' : 'timeline');
 }
 
 /* ─── Chart initializer — called after HTML is injected into the DOM ─────────── */
