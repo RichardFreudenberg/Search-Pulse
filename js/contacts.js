@@ -1088,7 +1088,13 @@ async function saveNewContact() {
 
   closeModal();
   showToast('Contact created', 'success');
-  navigate('contacts');
+  // Refresh where you are — if you added a broker from the Brokers tab, stay
+  // there and show it, rather than jumping to the Contacts hub.
+  if (typeof currentPage !== 'undefined' && currentPage === 'brokers' && typeof renderBrokers === 'function') {
+    renderBrokers();
+  } else {
+    navigate('contacts');
+  }
 }
 
 /**
