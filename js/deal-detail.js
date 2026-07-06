@@ -230,9 +230,25 @@ async function renderDealOverviewTab() {
     ? await DB.get(STORES.contacts, deal.sourceContactId).catch(() => null)
     : null;
 
+  // Fit Score (0–100), mirrored onto the deal from the Fit Score tab.
+  const _fit = (deal.fitScore != null && !isNaN(deal.fitScore)) ? Number(deal.fitScore) : null;
+  const _fitColor = _fit == null ? '#94a3b8' : (_fit >= 70 ? '#16a34a' : _fit >= 50 ? '#f59e0b' : '#dc2626');
+
   return `
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
       <div class="lg:col-span-2 space-y-6">
+        <!-- Fit Score -->
+        <div class="card flex items-center justify-between gap-4">
+          <div class="flex items-center gap-3">
+            <div class="w-12 h-12 rounded-full flex items-center justify-center text-lg font-bold flex-shrink-0" style="background:${_fitColor}1a;color:${_fitColor}">${_fit != null ? _fit : '—'}</div>
+            <div>
+              <p class="text-sm font-semibold">Fit Score${deal.fitScoreOverride != null ? ' <span class="text-xs font-normal text-surface-400">(manual)</span>' : ''}</p>
+              <p class="text-xs text-surface-400">${_fit != null ? 'out of 100 · vs. your search criteria' : 'Not scored yet — open the Fit Score tab'}</p>
+            </div>
+          </div>
+          <button onclick="switchDealTab('fit-score')" class="btn-secondary btn-sm flex-shrink-0">${_fit != null ? 'Open / overwrite' : 'Score deal'}</button>
+        </div>
+
         <!-- Description -->
         <div class="card">
           <h3 class="text-sm font-semibold mb-3">Description</h3>

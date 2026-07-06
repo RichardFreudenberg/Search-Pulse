@@ -662,12 +662,25 @@ async function renderDealFitScoreTab() {
     }
   } catch (e) { /* silent */ }
 
-  // Check for fresh stored eval (skip if found and same schema)
-  let ev = await _loadStoredEval(deal.id);
-  if (!ev) {
-    ev = runScoringEngine(deal, criteria, docs);
-    await _storeEval(ev);
+  // Always recompute so criterion overrides are actually reflected. (Previously
+  // a cached stored eval was reused, which made overrides appear to do nothing.)
+  let ev = runScoringEngine(deal, criteria, docs);
+
+  // Overall manual overwrite of the fit score (0–100), if the user set one.
+  const ovNum = (deal.fitScoreOverride === 0 || deal.fitScoreOverride) ? Number(deal.fitScoreOverride) : null;
+  if (ovNum !== null && !isNaN(ovNum)) {
+    const t = _getTier(ovNum);
+    ev = { ...ev, score: ovNum, tier: t.tier, tierLabel: t.label, tierColor: t.color, _manualOverride: true };
   }
+  _storeEval(ev).catch(() => {});
+
+  // Mirror the current fit score onto the deal so the Overview can display it.
+  try {
+    if (deal.id && deal.fitScore !== ev.score) {
+      deal.fitScore = ev.score;
+      await DB.put(STORES.deals, deal);
+    }
+  } catch (_) {}
 
   window._currentFitEval = ev;
   return _renderFitScoreHTML(ev, deal, criteria);
@@ -740,6 +753,7 @@ function _renderFitScoreHTML(ev, deal, criteria) {
         ${watchCount ? `<span class="fit-badge watch">◑ ${watchCount} watch</span>` : ''}
         ${failCount  ? `<span class="fit-badge fail">✗ ${failCount} fail</span>` : ''}
         ${overrideCount ? `<span class="fit-badge override">✎ ${overrideCount} override${overrideCount > 1 ? 's' : ''}</span>` : ''}
+        ${ev._manualOverride ? `<span class="fit-badge override">✎ manual score</span>` : ''}
       </div>
       <div class="fit-confidence">Data confidence: <strong>${ev.confidence}%</strong></div>
     </div>
@@ -757,6 +771,11 @@ function _renderFitScoreHTML(ev, deal, criteria) {
         <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99"/></svg>
         Re-score
       </button>
+      <button class="fit-action-btn" onclick="openFitScoreOverwrite('${ev.dealId}')" title="Manually set the overall fit score">
+        <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z"/></svg>
+        Overwrite score
+      </button>
+      ${ev._manualOverride ? `<button class="fit-action-btn" onclick="clearFitScoreOverwrite('${ev.dealId}')" title="Go back to the computed score">Reset to computed</button>` : ''}
     </div>
   </div>
 
@@ -968,6 +987,63 @@ async function _clearOverride(criterionId) {
 }
 
 async function _rerunFitScore() {
+  window._currentFitEval = null;
+  if (typeof switchDealTab === 'function') switchDealTab('fit-score');
+}
+
+// ── Overall fit-score manual overwrite ───────────────────────
+async function openFitScoreOverwrite(dealId) {
+  const deal = await DB.get(STORES.deals, dealId).catch(() => null);
+  if (!deal) return;
+  const cur = (deal.fitScoreOverride === 0 || deal.fitScoreOverride) ? deal.fitScoreOverride
+            : (deal.fitScore != null ? deal.fitScore : '');
+  openModal('Overwrite Fit Score', `
+    <div class="p-6 space-y-4">
+      <p class="text-sm text-surface-500">Manually set the overall fit score (0–100). This overrides the computed score and shows on the deal Overview. Individual criterion overrides still feed the computed score.</p>
+      <div class="flex items-center gap-3">
+        <input type="number" id="fit-overwrite-input" min="0" max="100" step="1" value="${cur}" placeholder="—"
+          class="input-field w-28 text-center text-2xl font-bold"
+          onkeydown="if(event.key==='Enter'){event.preventDefault();saveFitScoreOverwrite('${dealId}');}" />
+        <span class="text-surface-500 text-lg">/ 100</span>
+      </div>
+      <div class="flex justify-between items-center pt-4 border-t border-surface-200 dark:border-surface-800">
+        <button onclick="clearFitScoreOverwrite('${dealId}')" class="btn-ghost btn-sm text-red-500">Reset to computed</button>
+        <div class="flex gap-3">
+          <button onclick="closeModal()" class="btn-secondary">Cancel</button>
+          <button onclick="saveFitScoreOverwrite('${dealId}')" class="btn-primary">Save</button>
+        </div>
+      </div>
+    </div>
+  `);
+  setTimeout(() => { const i = document.getElementById('fit-overwrite-input'); if (i) { i.focus(); i.select(); } }, 40);
+}
+
+async function saveFitScoreOverwrite(dealId) {
+  const raw = document.getElementById('fit-overwrite-input')?.value;
+  let v = parseFloat(raw);
+  if (raw == null || raw === '' || isNaN(v)) { showToast('Enter a score between 0 and 100', 'error'); return; }
+  v = Math.max(0, Math.min(100, Math.round(v)));
+  const deal = await DB.get(STORES.deals, dealId).catch(() => null);
+  if (!deal) return;
+  deal.fitScoreOverride = v;
+  deal.fitScore = v;
+  deal.updatedAt = new Date().toISOString();
+  await DB.put(STORES.deals, deal).catch(() => {});
+  if (typeof logDealHistory === 'function') logDealHistory(dealId, 'score_updated', { fitScore: v, manual: true }).catch(() => {});
+  closeModal();
+  showToast(`Fit score set to ${v}/100`, 'success');
+  window._currentFitEval = null;
+  if (typeof switchDealTab === 'function') switchDealTab('fit-score');
+}
+
+async function clearFitScoreOverwrite(dealId) {
+  const deal = await DB.get(STORES.deals, dealId).catch(() => null);
+  if (!deal) return;
+  deal.fitScoreOverride = null;   // merge-write clears the override
+  deal.updatedAt = new Date().toISOString();
+  await DB.put(STORES.deals, deal).catch(() => {});
+  closeModal();
+  showToast('Reverted to the computed fit score', 'info');
   window._currentFitEval = null;
   if (typeof switchDealTab === 'function') switchDealTab('fit-score');
 }
