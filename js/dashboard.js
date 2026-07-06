@@ -64,6 +64,43 @@ let dashboardEditMode = false;
 let draggedWidget = null;
 let currentDashboardTab = 'overview'; // 'overview' | 'crm' | 'deals'
 
+// ── Time-period filter for period-based dashboard metrics ────
+let dashPeriod = '3m'; // '1m'|'3m'|'6m'|'1y'|'3y'|'all'
+const DASH_PERIODS = [['1m', '1M'], ['3m', '3M'], ['6m', '6M'], ['1y', '1Y'], ['3y', '3Y'], ['all', 'All']];
+const _DASH_PERIOD_MONTHS = { '1m': 1, '3m': 3, '6m': 6, '1y': 12, '3y': 36 };
+function _dashPeriodStart() {
+  if (dashPeriod === 'all') return null;
+  const m = _DASH_PERIOD_MONTHS[dashPeriod] || 3;
+  const d = new Date(); d.setMonth(d.getMonth() - m); d.setHours(0, 0, 0, 0);
+  return d;
+}
+function _dashInPeriod(dateStr) {
+  const start = _dashPeriodStart();
+  if (!start) return true;
+  if (!dateStr) return false;
+  const t = new Date(dateStr);
+  return !isNaN(t.getTime()) && t >= start;
+}
+function _dashPeriodLabel() { const p = DASH_PERIODS.find(x => x[0] === dashPeriod); return p ? 'last ' + p[1] : 'last 3M'; }
+function setDashPeriod(p) { dashPeriod = p; renderDashboard(); }
+function _dashPeriodBar() {
+  return `<div class="inline-flex items-center gap-1 bg-surface-100 dark:bg-surface-800 p-1 rounded-lg">
+    <span class="text-[11px] font-medium text-surface-400 px-1.5 hidden sm:inline">Period</span>
+    ${DASH_PERIODS.map(([v, l]) => `<button onclick="setDashPeriod('${v}')" class="px-2.5 py-1 rounded-md text-xs font-semibold transition-colors ${dashPeriod === v ? 'bg-white dark:bg-surface-900 text-brand-600 dark:text-brand-400 shadow-sm' : 'text-surface-500 hover:text-surface-800 dark:hover:text-surface-200'}">${l}</button>`).join('')}
+  </div>`;
+}
+
+// Search-fund pipeline funnel — cumulative "reached" phases.
+const DASH_FUNNEL = [
+  { key: 'sourced',   label: 'Sourced',       stages: ['Sourced', 'First Look'] },
+  { key: 'engaged',   label: 'Engaged',       stages: ['Contacted', 'NDA Signed', 'CIM Received'] },
+  { key: 'met',       label: 'Mgmt Meeting',  stages: ['Management Call'] },
+  { key: 'loi',       label: 'LOI',           stages: ['LOI Drafted', 'LOI Submitted'] },
+  { key: 'diligence', label: 'Diligence',     stages: ['Due Diligence', 'Exclusivity'] },
+  { key: 'closing',   label: 'Closing',       stages: ['Legal / Closing'] },
+  { key: 'won',       label: 'Won',           stages: ['Closed - Won'] },
+];
+
 // ── Premium KPI card (used across all dashboard tabs) ──
 const _DASH_ICONS = {
   deals:    '<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.6" d="M20.25 14.15v4.25c0 1.094-.787 2.036-1.872 2.18-2.087.277-4.216.42-6.378.42s-4.291-.143-6.378-.42c-1.085-.144-1.872-1.086-1.872-2.18v-4.25m16.5 0a2.18 2.18 0 00.75-1.661V8.706c0-1.081-.768-2.015-1.837-2.175a48.114 48.114 0 00-3.413-.387m4.5 8.006c-.194.165-.42.295-.673.38A23.978 23.978 0 0112 15.75c-2.648 0-5.195-.429-7.577-1.22a2.016 2.016 0 01-.673-.38m0 0A2.18 2.18 0 013 12.489V8.706c0-1.081.768-2.015 1.837-2.175a48.111 48.111 0 013.413-.387m7.5 0V5.25A2.25 2.25 0 0013.5 3h-3a2.25 2.25 0 00-2.25 2.25v.894m7.5 0a48.667 48.667 0 00-7.5 0"/></svg>',
@@ -463,6 +500,29 @@ async function renderDashboard() {
   allDeals.forEach(d => { if (d.source) dealsBySource[d.source] = (dealsBySource[d.source] || 0) + 1; });
 
   const fmtVal = (n) => n >= 1e6 ? `$${(n/1e6).toFixed(1)}M` : n >= 1e3 ? `$${(n/1e3).toFixed(0)}K` : `$${n}`;
+
+  // ── Period-based metrics (respect the dashboard time-period filter) ──
+  const _pLabel = _dashPeriodLabel();
+  const dealsSourced      = allDeals.filter(d => _dashInPeriod(d.createdAt));
+  const callsInPeriod     = calls.filter(c => _dashInPeriod(c.date));
+  const newContactsPeriod = activeContacts.filter(c => _dashInPeriod(c.createdAt));
+  const dealsPassed       = allDeals.filter(d => ['Rejected', 'Closed - Lost'].includes(d.stage) && _dashInPeriod(d.updatedAt || d.createdAt));
+  const dealsWonPeriod    = allDeals.filter(d => d.stage === 'Closed - Won' && _dashInPeriod(d.updatedAt || d.createdAt));
+  const _fitScored        = activeDeals.filter(d => d.fitScore != null && !isNaN(d.fitScore));
+  const avgFit            = _fitScored.length ? Math.round(_fitScored.reduce((s, d) => s + Number(d.fitScore), 0) / _fitScored.length) : null;
+  // Win rate over concluded deals in the period
+  const _concluded        = dealsPassed.length + dealsWonPeriod.length;
+  const _winRate          = _concluded > 0 ? Math.round(dealsWonPeriod.length / _concluded * 100) : null;
+
+  // Pipeline funnel — cumulative "reached at least this phase" over active + won deals.
+  const _funnelPool = allDeals.filter(d => !['Closed - Lost', 'Rejected'].includes(d.stage));
+  const _stageIdx = (st) => (typeof DEAL_STAGES !== 'undefined' ? DEAL_STAGES.indexOf(st) : -1);
+  const _funnelCounts = DASH_FUNNEL.map(ph => {
+    const threshold = Math.min(...ph.stages.map(_stageIdx).filter(i => i >= 0));
+    return _funnelPool.filter(d => _stageIdx(d.stage) >= threshold).length;
+  });
+  const _funnelTop = _funnelCounts[0] || 0;
+
   const callMonthLabels = typeof getLastNMonthLabels === 'function' ? getLastNMonthLabels(6) : [];
   const callMonthData = typeof countByMonth === 'function' ? countByMonth(calls, 'date', 6) : [];
   const contactMonthData = typeof countByMonth === 'function' ? countByMonth(activeContacts, 'createdAt', 6) : [];
@@ -501,17 +561,67 @@ async function renderDashboard() {
 
   // Overview tab HTML
   const overviewHtml = `
+    <!-- Period selector -->
+    <div class="flex items-center justify-between mb-4 gap-3 flex-wrap">
+      <div>
+        <div class="text-sm font-semibold">Pipeline activity</div>
+        <div class="text-xs text-surface-400">Flow metrics for the ${_pLabel} · snapshot metrics are current</div>
+      </div>
+      ${_dashPeriodBar()}
+    </div>
+
+    <!-- Flow metrics (period-based) -->
     <div class="kpi-grid">
       ${[
-        { label: 'Pipeline Value',  value: fmtVal(pipelineValue), icon: _DASH_ICONS.money, color: 'emerald',
-          delta: activeDeals.length > 0 ? `${activeDeals.length} active` : null, up: true, click: "showDrilldown('deals-active')", sparkId: 'spk-pipeline' },
-        { label: 'Active Deals',    value: activeDeals.length,    icon: _DASH_ICONS.deals, color: 'brand',
-          delta: hotDeals.length > 0 ? `${hotDeals.length} hot` : (allDeals.length > 0 ? `${allDeals.length} total` : null), up: true, click: "showDrilldown('deals-active')", sparkId: 'spk-deals' },
-        { label: 'New Contacts',    value: activeContacts.length, icon: _DASH_ICONS.users, color: 'violet',
-          delta: _newContactsThisMonth > 0 ? `${_newContactsThisMonth} this month` : null, up: true, click: "showDrilldown('contacts-all')", sparkId: 'spk-contacts' },
-        { label: 'Calls This Week', value: _callsThisWeek,        icon: _DASH_ICONS.phone, color: 'sky',
-          delta: calls.length > 0 ? `${calls.length} total` : null, up: true, click: "showDrilldown('calls-all')", sparkId: 'spk-calls' },
+        { label: 'Deals Sourced',    value: dealsSourced.length,  icon: _DASH_ICONS.deals, color: 'brand',
+          delta: _pLabel, up: true, click: "showDrilldown('deals-sourced')" },
+        { label: 'Calls / Meetings', value: callsInPeriod.length, icon: _DASH_ICONS.phone, color: 'sky',
+          delta: _pLabel, up: true, click: "showDrilldown('calls-period')" },
+        { label: 'New Relationships', value: newContactsPeriod.length, icon: _DASH_ICONS.users, color: 'violet',
+          delta: _pLabel, up: true, click: "showDrilldown('contacts-new')" },
+        { label: 'Deals Passed',     value: dealsPassed.length,   icon: _DASH_ICONS.clock, color: 'rose',
+          delta: _winRate != null ? `${_winRate}% win rate` : _pLabel, up: false, click: "showDrilldown('deals-passed')" },
       ].map(renderKpiCard).join('')}
+    </div>
+
+    <!-- Snapshot metrics (current pipeline) -->
+    <div class="kpi-grid">
+      ${[
+        { label: 'Active Deals',   value: activeDeals.length,     icon: _DASH_ICONS.check, color: 'brand',
+          delta: hotDeals.length > 0 ? `${hotDeals.length} hot` : null, up: true, click: "showDrilldown('deals-active')" },
+        { label: 'Pipeline Value', value: fmtVal(pipelineValue),  icon: _DASH_ICONS.money, color: 'emerald',
+          delta: activeDeals.length > 0 ? `avg ${fmtVal(Math.round(pipelineValue / activeDeals.length))}` : null, up: true, click: "showDrilldown('deals-active')", sparkId: 'spk-pipeline' },
+        { label: 'Avg Fit Score',  value: avgFit != null ? `${avgFit}` : '—', icon: _DASH_ICONS.fire, color: avgFit != null && avgFit >= 70 ? 'emerald' : avgFit != null && avgFit >= 50 ? 'amber' : 'rose',
+          delta: _fitScored.length ? `${_fitScored.length} scored` : 'none scored', up: true, click: "showDrilldown('deals-active')" },
+        { label: 'Going Cold',     value: _goingCold,             icon: _DASH_ICONS.reconnect, color: _goingCold > 0 ? 'amber' : 'green',
+          delta: _goingCold > 0 ? 'need a touch' : 'all warm', up: _goingCold === 0, click: "contactsFilters.quick='reconnect'; navigate('contacts')" },
+      ].map(renderKpiCard).join('')}
+    </div>
+
+    <!-- Pipeline funnel (search-fund) -->
+    <div class="card mb-6">
+      <div class="flex items-center justify-between mb-1">
+        <div class="card-title">Pipeline Funnel</div>
+        <button onclick="navigate('deals')" class="text-xs font-medium text-brand-600 hover:underline">Full pipeline →</button>
+      </div>
+      <div class="card-sub">Deals that reached each phase · click a phase to see them</div>
+      ${_funnelTop === 0 ? '<p class="text-sm text-surface-400 text-center py-8">No deals yet — add deals to see your funnel.</p>' : `
+        <div class="space-y-2 mt-4">
+          ${DASH_FUNNEL.map((ph, i) => {
+            const n = _funnelCounts[i];
+            const pct = _funnelTop ? Math.round(n / _funnelTop * 100) : 0;
+            const conv = (i > 0 && _funnelCounts[i - 1] > 0) ? Math.round(n / _funnelCounts[i - 1] * 100) : null;
+            return `
+              <button onclick="showDrilldown('deals-phase','${ph.key}')" class="w-full flex items-center gap-3 group text-left">
+                <span class="text-xs font-medium text-surface-500 w-24 flex-shrink-0 truncate">${ph.label}</span>
+                <div class="flex-1 h-7 rounded-md bg-surface-100 dark:bg-surface-800 overflow-hidden relative">
+                  <div class="h-full rounded-md bg-brand-500/80 group-hover:bg-brand-500 transition-all" style="width:${Math.max(pct, n > 0 ? 6 : 0)}%"></div>
+                  <span class="absolute left-2 top-1/2 -translate-y-1/2 text-xs font-semibold ${pct > 12 ? 'text-white' : 'text-surface-700 dark:text-surface-200'}">${n}</span>
+                </div>
+                <span class="text-[11px] text-surface-400 w-16 flex-shrink-0 text-right">${conv != null ? conv + '% conv' : ''}</span>
+              </button>`;
+          }).join('')}
+        </div>`}
     </div>
 
     <!-- Needs Attention — actionable signals (follow-ups + email) -->
@@ -1131,6 +1241,41 @@ async function showDrilldown(type, encodedFilter) {
     title = `Deals Sourced via: ${filter}`;
     subtitle = `${items.length} deal${items.length !== 1 ? 's' : ''}`;
     bodyHtml = _drilldownDealList(items);
+
+  // ── PERIOD-BASED DRILLDOWNS (respect the dashboard period filter) ──
+  } else if (type === 'deals-sourced') {
+    const items = allDeals.filter(d => _dashInPeriod(d.createdAt));
+    title = 'Deals Sourced';
+    subtitle = `${items.length} deal${items.length !== 1 ? 's' : ''} added in the ${_dashPeriodLabel()}`;
+    bodyHtml = _drilldownDealList(sortByDate([...items], 'createdAt'));
+
+  } else if (type === 'deals-passed') {
+    const items = allDeals.filter(d => ['Rejected', 'Closed - Lost'].includes(d.stage) && _dashInPeriod(d.updatedAt || d.createdAt));
+    title = 'Deals Passed / Lost';
+    subtitle = `${items.length} deal${items.length !== 1 ? 's' : ''} passed or lost in the ${_dashPeriodLabel()}`;
+    bodyHtml = _drilldownDealList(items);
+
+  } else if (type === 'deals-phase') {
+    const ph = DASH_FUNNEL.find(p => p.key === filter);
+    const stages = ph ? ph.stages : [];
+    const idx = (s) => (typeof DEAL_STAGES !== 'undefined' ? DEAL_STAGES.indexOf(s) : -1);
+    const thr = Math.min(...stages.map(idx).filter(i => i >= 0));
+    const items = allDeals.filter(d => !['Closed - Lost', 'Rejected'].includes(d.stage) && idx(d.stage) >= thr);
+    title = `Funnel: ${ph ? ph.label : filter}`;
+    subtitle = `${items.length} deal${items.length !== 1 ? 's' : ''} that reached ${ph ? ph.label : filter}`;
+    bodyHtml = _drilldownDealList(items);
+
+  } else if (type === 'contacts-new') {
+    const items = activeContacts.filter(c => _dashInPeriod(c.createdAt));
+    title = 'New Relationships';
+    subtitle = `${items.length} contact${items.length !== 1 ? 's' : ''} added in the ${_dashPeriodLabel()}`;
+    bodyHtml = _drilldownContactList(sortByDate([...items], 'createdAt'), companyMap);
+
+  } else if (type === 'calls-period') {
+    const items = calls.filter(c => _dashInPeriod(c.date));
+    title = 'Calls & Meetings';
+    subtitle = `${items.length} logged in the ${_dashPeriodLabel()}`;
+    bodyHtml = _drilldownCallList(sortByDate([...items], 'date'), contactMap, companyMap);
 
   // ── COMPANY DRILLDOWN ─────────────────────────────────────────────
   } else if (type === 'companies-all') {
