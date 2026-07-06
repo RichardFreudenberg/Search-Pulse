@@ -974,16 +974,27 @@ async function showOverdueTasksModal() {
 
 // === PIPELINE BOARD (KANBAN) ===
 function renderDealsPipelineBoard(deals) {
+  const CLOSED_STAGES = ['Closed - Won', 'Closed - Lost', 'Rejected'];
+  // Group by EVERY stage (not just active) so closed/rejected deals aren't dropped.
   const stageGroups = {};
-  DEAL_ACTIVE_STAGES.forEach(s => stageGroups[s] = []);
-  deals.filter(d => DEAL_ACTIVE_STAGES.includes(d.stage)).forEach(d => {
-    if (stageGroups[d.stage]) stageGroups[d.stage].push(d);
-  });
+  DEAL_STAGES.forEach(s => stageGroups[s] = []);
+  deals.forEach(d => { if (stageGroups[d.stage]) stageGroups[d.stage].push(d); });
 
-  const hasAnyDeals = DEAL_ACTIVE_STAGES.some(s => stageGroups[s].length > 0);
-  const displayStages = (dealsBoardHideEmpty && hasAnyDeals)
-    ? DEAL_ACTIVE_STAGES.filter(s => stageGroups[s].length > 0)
-    : DEAL_ACTIVE_STAGES;
+  const anyActive     = DEAL_ACTIVE_STAGES.some(s => stageGroups[s].length > 0);
+  const presentClosed = CLOSED_STAGES.filter(s => stageGroups[s].length > 0);
+
+  // Which columns to show, based on what's in the current (filtered) set:
+  //  • only closed/rejected deals → show just those columns (so you can find them);
+  //  • otherwise → the active pipeline columns, plus any closed columns that have deals.
+  let displayStages;
+  if (presentClosed.length && !anyActive) {
+    displayStages = presentClosed;
+  } else {
+    displayStages = (dealsBoardHideEmpty && anyActive)
+      ? DEAL_ACTIVE_STAGES.filter(s => stageGroups[s].length > 0)
+      : DEAL_ACTIVE_STAGES.slice();
+    displayStages = displayStages.concat(presentClosed);
+  }
 
   return `
     <div class="sp-kanban-board">
