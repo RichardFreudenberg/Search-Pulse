@@ -498,7 +498,7 @@ function _renderManualNoteCard(note) {
           </button>
         </div>
       </div>
-      <p class="text-sm whitespace-pre-wrap">${escapeHtml(note.content)}</p>
+      <div class="text-sm note-html leading-relaxed">${typeof renderNoteHtml === 'function' ? renderNoteHtml(note.content) : escapeHtml(note.content)}</div>
     </div>
   `;
 }
@@ -566,7 +566,7 @@ function openDealNoteModal(dealId, noteId) {
         </div>
         <div>
           <label class="block text-sm font-medium mb-1">Content</label>
-          <textarea id="deal-note-content" class="input-field" rows="8" placeholder="Write your notes here...">${note ? escapeHtml(note.content) : ''}</textarea>
+          ${renderRichEditor('deal-note-content', note ? renderNoteHtml(note.content) : '', 'Write your notes here… (use the toolbar for bold, bullets, etc.)')}
         </div>
         <div class="flex items-center gap-2">
           <input type="checkbox" id="deal-note-pinned" ${note?.pinned ? 'checked' : ''} class="rounded border-surface-300" />
@@ -582,7 +582,7 @@ function openDealNoteModal(dealId, noteId) {
 }
 
 async function saveDealNote(dealId, noteId) {
-  const content = document.getElementById('deal-note-content').value.trim();
+  const content = getRichEditor('deal-note-content');
   if (!content) return showToast('Note content is required', 'error');
 
   const type = document.getElementById('deal-note-type').value;

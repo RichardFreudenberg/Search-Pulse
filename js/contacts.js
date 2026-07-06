@@ -1127,7 +1127,8 @@ function buildContactTimeline(contact, calls, notes, reminders, activities) {
   (notes || []).forEach(n => {
     if (!n.createdAt) return;
     const full = n.cleanedContent || n.content || '';
-    items.push({ type: 'note', title: 'Note', description: clip(full), timestamp: n.createdAt, openable: true, refType: 'note', refId: n.id, contactId: cid, full });
+    const notePreview = typeof stripHtmlToText === 'function' ? stripHtmlToText(full) : full;
+    items.push({ type: 'note', title: 'Note', description: clip(notePreview), timestamp: n.createdAt, openable: true, refType: 'note', refId: n.id, contactId: cid, full });
   });
 
   (reminders || []).forEach(r => {
@@ -1180,7 +1181,7 @@ function openTimelineDetail(idx) {
         </div>
       </div>
       ${body
-        ? `<div class="text-sm whitespace-pre-wrap text-surface-700 dark:text-surface-200 leading-relaxed max-h-[55vh] overflow-y-auto">${escapeHtml(body)}</div>`
+        ? `<div class="text-sm note-html text-surface-700 dark:text-surface-200 leading-relaxed max-h-[55vh] overflow-y-auto">${a.refType === 'note' ? renderNoteHtml(body) : escapeHtml(body).replace(/\n/g, '<br>')}</div>`
         : `<p class="text-sm text-surface-400">No additional detail recorded for this activity.</p>`}
       <div class="flex justify-end gap-2 mt-6">${footer}<button onclick="closeModal()" class="btn-primary btn-sm">Close</button></div>
     </div>`);
@@ -1334,7 +1335,7 @@ async function viewContact(contactId, opts = {}) {
                     </button>
                   </div>
                 </div>
-                <div class="text-sm whitespace-pre-wrap">${escapeHtml(n.cleanedContent || n.content)}</div>
+                <div class="text-sm note-html leading-relaxed">${renderNoteHtml(n.cleanedContent || n.content)}</div>
                 ${n.cleanedContent ? '<p class="text-xs text-surface-400 mt-2 italic">✨ Cleaned up version shown</p>' : ''}
               </div>
             `).join('')}
@@ -1664,7 +1665,7 @@ async function openNewNoteModal(contactId) {
       <form id="new-note-form" class="space-y-4">
         <div>
           <label class="block text-sm font-medium text-surface-600 dark:text-surface-400 mb-1">Note</label>
-          <textarea id="note-content" class="input-field" rows="8" required placeholder="Write your notes here…"></textarea>
+          ${renderRichEditor('note-content', '', 'Write your notes here… (use the toolbar for bold, bullets, etc.)')}
         </div>
         <div class="flex justify-end gap-3">
           <button type="button" onclick="closeModal()" class="btn-secondary">Cancel</button>
@@ -1676,8 +1677,9 @@ async function openNewNoteModal(contactId) {
 
   document.getElementById('new-note-form').addEventListener('submit', async (e) => {
     e.preventDefault();
-    const content = document.getElementById('note-content').value.trim();
+    const content = getRichEditor('note-content');
     if (!content) return;
+    const plain = typeof stripHtmlToText === 'function' ? stripHtmlToText(content) : content;
 
     await DB.add(STORES.notes, {
       userId: currentUser.id,
@@ -1692,7 +1694,7 @@ async function openNewNoteModal(contactId) {
       contactId: contactId,
       type: 'note',
       title: 'Note added',
-      description: truncate(content, 60),
+      description: truncate(plain, 60),
       timestamp: new Date().toISOString(),
     });
 

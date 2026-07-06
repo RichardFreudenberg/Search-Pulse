@@ -2,6 +2,58 @@
    Nexus CRM — Shared Components
    ============================================ */
 
+/* ─── Rich text editor (bold / italic / underline / lists) ───────────────────
+   Reusable formatted-note editor. Notes are stored as HTML; use getRichEditor()
+   to read the value and renderNoteHtml() to display (handles legacy plain text).
+   ---------------------------------------------------------------------------- */
+function renderRichEditor(id, initialHtml = '', placeholder = '', minHeight = '140px') {
+  const btn = (cmd, label, title) =>
+    `<button type="button" title="${title}" onmousedown="event.preventDefault()" onclick="richCmd('${id}','${cmd}')">${label}</button>`;
+  return `
+    <div class="rich-editor">
+      <div class="rich-toolbar">
+        ${btn('bold', '<b>B</b>', 'Bold')}
+        ${btn('italic', '<i>I</i>', 'Italic')}
+        ${btn('underline', '<u>U</u>', 'Underline')}
+        <span class="rich-sep"></span>
+        ${btn('insertUnorderedList', '&bull; List', 'Bullet list')}
+        ${btn('insertOrderedList', '1. List', 'Numbered list')}
+        <span class="rich-sep"></span>
+        ${btn('removeFormat', 'Clear', 'Clear formatting')}
+      </div>
+      <div id="${id}" class="rich-content input-field" contenteditable="true"
+        data-placeholder="${escapeHtml(placeholder)}" style="min-height:${minHeight};">${initialHtml || ''}</div>
+    </div>`;
+}
+
+function richCmd(id, cmd) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.focus();
+  try { document.execCommand(cmd, false, null); } catch (_) {}
+}
+
+/** Read a rich editor's HTML; returns '' when the editor is visually empty. */
+function getRichEditor(id) {
+  const el = document.getElementById(id);
+  if (!el) return '';
+  const text = (el.textContent || '').replace(/​/g, '').trim();
+  return text ? el.innerHTML.trim() : '';
+}
+
+/** Plain-text version of note content (for previews / activity descriptions). */
+function stripHtmlToText(html) {
+  return String(html || '').replace(/<br\s*\/?>(?=)/gi, ' ').replace(/<\/(p|div|li|ul|ol|h[1-6])>/gi, ' ').replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+/** Render note content: HTML notes as-is, legacy plain-text with line breaks. */
+function renderNoteHtml(content) {
+  const s = String(content == null ? '' : content);
+  if (!s.trim()) return '';
+  if (/<(\/?)(p|div|ul|ol|li|b|strong|i|em|u|br|span|h[1-6]|a)\b/i.test(s)) return s; // already HTML
+  return escapeHtml(s).replace(/\n/g, '<br>'); // legacy plain text
+}
+
 function renderPageHeader(title, subtitle, actions = '') {
   return `
     <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 mb-8">

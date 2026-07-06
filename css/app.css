@@ -3283,3 +3283,30 @@ button:active { -webkit-tap-highlight-color: transparent; }
 .kpi-spark { height: 34px; margin: 14px -8px -4px; position: relative; }
 .kpi-spark canvas { width: 100% !important; }
 
+
+/* ─── Rich text editor (formatted notes) ─────────────────────────────── */
+.rich-editor { border: 1px solid rgb(var(--surface-200)); border-radius: 0.5rem; overflow: hidden; background: var(--rich-bg, #fff); }
+.dark .rich-editor { border-color: rgb(var(--surface-700)); background: transparent; }
+.rich-toolbar { display: flex; align-items: center; gap: 2px; padding: 4px 6px; border-bottom: 1px solid rgb(var(--surface-200)); background: rgb(var(--surface-50)); flex-wrap: wrap; }
+.dark .rich-toolbar { border-color: rgb(var(--surface-700)); background: rgba(255,255,255,0.03); }
+.rich-toolbar button { min-width: 28px; height: 26px; padding: 0 7px; font-size: 12px; border-radius: 5px; color: rgb(var(--surface-600)); background: transparent; border: none; cursor: pointer; transition: background .12s, color .12s; }
+.rich-toolbar button:hover { background: rgb(var(--surface-200)); color: rgb(var(--surface-900)); }
+.dark .rich-toolbar button { color: rgb(var(--surface-300)); }
+.dark .rich-toolbar button:hover { background: rgb(var(--surface-700)); color: #fff; }
+.rich-sep { width: 1px; height: 16px; background: rgb(var(--surface-200)); margin: 0 3px; }
+.dark .rich-sep { background: rgb(var(--surface-700)); }
+.rich-content { border: none !important; border-radius: 0 !important; outline: none; overflow-y: auto; max-height: 45vh; line-height: 1.55; }
+.rich-content:focus { box-shadow: none !important; }
+.rich-content:empty::before, .rich-content[data-empty="true"]::before { content: attr(data-placeholder); color: rgb(var(--surface-400)); pointer-events: none; }
+.rich-content ul { list-style: disc; margin: 4px 0; padding-left: 1.4em; }
+.rich-content ol { list-style: decimal; margin: 4px 0; padding-left: 1.4em; }
+.rich-content li { margin: 2px 0; }
+.rich-content b, .rich-content strong { font-weight: 700; }
+.rich-content u { text-decoration: underline; }
+/* Note display formatting (rendered HTML notes) */
+.note-html ul { list-style: disc; margin: 4px 0; padding-left: 1.4em; }
+.note-html ol { list-style: decimal; margin: 4px 0; padding-left: 1.4em; }
+.note-html li { margin: 2px 0; }
+.note-html b, .note-html strong { font-weight: 700; }
+.note-html u { text-decoration: underline; }
+.note-html a { color: rgb(var(--brand-600)); text-decoration: underline; }
