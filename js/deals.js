@@ -176,6 +176,181 @@ async function logDealHistory(dealId, action, details = {}) {
   });
 }
 
+// Compact icons for the customizable pipeline KPI cards.
+const _DK_ICON = {
+  deals: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M20.25 14.15v4.25a2.25 2.25 0 01-1.872 2.18A48 48 0 0112 21.1c-2.162 0-4.29-.143-6.378-.42A2.25 2.25 0 013.75 18.4v-4.25m16.5 0a2.18 2.18 0 00.75-1.66V8.7a2.25 2.25 0 00-1.837-2.175A48 48 0 0012 6.1c-2.68 0-5.293.207-7.163.425A2.25 2.25 0 003 8.7v3.79c0 .655.28 1.243.75 1.66m16.5 0a48 48 0 01-16.5 0M12 9v3.75"/></svg>',
+  fire: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15.362 5.214A8.252 8.252 0 0112 21 8.25 8.25 0 016.038 7.048 8.287 8.287 0 009 9.6a8.983 8.983 0 013.361-6.867 8.21 8.21 0 003 2.48z"/></svg>',
+  search: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"/></svg>',
+  doc: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5A3.375 3.375 0 0010.125 2.25H8.25m2.25 0H5.625A1.125 1.125 0 004.5 3.375v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z"/></svg>',
+  phone: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 002.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293a1.125 1.125 0 01-1.21.38 12 12 0 01-7.143-7.143 1.125 1.125 0 01.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102A1.125 1.125 0 005.872 2.25H4.5A2.25 2.25 0 002.25 4.5v2.25z"/></svg>',
+  check: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>',
+  x: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.75 9.75l4.5 4.5m0-4.5l-4.5 4.5M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>',
+  list: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3.75 12h16.5m-16.5 3.75h16.5M3.75 19.5h16.5M5.625 4.5h12.75a1.875 1.875 0 010 3.75H5.625a1.875 1.875 0 010-3.75z"/></svg>',
+  warn: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/></svg>',
+  money: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 6v12m-3-2.818l.879.659c1.171.879 3.07.879 4.242 0 1.172-.879 1.172-2.303 0-3.182C13.536 12.219 12.768 12 12 12c-.725 0-1.45-.22-2.003-.659-1.106-.879-1.106-2.303 0-3.182s2.9-.879 4.006 0l.415.33M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>',
+};
+
+const DEAL_KPI_META = {
+  active:    'Active Deals',    hot:      'Hot Deals',    diligence: 'In Diligence',
+  loi:       'At LOI+',         meetings: 'Mgmt Meetings', won:      'Deals Won',
+  killed:    'Deals Killed',    total:    'Total Deals',   pipeline: 'Pipeline Value',
+  avgFit:    'Avg Fit Score',   avgEbitda:'Avg EBITDA',    overdue:  'Overdue Tasks',
+};
+const DEAL_KPI_ORDER = ['active', 'hot', 'diligence', 'loi', 'meetings', 'won', 'killed', 'total', 'pipeline', 'avgFit', 'avgEbitda', 'overdue'];
+const DEAL_KPI_DEFAULT = ['active', 'hot', 'diligence', 'overdue', 'total'];
+
+// ── Customize which KPIs show on the Deal Pipeline ──
+async function openDealKpiCustomize() {
+  const settings = await DB.get(STORES.settings, `settings_${currentUser.id}`).catch(() => null);
+  const selected = new Set((settings && Array.isArray(settings.dealKpis) && settings.dealKpis.length) ? settings.dealKpis : DEAL_KPI_DEFAULT);
+  openModal('Customize Pipeline KPIs', `
+    <div class="p-6 space-y-4">
+      <p class="text-sm text-surface-500">Pick which KPIs appear at the top of your Deal Pipeline.</p>
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        ${DEAL_KPI_ORDER.map(k => `
+          <label class="flex items-center gap-2 text-sm p-2 rounded-lg border border-surface-200 dark:border-surface-700 cursor-pointer hover:bg-surface-50 dark:hover:bg-surface-800">
+            <input type="checkbox" class="deal-kpi-check rounded" value="${k}" ${selected.has(k) ? 'checked' : ''} />
+            ${escapeHtml(DEAL_KPI_META[k])}
+          </label>`).join('')}
+      </div>
+      <div class="flex justify-between items-center pt-3 border-t border-surface-200 dark:border-surface-800">
+        <button onclick="_resetDealKpis()" class="btn-ghost btn-sm text-surface-500">Reset to default</button>
+        <div class="flex gap-3">
+          <button onclick="closeModal()" class="btn-secondary">Cancel</button>
+          <button onclick="saveDealKpis()" class="btn-primary">Save</button>
+        </div>
+      </div>
+    </div>
+  `);
+}
+async function _persistDealKpis(ids) {
+  const id = `settings_${currentUser.id}`;
+  let s = await DB.get(STORES.settings, id).catch(() => null);
+  if (!s) s = { id, userId: currentUser.id };
+  s.dealKpis = ids;
+  await DB.put(STORES.settings, s);
+}
+async function saveDealKpis() {
+  const ids = Array.from(document.querySelectorAll('.deal-kpi-check:checked')).map(el => el.value);
+  await _persistDealKpis(ids.length ? ids : ['active']);
+  closeModal();
+  showToast('Pipeline KPIs updated', 'success');
+  renderDeals();
+}
+async function _resetDealKpis() {
+  await _persistDealKpis([...DEAL_KPI_DEFAULT]);
+  closeModal();
+  showToast('Reset to default KPIs', 'info');
+  renderDeals();
+}
+
+// ── Deal activity report ──
+async function openDealReport() {
+  const [deals, tasks] = await Promise.all([
+    DB.getForUser(STORES.deals, currentUser.id),
+    DB.getForUser(STORES.dealTasks, currentUser.id).catch(() => []),
+  ]);
+  const html = _buildDealReportHtml(deals, tasks);
+  openModal('Deal Activity Report', `
+    <div>
+      <div id="deal-report-body" class="px-6 py-5 overflow-y-auto" style="max-height:70vh">${html}</div>
+      <div class="flex justify-end gap-3 px-6 py-4 border-t border-surface-200 dark:border-surface-800">
+        <button onclick="closeModal()" class="btn-secondary">Close</button>
+        <button onclick="_printDealReport()" class="btn-primary">Print / Save PDF</button>
+      </div>
+    </div>
+  `, { wide: true });
+}
+
+function _buildDealReportHtml(deals, tasks) {
+  const fmt = (n) => n >= 1e6 ? `$${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `$${Math.round(n / 1e3)}K` : (n ? `$${n}` : '—');
+  const active = deals.filter(d => !['Closed - Won', 'Closed - Lost', 'Rejected'].includes(d.stage));
+  const killed = deals.filter(d => ['Rejected', 'Closed - Lost'].includes(d.stage));
+  const won = deals.filter(d => d.stage === 'Closed - Won');
+  const pipelineValue = active.reduce((s, d) => s + (d.askingPrice || 0), 0);
+  const _fit = active.filter(d => d.fitScore != null && !isNaN(d.fitScore));
+  const avgFit = _fit.length ? Math.round(_fit.reduce((s, d) => s + Number(d.fitScore), 0) / _fit.length) : null;
+  const _eb = active.filter(d => d.ebitda);
+  const avgEbitda = _eb.length ? Math.round(_eb.reduce((s, d) => s + d.ebitda, 0) / _eb.length) : null;
+  const overdue = (tasks || []).filter(t => t.status !== 'done' && t.dueDate && new Date(t.dueDate) < new Date()).length;
+
+  const byStage = {};
+  active.forEach(d => { byStage[d.stage] = (byStage[d.stage] || 0) + 1; });
+  const stageRows = DEAL_STAGES.filter(s => byStage[s]).map(s => `<tr><td>${escapeHtml(s)}</td><td style="text-align:right">${byStage[s]}</td></tr>`).join('');
+
+  const bySource = {};
+  deals.forEach(d => { if (d.source) bySource[d.source] = (bySource[d.source] || 0) + 1; });
+  const sourceRows = Object.entries(bySource).sort((a, b) => b[1] - a[1]).map(([s, n]) => `<tr><td>${escapeHtml(s)}</td><td style="text-align:right">${n}</td></tr>`).join('');
+
+  const dealRows = [...active].sort((a, b) => (b.fitScore || b.score || 0) - (a.fitScore || a.score || 0)).map(d => {
+    const mult = d.askingMultiple ? d.askingMultiple + 'x' : (d.askingPrice && d.ebitda ? (d.askingPrice / d.ebitda).toFixed(1) + 'x' : '—');
+    return `<tr>
+      <td>${escapeHtml(d.name)}</td>
+      <td>${escapeHtml(d.stage || '—')}</td>
+      <td>${escapeHtml(d.sector || '—')}</td>
+      <td style="text-align:right">${fmt(d.revenue)}</td>
+      <td style="text-align:right">${fmt(d.ebitda)}</td>
+      <td style="text-align:right">${mult}</td>
+      <td style="text-align:right">${d.fitScore != null ? d.fitScore : (d.score != null ? d.score : '—')}</td>
+      <td>${escapeHtml(d.nextAction || '—')}</td>
+    </tr>`;
+  }).join('');
+
+  const now = new Date();
+  return `
+  <style>
+    .dreport { font-size: 13px; }
+    .dreport h1 { font-size: 18px; font-weight: 700; margin: 0; }
+    .dreport .gen { font-size: 12px; color: #94a3b8; margin: 2px 0 16px; }
+    .dreport h2 { font-size: 13px; font-weight: 600; margin: 20px 0 6px; padding-bottom: 4px; border-bottom: 1px solid #e2e8f0; }
+    .dreport .kpis { display: flex; flex-wrap: wrap; gap: 10px; }
+    .dreport .kpi { border: 1px solid #e2e8f0; border-radius: 10px; padding: 10px 14px; min-width: 108px; }
+    .dreport .kpi .v { font-size: 20px; font-weight: 700; }
+    .dreport .kpi .l { font-size: 11px; color: #64748b; margin-top: 2px; }
+    .dreport table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    .dreport th, .dreport td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #eef2f7; }
+    .dreport th { color: #64748b; font-weight: 600; }
+    .dreport .muted { color: #94a3b8; }
+    .dreport .two { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+    @media (max-width: 640px){ .dreport .two { grid-template-columns: 1fr; } }
+  </style>
+  <div class="dreport">
+    <h1>Deal Activity Report</h1>
+    <div class="gen">Generated ${now.toLocaleDateString()} ${now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
+    <div class="kpis">
+      <div class="kpi"><div class="v">${active.length}</div><div class="l">Active (looking at)</div></div>
+      <div class="kpi"><div class="v">${killed.length}</div><div class="l">Killed / Passed</div></div>
+      <div class="kpi"><div class="v">${won.length}</div><div class="l">Won</div></div>
+      <div class="kpi"><div class="v">${deals.length}</div><div class="l">Total deals</div></div>
+      <div class="kpi"><div class="v">${fmt(pipelineValue)}</div><div class="l">Pipeline value</div></div>
+      <div class="kpi"><div class="v">${avgFit != null ? avgFit : '—'}</div><div class="l">Avg fit score</div></div>
+      <div class="kpi"><div class="v">${avgEbitda != null ? fmt(avgEbitda) : '—'}</div><div class="l">Avg EBITDA</div></div>
+      <div class="kpi"><div class="v">${overdue}</div><div class="l">Overdue tasks</div></div>
+    </div>
+    <div class="two">
+      <div><h2>Pipeline by stage</h2><table><thead><tr><th>Stage</th><th style="text-align:right">Deals</th></tr></thead><tbody>${stageRows || '<tr><td class="muted">No active deals</td><td></td></tr>'}</tbody></table></div>
+      <div><h2>By source</h2><table><thead><tr><th>Source</th><th style="text-align:right">Deals</th></tr></thead><tbody>${sourceRows || '<tr><td class="muted">No source data</td><td></td></tr>'}</tbody></table></div>
+    </div>
+    <h2>Active deals (${active.length})</h2>
+    <table>
+      <thead><tr><th>Company</th><th>Stage</th><th>Sector</th><th style="text-align:right">Revenue</th><th style="text-align:right">EBITDA</th><th style="text-align:right">Multiple</th><th style="text-align:right">Fit</th><th>Next action</th></tr></thead>
+      <tbody>${dealRows || '<tr><td colspan="8" class="muted">No active deals</td></tr>'}</tbody>
+    </table>
+  </div>`;
+}
+
+function _printDealReport() {
+  const body = document.getElementById('deal-report-body');
+  if (!body) return;
+  const w = window.open('', '_blank', 'width=980,height=1000');
+  if (!w) { showToast('Allow pop-ups to print the report', 'warning'); return; }
+  w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Deal Activity Report</title>
+    <style>body{font-family:-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#1e293b;margin:36px;background:#fff;}</style>
+    </head><body>${body.innerHTML}</body></html>`);
+  w.document.close();
+  setTimeout(() => { try { w.focus(); w.print(); } catch (_) {} }, 350);
+}
+
 // === MAIN RENDER ===
 async function renderDeals() {
   const pageContent = document.getElementById('page-content');
@@ -214,6 +389,38 @@ async function renderDeals() {
   else if (dealsFilter.sort === 'score') filtered.sort((a, b) => (b.score || 0) - (a.score || 0));
   else if (dealsFilter.sort === 'name') filtered.sort((a, b) => a.name.localeCompare(b.name));
 
+  // ── Customizable KPI values ──
+  const _dkFmt = (n) => n >= 1e6 ? `$${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `$${Math.round(n / 1e3)}K` : `$${n || 0}`;
+  const pipelineValue = activeDeals.reduce((s, d) => s + (d.askingPrice || 0), 0);
+  const killedDeals = deals.filter(d => ['Rejected', 'Closed - Lost'].includes(d.stage));
+  const wonDeals = deals.filter(d => d.stage === 'Closed - Won');
+  const inDiligence = activeDeals.filter(d => ['Due Diligence', 'Exclusivity'].includes(d.stage));
+  const _loiIdx = DEAL_STAGES.indexOf('LOI Drafted');
+  const _mtgIdx = DEAL_STAGES.indexOf('Management Call');
+  const atLoi = activeDeals.filter(d => DEAL_STAGES.indexOf(d.stage) >= _loiIdx);
+  const mgmtMeetings = activeDeals.filter(d => DEAL_STAGES.indexOf(d.stage) >= _mtgIdx);
+  const _fitScored = activeDeals.filter(d => d.fitScore != null && !isNaN(d.fitScore));
+  const avgFit = _fitScored.length ? Math.round(_fitScored.reduce((s, d) => s + Number(d.fitScore), 0) / _fitScored.length) : null;
+  const _ebitdaDeals = activeDeals.filter(d => d.ebitda);
+  const avgEbitda = _ebitdaDeals.length ? _ebitdaDeals.reduce((s, d) => s + d.ebitda, 0) / _ebitdaDeals.length : null;
+
+  const DEAL_KPI_DEFS = {
+    active:    { value: activeDeals.length, color: 'brand',  icon: _DK_ICON.deals,  click: "showPipelineStatsModal('active')" },
+    hot:       { value: hotDeals.length,    color: 'red',    icon: _DK_ICON.fire,   click: "showPipelineStatsModal('hot')" },
+    diligence: { value: inDiligence.length, color: 'purple', icon: _DK_ICON.search, click: "showPipelineStatsModal('diligence')" },
+    loi:       { value: atLoi.length,       color: 'brand',  icon: _DK_ICON.doc,    click: "dealsFilter.stage='active'; renderDeals()" },
+    meetings:  { value: mgmtMeetings.length,color: 'brand',  icon: _DK_ICON.phone,  click: null },
+    won:       { value: wonDeals.length,    color: 'green',  icon: _DK_ICON.check,  click: "dealsFilter.stage='Closed - Won'; renderDeals()" },
+    killed:    { value: killedDeals.length, color: 'red',    icon: _DK_ICON.x,      click: "dealsFilter.stage='closed'; renderDeals()" },
+    total:     { value: deals.length,       color: 'green',  icon: _DK_ICON.list,   click: "showPipelineStatsModal('all')" },
+    pipeline:  { value: _dkFmt(pipelineValue), color: 'green', icon: _DK_ICON.money, click: null },
+    avgFit:    { value: avgFit != null ? String(avgFit) : '—', color: 'brand', icon: _DK_ICON.fire, click: null },
+    avgEbitda: { value: avgEbitda != null ? _dkFmt(Math.round(avgEbitda)) : '—', color: 'green', icon: _DK_ICON.money, click: null },
+    overdue:   { value: overdueTasks.length, color: 'yellow', icon: _DK_ICON.warn,  click: "showOverdueTasksModal()" },
+  };
+  const _selectedKpis = (userSettings && Array.isArray(userSettings.dealKpis) && userSettings.dealKpis.length)
+    ? userSettings.dealKpis.filter(k => DEAL_KPI_DEFS[k]) : DEAL_KPI_DEFAULT;
+
   pageContent.innerHTML = `
     <div class="p-4 lg:p-8 max-w-7xl mx-auto animate-fade-in">
       ${renderPageHeader('Deal Pipeline', `${activeDeals.length} active deal${activeDeals.length !== 1 ? 's' : ''} across ${new Set(activeDeals.map(d => d.stage)).size} stages`,
@@ -229,13 +436,19 @@ async function renderDeals() {
          <button onclick="openNewDealModal()" class="btn-primary btn-sm">+ New Deal</button>`
       )}
 
-      <!-- Stats Row -->
-      <div class="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-6">
-        ${renderStatCard('Active Deals', activeDeals.length, '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M20.25 14.15v4.25c0 1.094-.787 2.036-1.872 2.18-2.087.277-4.216.42-6.378.42s-4.291-.143-6.378-.42c-1.085-.144-1.872-1.086-1.872-2.18v-4.25m16.5 0a2.18 2.18 0 00.75-1.661V8.706c0-1.081-.768-2.015-1.837-2.175a48.114 48.114 0 00-3.413-.387m4.5 8.006c-.194.165-.42.295-.673.38A23.978 23.978 0 0112 15.75c-2.648 0-5.195-.429-7.577-1.22a2.016 2.016 0 01-.673-.38m0 0A2.18 2.18 0 013 12.489V8.706c0-1.081.768-2.015 1.837-2.175a48.111 48.111 0 013.413-.387m7.5 0V5.25A2.25 2.25 0 0013.5 3h-3a2.25 2.25 0 00-2.25 2.25v.894m7.5 0a48.667 48.667 0 00-7.5 0" /></svg>', 'brand', "showPipelineStatsModal('active')")}
-        ${renderStatCard('Hot Deals', hotDeals.length, '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15.362 5.214A8.252 8.252 0 0112 21 8.25 8.25 0 016.038 7.048 8.287 8.287 0 009 9.6a8.983 8.983 0 013.361-6.867 8.21 8.21 0 003 2.48z" /></svg>', 'red', "showPipelineStatsModal('hot')")}
-        ${renderStatCard('In Diligence', activeDeals.filter(d => ['Due Diligence', 'Exclusivity'].includes(d.stage)).length, '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" /></svg>', 'purple', "showPipelineStatsModal('diligence')")}
-        ${renderStatCard('Overdue Tasks', overdueTasks.length, '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" /></svg>', 'yellow', "showOverdueTasksModal()")}
-        ${renderStatCard('Total Deals', deals.length, '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3.75 12h16.5m-16.5 3.75h16.5M3.75 19.5h16.5M5.625 4.5h12.75a1.875 1.875 0 010 3.75H5.625a1.875 1.875 0 010-3.75z" /></svg>', 'green', "showPipelineStatsModal('all')")}
+      <!-- Stats Row (customizable) -->
+      <div class="flex items-center justify-end gap-2 mb-2">
+        <button onclick="openDealReport()" class="text-xs font-medium text-surface-500 hover:text-brand-600 dark:hover:text-brand-400 inline-flex items-center gap-1" title="Pull an activity report">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/></svg>
+          Report
+        </button>
+        <button onclick="openDealKpiCustomize()" class="text-xs font-medium text-surface-500 hover:text-brand-600 dark:hover:text-brand-400 inline-flex items-center gap-1" title="Choose which KPIs to show">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.5 6h9.75M10.5 6a1.5 1.5 0 11-3 0m3 0a1.5 1.5 0 10-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m-9.75 0h9.75"/></svg>
+          Customize
+        </button>
+      </div>
+      <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 mb-6">
+        ${_selectedKpis.map(k => { const d = DEAL_KPI_DEFS[k]; return renderStatCard(DEAL_KPI_META[k] || k, d.value, d.icon, d.color, d.click); }).join('')}
       </div>
 
       ${deals.length > 0 ? renderPipelineAnalyticsSection(deals, activeDeals) : ''}
