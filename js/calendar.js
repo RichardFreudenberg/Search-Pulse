@@ -69,12 +69,23 @@ function _calUpcoming(events, hidden, limit = 8) {
 }
 
 // ── Render ───────────────────────────────────────────────────
-async function renderCalendar() {
-  const pageContent = document.getElementById('page-content');
-  if (!pageContent) return;
-  pageContent.innerHTML = `<div class="p-4 lg:p-8 max-w-6xl mx-auto">${renderLoadingSkeleton(4)}</div>`;
-  if (!_calMonth) { const n = new Date(); _calMonth = new Date(n.getFullYear(), n.getMonth(), 1); }
+let _calTarget = 'page-content';  // container the calendar paints into (page or a dashboard tab)
 
+async function renderCalendar() {
+  _calTarget = 'page-content';
+  const el = document.getElementById('page-content');
+  if (el) el.innerHTML = `<div class="p-4 lg:p-8 max-w-6xl mx-auto">${renderLoadingSkeleton(4)}</div>`;
+  await _calLoadAndPaint();
+}
+
+// Embedded variant for the dashboard "Calendar" tab (paints into #dash-calendar).
+async function renderDashCalendar() {
+  _calTarget = 'dash-calendar';
+  await _calLoadAndPaint();
+}
+
+async function _calLoadAndPaint() {
+  if (!_calMonth) { const n = new Date(); _calMonth = new Date(n.getFullYear(), n.getMonth(), 1); }
   const [events, settings, deals] = await Promise.all([
     DB.getForUser(STORES.calendarEvents, currentUser.id).catch(() => []),
     DB.get(STORES.settings, `settings_${currentUser.id}`).catch(() => null),
@@ -87,8 +98,9 @@ async function renderCalendar() {
 }
 
 function _calPaint(events) {
-  const pageContent = document.getElementById('page-content');
+  const pageContent = document.getElementById(_calTarget);
   if (!pageContent) return;
+  const _embedded = _calTarget !== 'page-content';
   const cells = _calMonthGrid(_calMonth);
   const byDate = _calEventsByDate(events);
   const todayStr = _calDateStr(new Date());
@@ -107,22 +119,15 @@ function _calPaint(events) {
 
   const dow = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
-  pageContent.innerHTML = `
-    <div class="p-4 lg:p-8 max-w-6xl mx-auto animate-fade-in">
-      ${renderPageHeader('Calendar', 'Deadlines, offer dates, presentations — colour-coded by category', `
-        <button onclick="openCalCategories()" class="btn-secondary btn-sm">Categories</button>
-        <button onclick="openCalEventModal(null, '${todayStr}')" class="btn-primary btn-sm">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.5v15m7.5-7.5h-15"/></svg>
-          Add event
-        </button>
-      `)}
-
+  const _navRow = `
       <div class="flex items-center justify-between mb-4 gap-3 flex-wrap">
         <div class="flex items-center gap-2">
           <button onclick="calNavMonth(-1)" class="btn-ghost btn-sm p-1.5" title="Previous month"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.75 19.5L8.25 12l7.5-7.5"/></svg></button>
           <div class="text-base font-semibold w-40 text-center">${monthLabel}</div>
           <button onclick="calNavMonth(1)" class="btn-ghost btn-sm p-1.5" title="Next month"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.25 4.5l7.5 7.5-7.5 7.5"/></svg></button>
           <button onclick="calToday()" class="btn-secondary btn-sm ml-1">Today</button>
+          <button onclick="openCalEventModal(null, '${todayStr}')" class="btn-primary btn-sm ml-1">+ Add</button>
+          <button onclick="openCalCategories()" class="btn-secondary btn-sm">Categories</button>
         </div>
         <div class="flex items-center gap-1.5 flex-wrap">
           ${_calCategories.map(c => `
@@ -131,8 +136,9 @@ function _calPaint(events) {
               <span class="w-2 h-2 rounded-full" style="background:${c.color}"></span>${escapeHtml(c.name)}
             </button>`).join('')}
         </div>
-      </div>
+      </div>`;
 
+  const _grid = `
       <div class="card p-0 overflow-hidden">
         <div class="grid grid-cols-7 border-b border-surface-200 dark:border-surface-700">
           ${dow.map(d => `<div class="px-2 py-2 text-[11px] font-semibold text-surface-400 text-center uppercase tracking-wide">${d}</div>`).join('')}
@@ -153,9 +159,9 @@ function _calPaint(events) {
               </div>`;
           }).join('')}
         </div>
-      </div>
+      </div>`;
 
-      <!-- Upcoming -->
+  const _upcoming = `
       <div class="card mt-6">
         <h3 class="text-sm font-semibold mb-3">Upcoming</h3>
         ${(() => {
@@ -180,13 +186,17 @@ function _calPaint(events) {
             }).join('')}
           </div>`;
         })()}
-      </div>
-    </div>`;
+      </div>`;
+
+  const _body = _navRow + _grid + _upcoming;
+  pageContent.innerHTML = _embedded
+    ? _body
+    : `<div class="p-4 lg:p-8 max-w-6xl mx-auto animate-fade-in">${renderPageHeader('Calendar', 'Deadlines, offer dates, presentations — colour-coded by category', '')}${_body}</div>`;
 }
 
 // ── Month navigation ─────────────────────────────────────────
-function calNavMonth(delta) { _calMonth = new Date(_calMonth.getFullYear(), _calMonth.getMonth() + delta, 1); renderCalendar(); }
-function calToday() { const n = new Date(); _calMonth = new Date(n.getFullYear(), n.getMonth(), 1); renderCalendar(); }
+function calNavMonth(delta) { _calMonth = new Date(_calMonth.getFullYear(), _calMonth.getMonth() + delta, 1); _calPaint(window._calEvents || []); }
+function calToday() { const n = new Date(); _calMonth = new Date(n.getFullYear(), n.getMonth(), 1); _calPaint(window._calEvents || []); }
 function calToggleCategory(id) { if (_calHidden.has(id)) _calHidden.delete(id); else _calHidden.add(id); _calPaint(window._calEvents || []); }
 
 // ── Event modal ──────────────────────────────────────────────
@@ -261,14 +271,14 @@ async function saveCalEvent(eventId) {
   else { await DB.add(STORES.calendarEvents, rec); }
   closeModal();
   showToast('Event saved', 'success');
-  renderCalendar();
+  _calLoadAndPaint();
 }
 
 async function deleteCalEvent(eventId) {
   await DB.delete(STORES.calendarEvents, eventId).catch(() => {});
   closeModal();
   showToast('Event removed', 'info');
-  renderCalendar();
+  _calLoadAndPaint();
 }
 
 // ── Category management ──────────────────────────────────────
@@ -293,7 +303,7 @@ function openCalCategories() {
         <button onclick="_calAddCategory()" class="btn-primary btn-sm flex-shrink-0">Add</button>
       </div>
       <div class="flex justify-end pt-2">
-        <button onclick="closeModal(); renderCalendar()" class="btn-secondary">Done</button>
+        <button onclick="closeModal(); _calLoadAndPaint()" class="btn-secondary">Done</button>
       </div>
     </div>
   `);
@@ -331,4 +341,42 @@ async function _calDeleteCategory(id) {
   if (!_calCategories.length) _calCategories = [{ id: 'c_other', name: 'Other', color: '#64748b' }];
   await _calPersistCategories();
   openCalCategories();
+}
+
+// ── Compact "Upcoming Deadlines" card for the dashboards ─────
+function calCategoriesFrom(settings) {
+  return (settings && Array.isArray(settings.calendarCategories) && settings.calendarCategories.length) ? settings.calendarCategories : CAL_DEFAULT_CATEGORIES;
+}
+
+function _upcomingDeadlinesHtml(events, cats, deals, limit = 6) {
+  const catById = id => (cats || []).find(c => c.id === id) || { name: 'Uncategorised', color: '#94a3b8' };
+  const dealMap = typeof buildMap === 'function' ? buildMap(deals || []) : {};
+  const up = _calUpcoming(events, null, limit);
+  const head = `<div class="flex items-center justify-between mb-3">
+      <div class="card-title">Upcoming Deadlines</div>
+      <button onclick="navigate('calendar')" class="text-xs font-medium text-brand-600 hover:underline">Open calendar &rarr;</button>
+    </div>`;
+  if (!up.length) {
+    return `<div class="card">${head}<p class="text-sm text-surface-400">Nothing scheduled. <button onclick="navigate('calendar')" class="text-brand-600 hover:underline">Add a deadline</button>.</p></div>`;
+  }
+  return `<div class="card">${head}
+    <div class="divide-y divide-surface-100 dark:divide-surface-800 -mb-1">
+      ${up.map(e => {
+        const cat = catById(e.categoryId);
+        const deal = e.dealId && dealMap[e.dealId] ? dealMap[e.dealId] : null;
+        const d = new Date(e.date + 'T00:00:00');
+        return `<button onclick="navigate('calendar')" class="w-full flex items-center gap-3 py-2.5 text-left hover:bg-surface-50 dark:hover:bg-surface-800/40 rounded-lg px-1 -mx-1">
+          <span class="w-2.5 h-2.5 rounded-full flex-shrink-0" style="background:${cat.color}"></span>
+          <div class="w-12 flex-shrink-0 text-center">
+            <div class="text-[10px] text-surface-400 uppercase">${d.toLocaleDateString('en-US', { month: 'short' })}</div>
+            <div class="text-base font-bold leading-none">${d.getDate()}</div>
+          </div>
+          <div class="min-w-0 flex-1">
+            <div class="text-sm font-medium truncate">${escapeHtml(e.title || cat.name)}</div>
+            <div class="text-xs text-surface-500 truncate">${escapeHtml(cat.name)}${deal ? ' &middot; ' + escapeHtml(deal.name) : ''}${e.time ? ' &middot; ' + escapeHtml(e.time) : ''}</div>
+          </div>
+        </button>`;
+      }).join('')}
+    </div>
+  </div>`;
 }
