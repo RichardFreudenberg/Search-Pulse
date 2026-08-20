@@ -414,6 +414,10 @@
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M2.25 18.75a60.07 60.07 0 0115.797 2.101c.727.198 1.453-.342 1.453-1.096V18.75M3.75 4.5v.75A.75.75 0 013 6h-.75m0 0v-.375c0-.621.504-1.125 1.125-1.125H20.25M2.25 6v9m18-10.5v.75c0 .414.336.75.75.75h.75m-1.5-1.5h.375c.621 0 1.125.504 1.125 1.125v9.75c0 .621-.504 1.125-1.125 1.125h-.375m1.5-1.5H21a.75.75 0 00-.75.75v.75m0 0H3.75m0 0h-.375a1.125 1.125 0 01-1.125-1.125V15m1.5 1.5v-.75A.75.75 0 003 15h-.75M15 10.5a3 3 0 11-6 0 3 3 0 016 0zm3 0h.008v.008H18V10.5zm-12 0h.008v.008H6V10.5z" /></svg>
             <span>Deal Pipeline</span>
           </button>
+          <button onclick="navigate('calendar')" class="nav-item" data-page="calendar">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5" /></svg>
+            <span>Calendar</span>
+          </button>
           <span class="nav-section-label">Sourcing</span>
           <button onclick="navigate('deal-search')" class="nav-item" data-page="deal-search">
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607zM10.5 7.5v6m3-3h-6" /></svg>
@@ -676,7 +680,7 @@
   <!-- Scripts -->
   <script src="js/shared-config.js?v=1"></script>
   <script src="js/firebase-config.js?v=1"></script>
-  <script src="js/db.js?v=20260426"></script>
+  <script src="js/db.js?v=20260661"></script>
   <script src="js/auth.js?v=20260644"></script>
   <script src="js/utils.js?v=20260624"></script>
   <script src="js/toast.js?v=8"></script>
@@ -716,6 +720,7 @@
   <script src="js/granola.js?v=20260609"></script>
   <script src="js/deal-detail.js?v=20260658"></script>
   <script src="js/deals.js?v=20260660"></script>
+  <script src="js/calendar.js?v=20260661"></script>
   <script src="js/deal-search.js?v=9"></script>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="js/company-scout.js?v=20260514"></script>
@@ -737,7 +742,7 @@
   <script src="js/sourcing-analyser.js?v=1"></script>
   <script src="js/handelsregister.js?v=20260517"></script>
   <script src="js/todos.js?v=20260645"></script>
-  <script src="js/app.js?v=20260644"></script>
+  <script src="js/app.js?v=20260661"></script>
   <!-- EmailJS — for real email verification on signup -->
   <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
 

@@ -89,7 +89,7 @@ const VALID_PAGES = new Set([
   'dashboard','contacts','companies','calls','reminders','email',
   'suggestions','news','resources','deals','deal-search',
   'company-scout','sourcing','settings','shared-dashboard',
-  'email-templates','brokers',
+  'email-templates','brokers','calendar',
   'pipeline-company',  // /#pipeline-company/<id> — full-page detail view
   'deal',              // /#deal/<id>/<tab> — full-page deal detail view
   'contact',           // /#contact/<id> — contact detail
@@ -98,7 +98,7 @@ const VALID_PAGES = new Set([
 ]);
 
 // Nav tab switcher
-const DEALS_PAGES = new Set(['deals','deal-search','company-scout','sourcing','shared-dashboard','email-templates','brokers','pipeline-company','deal','broker-firm']);
+const DEALS_PAGES = new Set(['deals','deal-search','company-scout','sourcing','shared-dashboard','email-templates','brokers','calendar','pipeline-company','deal','broker-firm']);
 
 function switchNavTab(tab) {
   const relPanel  = document.getElementById('nav-panel-relationships');
@@ -174,6 +174,7 @@ function navigate(pageInput, { pushState = true, replace = false } = {}) {
     case 'shared-dashboard': renderSharedDashboardPage(); break;
     case 'email-templates': renderEmailTemplates(); break;
     case 'brokers': renderBrokers(); break;
+    case 'calendar': renderCalendar(); break;
     case 'pipeline-company':
       if (typeof renderPipelineCompanyDetail === 'function') {
         renderPipelineCompanyDetail(param);

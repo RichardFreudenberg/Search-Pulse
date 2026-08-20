@@ -41,6 +41,7 @@ const STORES = {
   meetingSessions:   'meetingSessions',
   brokers:           'brokers',
   todos:             'todos',
+  calendarEvents:    'calendarEvents',
 };
 
 // Returns the Firestore subcollection for the current user
